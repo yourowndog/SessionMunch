@@ -475,3 +475,65 @@ async fn search_passages_hybrid_rrf_deterministic_tie_break() {
         );
     }
 }
+
+#[tokio::test]
+async fn store_passage_embeddings_writes_to_table() {
+    let (_tmp, store) = make_store();
+    let (ws, proj) = make_scope(&store).await;
+
+    // Create a page with a passage
+    let page = make_page(ws, proj, "notes/embed_test.md", "# Heading\n\nTest passage content here.");
+    let page_id = store.writer.upsert_page(page).await.unwrap();
+
+    // Get the passage ID that was created
+    let conn = Connection::open(store.db_path()).unwrap();
+    let passage_id: Vec<u8> = conn
+        .query_row(
+            "SELECT id FROM page_passages WHERE page_id = ?1 LIMIT 1",
+            [page_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .unwrap();
+
+    // Create embedding vectors
+    let vec = vec![0.1, 0.2, 0.3, 0.4];
+    let embedding_bytes = f32_vec_to_bytes(&vec);
+    let passage_id_uuid = uuid::Uuid::from_slice(&passage_id).unwrap();
+
+    // Write embedding using the production store_passage_embeddings API
+    let embedding_write = ai_memory_store::PassageEmbeddingWrite {
+        passage_id: passage_id_uuid,
+        vector_bytes: embedding_bytes.clone(),
+        provider: "test".to_string(),
+        model: "model".to_string(),
+        dim: 4,
+    };
+
+    store
+        .writer
+        .store_passage_embeddings(vec![embedding_write])
+        .await
+        .unwrap();
+
+    // Verify the embedding was written to the database
+    let row_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM page_passage_embeddings WHERE passage_id = ?1",
+            rusqlite::params![&passage_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+
+    assert_eq!(row_count, 1, "passage embedding should be written to table");
+
+    // Verify the embedding can be queried
+    let retrieved_vec: Vec<u8> = conn
+        .query_row(
+            "SELECT embedding FROM page_passage_embeddings WHERE passage_id = ?1",
+            rusqlite::params![&passage_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+
+    assert_eq!(retrieved_vec, embedding_bytes, "retrieved embedding should match written vector");
+}

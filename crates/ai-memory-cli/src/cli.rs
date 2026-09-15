@@ -135,6 +135,8 @@ pub enum Command {
     PendingWrites(PendingWritesArgs),
     /// Compute + store embeddings for every latest page (M9).
     Embed(EmbedArgs),
+    /// Backfill the section/passage index for latest pages (G1 outcome).
+    Backfill(BackfillArgs),
     /// Generate a random hex bearer token for AI_MEMORY_AUTH_TOKEN.
     GenerateAuthToken(GenerateAuthTokenArgs),
     /// One-shot agent setup for docker deploys: extract the bundled
@@ -1781,7 +1783,26 @@ pub struct EmbedArgs {
     pub project: Option<String>,
 }
 
-/// Arguments for `forget-sweep`.
+/// Arguments for `backfill-sections`.
+#[derive(Debug, Args)]
+pub struct BackfillArgs {
+    /// Report what would be backfilled without actually mutating.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Re-backfill even when sections already exist for a page.
+    #[arg(long)]
+    pub force: bool,
+    /// Workspace name (auto-created if absent).
+    #[arg(long)]
+    pub workspace: Option<String>,
+    /// Project name. When omitted, auto-derived from the basename of
+    /// the current git repo root (or CWD if no git repo). Matches the
+    /// hook router's per-cwd convention so this command targets the
+    /// same project sessions write into.
+    #[arg(long)]
+    pub project: Option<String>,
+}
+
 #[derive(Debug, Args)]
 pub struct ForgetSweepArgs {
     /// Report what would be evicted without actually mutating.

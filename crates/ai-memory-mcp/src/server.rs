@@ -199,7 +199,20 @@ developer, user, and canonical project instructions.\n\
   `include_expired=true` only when the user explicitly wants to inspect \
   expired historical memory. Use `explain=true` only when diagnosing \
   project/scopes ranking; it adds score provenance, while global search \
-  reports only its distinct FTS stream.\n\
+  reports only its distinct FTS stream. Retrieval unit: the default \
+  `unit=\"page\"` returns whole pages; `unit=\"passage\"` returns the \
+  ingest-time passages inside them — use it when the answer is one span in \
+  a long page (a procedure step, a single gotcha, an error string), and \
+  page mode when the whole page is the unit of meaning. Passage mode fuses \
+  FTS5 with the dense passage stream when an embedder is configured and \
+  degrades to FTS5-only when none is; it reads the current project or \
+  `scopes`, so `global=true`, `as_of`, and `include_expired` do not apply. \
+  `parent_expansion` sets how much parent context each passage hit carries: \
+  `none` (default) the passage alone, `section` its parent heading path and \
+  section id, `document` also the page's workspace/project/path/title — \
+  cheaper than a follow-up `memory_read_page`. `content_budget` caps the \
+  characters returned in each passage's `text` (default 8192; `0` disables \
+  the cap).\n\
 - `memory_recent` — at session start, or when the user asks 'what's \
   been going on lately'. Returns the N most-recent pages.\n\
 - `memory_status` — when the user asks 'is ai-memory healthy' or \
@@ -5930,6 +5943,42 @@ mod tests {
         assert!(
             ai_memory_core::SNIPPET_BODY.contains("expires_at"),
             "the installed base routing snippet must expose time-bounded writes"
+        );
+    }
+
+    /// Passage-mode retrieval is invisible to an agent that reads only the
+    /// prompt surfaces, so every surface must name both units and explain
+    /// the two arguments that shape a passage hit.
+    #[test]
+    fn prompts_document_passage_retrieval_unit() {
+        assert!(
+            MEMORY_INSTRUCTIONS.contains("unit=\"page\"")
+                && MEMORY_INSTRUCTIONS.contains("unit=\"passage\""),
+            "MCP handshake instructions must name both retrieval units"
+        );
+        assert!(
+            ai_memory_core::SNIPPET_BODY.contains("Passage mode"),
+            "the installed base routing snippet must expose passage retrieval"
+        );
+        for (label, prompt) in [
+            ("MCP handshake instructions", MEMORY_INSTRUCTIONS),
+            ("installed routing snippet", ai_memory_core::SNIPPET_BODY),
+        ] {
+            assert!(
+                prompt.contains("parent_expansion")
+                    && prompt.contains("`section`")
+                    && prompt.contains("`document`"),
+                "{label} must document the parent_expansion levels"
+            );
+            assert!(
+                prompt.contains("content_budget"),
+                "{label} must document the per-hit content budget"
+            );
+        }
+        let installed = installed_ai_memory_prompt_surface();
+        assert!(
+            installed.contains("unit: \"page\"") && installed.contains("unit: \"passage\""),
+            "installed retrieval skill must document the passage unit"
         );
     }
 

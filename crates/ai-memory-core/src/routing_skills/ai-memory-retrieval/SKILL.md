@@ -55,6 +55,16 @@ score provenance to compiled-page hits, including matched entity names.
 Cross-project `global: true` search has a distinct FTS-only ranker, so it reports
 the active stream without per-hit RRF details.
 
+## Page or passage
+
+Search returns whole pages unless you ask for passages.
+
+- Keep the default `unit: "page"` when the whole page is the unit of meaning: rules, decisions, procedures, and short notes you will read end to end.
+- Use `unit: "passage"` when the answer is one span inside a long page — a single procedure step, one gotcha, an exact error string — so the hit carries that span and its offsets instead of a page-wide snippet.
+- Passage search fuses FTS5 with the dense passage stream when an embedder is configured and degrades to lexical-only search when none is. It reads the current project or explicit `scopes`; `global: true`, `as_of`, and `include_expired` do not apply.
+- `parent_expansion` decides how much context each passage hit carries: `none` (default) the passage alone, `section` its parent heading path and section id, `document` also the page's workspace, project, path, and title. Prefer `document` over a follow-up full-page read when you only need to know where the span came from.
+- `content_budget` caps the characters returned in each passage's `text` (default 8192; `0` disables the cap). Lower it when a wide search would otherwise flood the context window.
+
 ## Snippets are not full pages
 
 Search returns snippets, not complete bodies. An empty-looking or short snippet does not prove the page is empty because the match can be outside the snippet window. Fetch the full page when the path or title looks relevant, especially for rules, procedures, decisions, and gotchas.

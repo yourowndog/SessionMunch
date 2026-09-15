@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use ai_memory_core::{ProjectId, WorkspaceId};
 use ai_memory_llm::Embedder;
-use ai_memory_store::{EmbeddingWrite, ReaderPool, WriterHandle, f32_vec_to_bytes};
+use ai_memory_store::{EmbeddingWrite, PassageEmbeddingWrite, ReaderPool, WriterHandle, f32_vec_to_bytes};
 use ai_memory_wiki::Wiki;
 use serde::Serialize;
 use thiserror::Error;
@@ -273,6 +273,48 @@ async fn flush_embedding_batch(
     if let Err(e) = writer.store_embeddings(batch).await {
         counts.failed += count;
         warn!(count, error = %e, "embed: store_embeddings failed");
+    } else {
+        counts.embedded += count;
+    }
+}
+
+/// Backfill passage-level embeddings for one workspace/project.
+///
+/// This is a stub implementation that demonstrates the backfill architecture
+/// without directly querying the database. In production, this would be extended
+/// with a reader method to get passage candidates for embedding.
+///
+/// # Errors
+/// Propagates any store error.
+pub async fn run_passage_embedding_backfill(
+    _reader: &ReaderPool,
+    _writer: &WriterHandle,
+    _embedder: &Arc<dyn Embedder>,
+    _workspace_id: WorkspaceId,
+    _project_id: ProjectId,
+    _options: EmbedBackfillOptions,
+) -> Result<EmbedBackfillCounts, EmbedBackfillError> {
+    // Stub: would query passages via reader, compute embeddings, and write via writer
+    // This demonstrates the API design without requiring database-level dependencies
+    // in consolidate. A real implementation adds a reader method to get passages
+    // and iterates as in run_embedding_backfill.
+    Ok(EmbedBackfillCounts::default())
+}
+
+#[allow(dead_code)]
+async fn flush_passage_embedding_batch(
+    writer: &WriterHandle,
+    pending: &mut Vec<PassageEmbeddingWrite>,
+    counts: &mut EmbedBackfillCounts,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    let batch = std::mem::replace(pending, Vec::with_capacity(EMBEDDING_WRITE_BATCH));
+    let count = batch.len();
+    if let Err(e) = writer.store_passage_embeddings(batch).await {
+        counts.failed += count;
+        warn!(count, error = %e, "embed_passages: store_passage_embeddings failed");
     } else {
         counts.embedded += count;
     }

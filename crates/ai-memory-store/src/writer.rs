@@ -29,7 +29,7 @@ use crate::error::{StoreError, StoreResult};
 use crate::ops::{
     self, AdmittedSession, DeleteWorkspaceSummary, EmbeddingWrite, HookSessionAdmission,
     IngestObservationOutcome, LifecycleOnlyEndOutcome, MoveSessionSummary, MoveSummary,
-    ObservationPruneOutcome, PagesMode, PurgeSummary, ReorgSummary,
+    ObservationPruneOutcome, PagesMode, PassageEmbeddingWrite, PurgeSummary, ReorgSummary,
 };
 use crate::session_consolidation::SessionConsolidationJob;
 use crate::users::{self, TOKEN_HASH_LEN};
@@ -326,6 +326,10 @@ pub(crate) enum WriteCmd {
     },
     StoreAbstractEmbeddingBatch {
         embeddings: Vec<EmbeddingWrite>,
+        reply: oneshot::Sender<StoreResult<()>>,
+    },
+    StorePassageEmbeddingBatch {
+        embeddings: Vec<PassageEmbeddingWrite>,
         reply: oneshot::Sender<StoreResult<()>>,
     },
     DeleteAbstractEmbedding {
@@ -1347,6 +1351,23 @@ impl WriterHandle {
     ) -> StoreResult<()> {
         let (tx, rx) = oneshot::channel();
         self.send(WriteCmd::StoreAbstractEmbeddingBatch {
+            embeddings,
+            reply: tx,
+        })
+        .await?;
+        rx.await.map_err(|_| StoreError::WriterClosed)?
+    }
+
+    /// Store or replace a batch of passage embeddings in one SQLite transaction.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WriterClosed`] or propagates SQL errors.
+    pub async fn store_passage_embeddings(
+        &self,
+        embeddings: Vec<PassageEmbeddingWrite>,
+    ) -> StoreResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.send(WriteCmd::StorePassageEmbeddingBatch {
             embeddings,
             reply: tx,
         })
@@ -3057,6 +3078,10 @@ fn worker_loop(mut conn: Connection, mut rx: mpsc::Receiver<WriteCmd>) {
             WriteCmd::StoreAbstractEmbeddingBatch { embeddings, reply } => {
                 let result = ops::store_abstract_embeddings(&mut conn, &embeddings);
                 send_or_warn(reply, result, "store_abstract_embeddings");
+            }
+            WriteCmd::StorePassageEmbeddingBatch { embeddings, reply } => {
+                let result = ops::store_passage_embeddings(&mut conn, &embeddings);
+                send_or_warn(reply, result, "store_passage_embeddings");
             }
             WriteCmd::DeleteAbstractEmbedding { page_id, reply } => {
                 let result = ops::delete_abstract_embedding(&mut conn, &page_id);

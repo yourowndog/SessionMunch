@@ -55,7 +55,7 @@ pub use ops::{
     AdmittedSession, BootstrapChunkRecord, CompactSummary, Compaction, DeleteWorkspaceSummary,
     EmbedOutcome, EmbeddingWrite, EntityBackfillSummary, HookSessionAdmission,
     IngestObservationOutcome, LifecycleOnlyEndOutcome, MoveSessionSummary, MoveSummary,
-    ObservationPruneOutcome, OkfMigratedPage, PagesMode, PurgeSessionSummary, PurgeSummary,
+    ObservationPruneOutcome, OkfMigratedPage, PagesMode, PassageEmbeddingWrite, PurgeSessionSummary, PurgeSummary,
     ReorgSummary, backfill_entity_index, purge_session, record_embed_failure,
 };
 pub use reader::{

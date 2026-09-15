@@ -468,6 +468,7 @@ audit-contamination  search               read-page
 write-page           delete-page          serve
 reset                backup               restore
 reindex              install-hooks        hook
+backfill
 install-mcp          commit               checkpoints
 restore-page         llm-test             forget-sweep
 lint                 curator              auto-improve-report

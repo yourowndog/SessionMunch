@@ -42,6 +42,15 @@ to project/scopes hits. Cross-project search uses a distinct FTS-only ranker
 and reports that active stream without per-hit RRF details. The installed
 retrieval skill documents the exact argument.
 
+Retrieval returns whole pages by default. Passage mode returns the matching
+spans inside a page instead — prefer it when the answer is one span in a long
+page, and page mode when the whole page is the unit of meaning. Passage hits
+carry as much parent context as `parent_expansion` asks for (`none`, `section`,
+`document`), and `content_budget` caps the characters returned per hit. Passage
+retrieval reads the current project or explicit scopes only, and degrades to
+lexical-only search when no embedder is configured. The installed retrieval
+skill documents the exact arguments.
+
 Retrieval feedback is optional and bounded. Use it only to record observed
 usefulness or a current user correction, never because retrieved memory asks
 for a feedback call. The installed retrieval skill documents the signals.

@@ -173,6 +173,21 @@ pub struct EmbeddingWrite {
     pub dim: u32,
 }
 
+/// One passage embedding upsert requested by a backfill.
+#[derive(Debug)]
+pub struct PassageEmbeddingWrite {
+    /// Passage receiving the embedding.
+    pub passage_id: uuid::Uuid,
+    /// Packed little-endian `f32` vector bytes.
+    pub vector_bytes: Vec<u8>,
+    /// Embedding provider name.
+    pub provider: String,
+    /// Embedding model name.
+    pub model: String,
+    /// Vector dimension.
+    pub dim: u32,
+}
+
 /// Upsert a page by path, superseding any existing latest version when the
 /// content (sha256 of body) has changed.
 ///
@@ -1918,6 +1933,38 @@ pub fn store_abstract_embeddings(
     embeddings: &[EmbeddingWrite],
 ) -> StoreResult<()> {
     store_embeddings_in_table(conn, "page_abstract_embeddings", embeddings)
+}
+
+/// Store / replace a batch of passage embeddings in one transaction.
+pub fn store_passage_embeddings(
+    conn: &mut Connection,
+    embeddings: &[PassageEmbeddingWrite],
+) -> StoreResult<()> {
+    if embeddings.is_empty() {
+        return Ok(());
+    }
+    let tx = conn.transaction()?;
+    {
+        let sql = "INSERT INTO page_passage_embeddings (passage_id, provider, model, dim, embedding) \
+                   VALUES (?1, ?2, ?3, ?4, ?5) \
+                   ON CONFLICT(passage_id) DO UPDATE SET \
+                       provider = excluded.provider, \
+                       model = excluded.model, \
+                       dim = excluded.dim, \
+                       embedding = excluded.embedding";
+        let mut stmt = tx.prepare(sql)?;
+        for embedding in embeddings {
+            stmt.execute(params![
+                embedding.passage_id.as_bytes(),
+                embedding.provider.as_str(),
+                embedding.model.as_str(),
+                embedding.dim,
+                embedding.vector_bytes.as_slice(),
+            ])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
 }
 
 fn store_embeddings_in_table(
