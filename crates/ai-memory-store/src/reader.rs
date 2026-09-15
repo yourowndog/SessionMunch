@@ -6,6 +6,7 @@
 //! soft cap: a connection that comes back when the pool is already full
 //! is simply dropped.
 
+use std::cmp::Ordering;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -639,6 +640,64 @@ pub struct PageHit {
     pub snippet: String,
     /// Relevance rank after the bounded authority adjustment (lower is better).
     pub rank: f64,
+}
+
+/// One hit returned by a passage-level retrieval query.
+///
+/// Each hit carries the passage's own text and byte offsets so a caller can
+/// fetch the surrounding context without a second round-trip, plus the
+/// per-stream ranks that produced it (`lexical_rank`, `dense_rank`) and the
+/// fused RRF score. The explain fields are `Option` and only populated when
+/// the hit actually surfaced in that stream — a hit that came from the
+/// dense stream alone has `lexical_rank = None`.
+#[derive(Debug, Clone, Serialize)]
+pub struct PassageHit {
+    /// Stable passage identifier (deterministic UUID derived from section id,
+    /// ordinal, and content hash).
+    pub passage_id: Uuid,
+    /// Stable section identifier (deterministic UUID derived from page id,
+    /// ordinal, and heading path).
+    pub section_id: Uuid,
+    /// Stable page identifier (UUID of the latest page row).
+    pub page_id: PageId,
+    /// Stable workspace identifier.
+    pub workspace_id: WorkspaceId,
+    /// Stable project identifier.
+    pub project_id: ProjectId,
+    /// Relative wiki path.
+    pub page_path: PagePath,
+    /// Page title.
+    pub page_title: String,
+    /// Heading path (denormalized from page_sections).
+    pub heading_path: String,
+    /// Passage text.
+    pub text: String,
+    /// UTF-8 byte offset where this passage starts in the page body.
+    pub start_byte: i64,
+    /// UTF-8 byte offset where this passage ends in the page body.
+    pub end_byte: i64,
+    /// Final fused rank (0-based position in the result set).
+    pub rank: usize,
+    /// 1-based rank in the lexical FTS5 stream. `None` when the hit came from
+    /// the dense stream only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lexical_rank: Option<usize>,
+    /// 1-based rank in the dense embedding stream. `None` when the hit came
+    /// from the lexical stream only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dense_rank: Option<usize>,
+    /// Reciprocal Rank Fusion score. Higher is better.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rrf_score: Option<f64>,
+}
+
+/// One raw passage candidate with its stream-specific scores, used during
+/// RRF fusion before the final `PassageHit` is assembled.
+#[derive(Debug, Clone)]
+struct PassageCandidate {
+    hit: PassageHit,
+    lexical_score: Option<f64>,
+    dense_score: Option<f64>,
 }
 
 /// Completed session selected for scheduled auto-improvement.
@@ -1500,6 +1559,95 @@ struct Inner {
     soft_cap: usize,
 }
 
+/// Parse a stored 16-byte blob into a `Uuid`, mapping a malformed value into
+/// the store's error type (mirrors the `MalformedRecord` pattern used
+/// elsewhere for corrupt stored data).
+fn uuid_from_stored_bytes(bytes: &[u8], field: &str) -> StoreResult<Uuid> {
+    Uuid::from_slice(bytes).map_err(|e| {
+        StoreError::Memory(ai_memory_core::MemoryError::MalformedRecord(format!(
+            "invalid {field}: {e}"
+        )))
+    })
+}
+
+fn rrf_fuse(
+    lexical: Vec<PassageHit>,
+    dense: Option<Vec<(PassageHit, f32)>>,
+    limit: usize,
+) -> Vec<PassageHit> {
+    const K: f64 = 60.0;
+    let mut candidates: std::collections::BTreeMap<Uuid, PassageCandidate> =
+        std::collections::BTreeMap::new();
+
+    for hit in lexical {
+        let lexical_rank = hit.lexical_rank.unwrap_or(usize::MAX);
+        candidates.insert(
+            hit.passage_id,
+            PassageCandidate {
+                hit,
+                lexical_score: Some(1.0 / (K + lexical_rank as f64)),
+                dense_score: None,
+            },
+        );
+    }
+
+    if let Some(dense_hits) = dense {
+        for (dense_rank, (mut hit, _cosine)) in dense_hits.into_iter().enumerate() {
+            hit.dense_rank = Some(dense_rank + 1);
+            let dense_score = 1.0 / (K + (dense_rank + 1) as f64);
+            candidates
+                .entry(hit.passage_id)
+                .and_modify(|c| {
+                    c.hit.dense_rank = hit.dense_rank;
+                    c.dense_score = Some(dense_score);
+                })
+                .or_insert(PassageCandidate {
+                    hit,
+                    lexical_score: None,
+                    dense_score: Some(dense_score),
+                });
+        }
+    }
+
+    // Deterministic tie-break: sort by fused RRF score descending, then by
+    // passage id ascending so re-running the same query never reorders ties
+    // (`BTreeMap` iteration is already id-ordered, `sort_by` is stable, so
+    // this two-key sort is enough without an explicit tertiary key).
+    let mut fused: Vec<PassageCandidate> = candidates.into_values().collect();
+    fused.sort_by(|a, b| {
+        let score_a = a.lexical_score.unwrap_or(0.0) + a.dense_score.unwrap_or(0.0);
+        let score_b = b.lexical_score.unwrap_or(0.0) + b.dense_score.unwrap_or(0.0);
+        score_b
+            .partial_cmp(&score_a)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.hit.passage_id.as_bytes().cmp(b.hit.passage_id.as_bytes()))
+    });
+
+    fused.truncate(limit);
+    fused
+        .into_iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let mut hit = c.hit;
+            hit.rank = i;
+            hit.rrf_score = Some(c.lexical_score.unwrap_or(0.0) + c.dense_score.unwrap_or(0.0));
+            hit
+        })
+        .collect()
+}
+
+fn l2_normalize(v: &[f32]) -> Vec<f32> {
+    let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm == 0.0 {
+        return v.to_vec();
+    }
+    v.iter().map(|x| x / norm).collect()
+}
+
+fn dot_f32(a: &[f32], b: &[f32]) -> f32 {
+    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+}
+
 impl ReaderPool {
     /// Initialise the pool. Connections are opened lazily on first use.
     ///
@@ -1810,6 +1958,269 @@ impl ReaderPool {
             )
             .await?;
         Ok(rerank_page_hits(candidates, limit))
+    }
+
+    /// Run a hybrid passage search over `page_passages_fts` (lexical)
+    /// and `page_passage_embeddings` (dense), fusing both rank lists
+    /// with Reciprocal Rank Fusion (k=60).
+    ///
+    /// `query` is the free-text lexical query passed through
+    /// [`prepare_fts5_query`] before being used as a `MATCH` argument
+    /// against `page_passages_fts`. When `query_vector` is `Some`, the
+    /// dense stream is also searched: `page_passage_embeddings` rows
+    /// are gated by workspace_id, project_id AND matching
+    /// {provider, model, dim}, then ranked by cosine similarity with
+    /// `query_vector` (normalized to unit length before comparison).
+    /// When `query_vector` is `None`, only the lexical stream runs
+    /// and every hit carries `lexical_rank` set and `dense_rank = None`.
+    ///
+    /// The two rank lists are fused with RRF (k=60) and ties broken
+    /// deterministically by passage id so re-running the same query
+    /// never reorders ties.
+    ///
+    /// # Errors
+    /// Propagates any SQL or pool error.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn search_passages_hybrid(
+        &self,
+        workspace_id: WorkspaceId,
+        project_id: ProjectId,
+        query: String,
+        query_vector: Option<Vec<f32>>,
+        provider: String,
+        model: String,
+        dim: u32,
+        limit: usize,
+    ) -> StoreResult<Vec<PassageHit>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let fts_query = prepare_fts5_query(&query);
+        let lexical = if fts_query.is_empty() {
+            Vec::new()
+        } else {
+            self.search_passages_lexical(workspace_id, project_id, fts_query.clone(), limit)
+                .await?
+        };
+        let dense = if let Some(vec) = query_vector {
+            Some(
+                self.search_passages_dense(
+                    workspace_id,
+                    project_id,
+                    vec,
+                    provider,
+                    model,
+                    dim,
+                    limit,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+        Ok(rrf_fuse(lexical, dense, limit))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn search_passages_lexical(
+        &self,
+        workspace_id: WorkspaceId,
+        project_id: ProjectId,
+        fts_query: String,
+        limit: usize,
+    ) -> StoreResult<Vec<PassageHit>> {
+        self.with_conn(move |conn| {
+            let sql = "SELECT page_passages.id, page_passages.section_id, \
+                        page_passages.page_id, page_passages.workspace_id, \
+                        page_passages.project_id, pages.path, pages.title, \
+                        page_passages.heading_path, page_passages.text, \
+                        page_passages.start_byte, page_passages.end_byte, \
+                        page_passages_fts.rank \
+                 FROM page_passages_fts \
+                 JOIN page_passages ON page_passages.rowid = page_passages_fts.rowid \
+                 JOIN pages ON pages.id = page_passages.page_id \
+                 WHERE page_passages_fts MATCH ?1 \
+                   AND page_passages.workspace_id = ?2 \
+                   AND page_passages.project_id = ?3 \
+                 ORDER BY page_passages_fts.rank \
+                 LIMIT ?4"
+                .to_string();
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(
+                params![fts_query, workspace_id.as_bytes(), project_id.as_bytes(), limit as i64],
+                |row| {
+                    let passage_id_bytes: Vec<u8> = row.get(0)?;
+                    let section_id_bytes: Vec<u8> = row.get(1)?;
+                    let page_id_bytes: Vec<u8> = row.get(2)?;
+                    let ws_bytes: Vec<u8> = row.get(3)?;
+                    let proj_bytes: Vec<u8> = row.get(4)?;
+                    let path: String = row.get(5)?;
+                    let title: String = row.get(6)?;
+                    let heading_path: String = row.get(7)?;
+                    let text: String = row.get(8)?;
+                    let start_byte: i64 = row.get(9)?;
+                    let end_byte: i64 = row.get(10)?;
+                    let rank: f64 = row.get(11)?;
+                    Ok((
+                        passage_id_bytes,
+                        section_id_bytes,
+                        page_id_bytes,
+                        ws_bytes,
+                        proj_bytes,
+                        path,
+                        title,
+                        heading_path,
+                        text,
+                        start_byte,
+                        end_byte,
+                        rank,
+                    ))
+                },
+            )?;
+            let mut hits = Vec::new();
+            for row in rows {
+                let (
+                    pid, sid, page_id, ws, proj, path, title, heading_path, text, s, e, _rank,
+                ) = row?;
+                hits.push(PassageHit {
+                    passage_id: uuid_from_stored_bytes(&pid, "page_passages.id")?,
+                    section_id: uuid_from_stored_bytes(&sid, "page_passages.section_id")?,
+                    page_id: PageId::from_slice(&page_id)?,
+                    workspace_id: WorkspaceId::from_slice(&ws)?,
+                    project_id: ProjectId::from_slice(&proj)?,
+                    page_path: PagePath::new(path)?,
+                    page_title: title,
+                    heading_path,
+                    text,
+                    start_byte: s,
+                    end_byte: e,
+                    rank: 0,
+                    lexical_rank: None,
+                    dense_rank: None,
+                    rrf_score: None,
+                });
+            }
+            hits.sort_by(|a, b| {
+                a.passage_id
+                    .as_bytes()
+                    .cmp(b.passage_id.as_bytes())
+            });
+            for (i, hit) in hits.iter_mut().enumerate() {
+                hit.lexical_rank = Some(i + 1);
+            }
+            Ok(hits)
+        })
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn search_passages_dense(
+        &self,
+        workspace_id: WorkspaceId,
+        project_id: ProjectId,
+        query_vector: Vec<f32>,
+        provider: String,
+        model: String,
+        dim: u32,
+        limit: usize,
+    ) -> StoreResult<Vec<(PassageHit, f32)>> {
+        let dim_check = query_vector.len();
+        if dim_check != dim as usize {
+            return Err(StoreError::Memory(
+                ai_memory_core::MemoryError::MalformedRecord(format!(
+                    "query vector dim {} != embedding dim {}",
+                    dim_check, dim
+                )),
+            ));
+        }
+        self.with_conn(move |conn| {
+            let sql = "SELECT page_passages.id, page_passages.section_id, \
+                        page_passages.page_id, page_passages.workspace_id, \
+                        page_passages.project_id, pages.path, pages.title, \
+                        page_passages.heading_path, page_passages.text, \
+                        page_passages.start_byte, page_passages.end_byte, \
+                        page_passage_embeddings.embedding \
+                 FROM page_passage_embeddings \
+                 JOIN page_passages ON page_passages.id = page_passage_embeddings.passage_id \
+                 JOIN pages ON pages.id = page_passages.page_id \
+                 WHERE page_passages.workspace_id = ?1 \
+                   AND page_passages.project_id = ?2 \
+                   AND page_passage_embeddings.provider = ?3 \
+                   AND page_passage_embeddings.model = ?4 \
+                   AND page_passage_embeddings.dim = ?5"
+                .to_string();
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(
+                params![
+                    workspace_id.as_bytes(),
+                    project_id.as_bytes(),
+                    provider,
+                    model,
+                    dim,
+                ],
+                |row| {
+                    let passage_id_bytes: Vec<u8> = row.get(0)?;
+                    let section_id_bytes: Vec<u8> = row.get(1)?;
+                    let page_id_bytes: Vec<u8> = row.get(2)?;
+                    let ws_bytes: Vec<u8> = row.get(3)?;
+                    let proj_bytes: Vec<u8> = row.get(4)?;
+                    let path: String = row.get(5)?;
+                    let title: String = row.get(6)?;
+                    let heading_path: String = row.get(7)?;
+                    let text: String = row.get(8)?;
+                    let start_byte: i64 = row.get(9)?;
+                    let end_byte: i64 = row.get(10)?;
+                    let embedding_bytes: Vec<u8> = row.get(11)?;
+                    Ok((
+                        passage_id_bytes,
+                        section_id_bytes,
+                        page_id_bytes,
+                        ws_bytes,
+                        proj_bytes,
+                        path,
+                        title,
+                        heading_path,
+                        text,
+                        start_byte,
+                        end_byte,
+                        embedding_bytes,
+                    ))
+                },
+            )?;
+            let mut scored = Vec::new();
+            for row in rows {
+                let (
+                    pid, sid, page_id, ws, proj, path, title, heading_path, text, s, e, emb,
+                ) = row?;
+                let query_norm = l2_normalize(&query_vector);
+                let emb_norm = l2_normalize(&bytes_to_f32_vec(&emb, dim)?);
+                let cosine = dot_f32(&query_norm, &emb_norm);
+                scored.push((
+                    PassageHit {
+                        passage_id: uuid_from_stored_bytes(&pid, "page_passages.id")?,
+                        section_id: uuid_from_stored_bytes(&sid, "page_passages.section_id")?,
+                        page_id: PageId::from_slice(&page_id)?,
+                        workspace_id: WorkspaceId::from_slice(&ws)?,
+                        project_id: ProjectId::from_slice(&proj)?,
+                        page_path: PagePath::new(path)?,
+                        page_title: title,
+                        heading_path,
+                        text,
+                        start_byte: s,
+                        end_byte: e,
+                        rank: 0,
+                        lexical_rank: None,
+                        dense_rank: None,
+                        rrf_score: None,
+                    },
+                    cosine,
+                ));
+            }
+            scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
+            scored.truncate(limit);
+            Ok(scored)
+        })
+        .await
     }
 
     async fn search_page_candidates_for_project(

@@ -18,3 +18,6 @@ mod session_scope_from_observations;
 mod sessions_by_agent;
 mod slot_visibility;
 mod stress_writer_throughput;
+mod passage_index;
+mod passage_index_eval;
+mod hybrid_search;

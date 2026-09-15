@@ -31,6 +31,7 @@ pub mod users;
 pub mod web_sessions;
 mod workstream;
 mod writer;
+pub mod passage_index;
 
 pub use fts_query::prepare_fts5_query;
 
@@ -49,6 +50,7 @@ pub use decay::{
 };
 pub use error::{StoreError, StoreResult};
 pub use maintenance::MaintenanceJob;
+pub use passage_index::{PagePassage, PageSection};
 pub use ops::{
     AdmittedSession, BootstrapChunkRecord, CompactSummary, Compaction, DeleteWorkspaceSummary,
     EmbedOutcome, EmbeddingWrite, EntityBackfillSummary, HookSessionAdmission,
@@ -63,9 +65,9 @@ pub use reader::{
     DerivedIndexStatus, EmbeddingTripleCount, FeedbackFinding, GraphVia, HealthDetail, HealthPage,
     ObservationHit, ObservationOrder, ObservationPage, ObservationPageResult, ObservationRecord,
     OpenSession, PageAuthor, PageHit, PageHitWithMeta, PageLinks, PageMeta, PageSummary,
-    ProjectSummary, ReaderPool, ReindexTargetStatus, RelatedPage, RrfContributions, ScopeRow,
-    SearchExplain, SessionDependentRows, SessionEndDisposition, SessionSummary, SettledPage,
-    StatusCounts, StorageStatus, StoredEmbedding, StoredPageBody, WorkspaceScopeRow,
+    PassageHit, ProjectSummary, ReaderPool, ReindexTargetStatus, RelatedPage, RrfContributions,
+    ScopeRow, SearchExplain, SessionDependentRows, SessionEndDisposition, SessionSummary,
+    SettledPage, StatusCounts, StorageStatus, StoredEmbedding, StoredPageBody, WorkspaceScopeRow,
     WorkspaceSummary, f32_vec_to_bytes,
 };
 pub use retrieval_tuning::{RetrievalTuning, is_session_recall_query};

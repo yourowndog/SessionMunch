@@ -267,6 +267,14 @@ pub(crate) enum WriteCmd {
         entries: Vec<(String, i64, u32, u32)>,
         reply: oneshot::Sender<StoreResult<()>>,
     },
+    /// Rebuild the section/passage index for all latest pages in a
+    /// scope, processing in bounded batches.
+    BackfillSections {
+        workspace_id: WorkspaceId,
+        project_id: ProjectId,
+        batch_size: usize,
+        reply: oneshot::Sender<StoreResult<u64>>,
+    },
     RecordPageFeedback {
         workspace_id: WorkspaceId,
         project_id: ProjectId,
@@ -1429,6 +1437,28 @@ impl WriterHandle {
     ) -> StoreResult<()> {
         let (tx, rx) = oneshot::channel();
         self.send(WriteCmd::BumpClientActivity { entries, reply: tx })
+            .await?;
+        rx.await.map_err(|_| StoreError::WriterClosed)?
+    }
+
+    /// Rebuild the section/passage index for all latest pages in a
+    /// scope in bounded batches. Returns the number of pages processed.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WriterClosed`] or propagates SQL errors.
+    pub async fn backfill_sections(
+        &self,
+        workspace_id: WorkspaceId,
+        project_id: ProjectId,
+        batch_size: usize,
+    ) -> StoreResult<u64> {
+        let (tx, rx) = oneshot::channel();
+        self.send(WriteCmd::BackfillSections {
+            workspace_id,
+            project_id,
+            batch_size,
+            reply: tx,
+        })
             .await?;
         rx.await.map_err(|_| StoreError::WriterClosed)?
     }
@@ -2936,6 +2966,15 @@ fn worker_loop(mut conn: Connection, mut rx: mpsc::Receiver<WriteCmd>) {
             WriteCmd::BumpClientActivity { entries, reply } => {
                 let result = ops::bump_client_activity(&mut conn, &entries);
                 send_or_warn(reply, result, "bump_client_activity");
+            }
+            WriteCmd::BackfillSections {
+                workspace_id,
+                project_id,
+                batch_size,
+                reply,
+            } => {
+                let result = ops::backfill_sections(&mut conn, &workspace_id, &project_id, batch_size);
+                send_or_warn(reply, result, "backfill_sections");
             }
             WriteCmd::SoftDeleteForDecayIfLatest {
                 workspace_id,

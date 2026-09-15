@@ -109,6 +109,7 @@ name = "ai-memory-core"
 version = "2.2.1"
 dependencies = [
  "jiff",
+ "pulldown-cmark",
  "regex",
  "schemars",
  "serde",
@@ -226,6 +227,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

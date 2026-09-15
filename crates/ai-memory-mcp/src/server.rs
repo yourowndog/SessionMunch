@@ -477,6 +477,11 @@ pub struct AiMemoryServer {
 }
 
 const MAX_QUERY_SCOPES: usize = 25;
+const DEFAULT_CONTENT_BUDGET: usize = 8_192;
+
+fn default_content_budget() -> Option<usize> {
+    Some(DEFAULT_CONTENT_BUDGET)
+}
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 struct MemoryScopeArg {
@@ -537,6 +542,45 @@ struct QueryArgs {
     /// combined with `global` or `scopes`. Omit for a normal search.
     #[serde(default)]
     as_of: Option<String>,
+    /// Retrieval unit: `page` (default, backward-compatible) or `passage`.
+    /// When `passage`, each result is a text passage extracted at ingest
+    /// time (D1a/D1b/E1), not a whole wiki page. Passage search requires an
+    /// embedder for the dense vector stream; when no embedder is configured
+    /// it degrades gracefully to FTS5-only passage search. Cannot be
+    /// combined with `as_of` (time-travel operates on whole-page versions).
+    #[serde(default, rename = "unit")]
+    unit: Option<QueryUnit>,
+    /// How much parent context to attach per passage hit, so a caller
+    /// knows which page and section a passage came from without a second
+    /// lookup. `none` (default) keeps the response body self-contained
+    /// with just the passage data. `section` adds the parent section's
+    /// heading and body offset. `document` also expands to the page-level
+    /// metadata (title, path). Ignored when `unit = "page"`.
+    #[serde(default)]
+    parent_expansion: Option<ParentExpansion>,
+    /// Per-hit content budget: the approximate character cap applied to
+    /// the `snippet` (page mode) or `text` (passage mode) field of each
+    /// result so a burst of hits cannot blow the caller's context
+    /// window. Defaults to 8 192 chars. Ignored when 0 (no cap).
+    #[serde(default = "default_content_budget")]
+    content_budget: Option<usize>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum QueryUnit {
+    #[default]
+    Page,
+    Passage,
+}
+
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum ParentExpansion {
+    #[default]
+    None,
+    Section,
+    Document,
 }
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
@@ -618,6 +662,86 @@ struct MemoryQueryResponse {
     /// `entity`, and `graph`; `vector` is present only when an embedder
     /// produced a query vector. Cross-project `global=true` retrieval is FTS-only.
     /// An `as_of` query runs `entity` plus version-filtered `fts`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    streams_active: Option<Vec<&'static str>>,
+}
+
+/// One `memory_query` passage hit when `unit="passage"`. Carries the
+/// passage's text and byte offsets, plus optional parent page/section
+/// context based on `parent_expansion`.
+#[derive(Debug, Serialize)]
+struct PassageQueryHit {
+    /// Stable passage identifier.
+    passage_id: uuid::Uuid,
+    /// Stable section identifier.
+    section_id: uuid::Uuid,
+    /// Stable page identifier.
+    page_id: ai_memory_core::PageId,
+    /// Relative wiki path.
+    page_path: ai_memory_core::PagePath,
+    /// Page title.
+    page_title: String,
+    /// Heading path (denormalized from parent section).
+    heading_path: String,
+    /// Passage text, truncated if `content_budget` is set.
+    text: String,
+    /// UTF-8 byte offset where this passage starts in the page body.
+    start_byte: i64,
+    /// UTF-8 byte offset where this passage ends in the page body.
+    end_byte: i64,
+    /// Relevance rank (0-based position in the result set).
+    rank: usize,
+    /// 1-based rank in the lexical FTS5 stream.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lexical_rank: Option<usize>,
+    /// 1-based rank in the dense embedding stream.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dense_rank: Option<usize>,
+    /// Reciprocal Rank Fusion score (higher is better).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rrf_score: Option<f64>,
+    /// Parent context when `parent_expansion` is `section` or `document`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent: Option<PassageParent>,
+}
+
+/// Parent context attached to a passage hit.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum PassageParent {
+    /// Section-level context: parent section's heading path and id.
+    Section {
+        /// Stable section identifier.
+        section_id: uuid::Uuid,
+        /// Heading path denormalized from the parent section.
+        heading_path: String,
+    },
+    /// Document-level context: the page the passage belongs to.
+    Document(PassageParentDocument),
+}
+
+/// Page-level parent context for `parent_expansion = "document"`.
+#[derive(Debug, Serialize)]
+struct PassageParentDocument {
+    /// Workspace identifier.
+    workspace_id: ai_memory_core::WorkspaceId,
+    /// Project identifier.
+    project_id: ai_memory_core::ProjectId,
+    /// Relative wiki path.
+    path: ai_memory_core::PagePath,
+    /// Page title.
+    title: String,
+}
+
+/// Response for passage-mode `memory_query`. Similar structure to
+/// page-mode response but with `passage_hits` instead of `hits`.
+#[derive(Debug, Serialize)]
+struct MemoryQueryPassageResponse {
+    hits: Vec<PassageQueryHit>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    global_hits: Vec<ai_memory_store::PageHitWithMeta>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    global_scope_hits: Vec<PassageQueryHit>,
     #[serde(skip_serializing_if = "Option::is_none")]
     streams_active: Option<Vec<&'static str>>,
 }
@@ -1880,6 +2004,144 @@ impl AiMemoryServer {
         self
     }
 
+    /// Handle passage-mode `memory_query`: calls `search_passages_hybrid`
+    /// and builds `PassageQueryHit` responses with optional parent
+    /// expansion and content budget enforcement.
+    #[allow(clippy::too_many_arguments)]
+    async fn memory_query_passage(
+        &self,
+        aps_actor: &ai_memory_core::ActorKey,
+        parts: &axum::http::request::Parts,
+        args: &QueryArgs,
+        limit: usize,
+        explain: bool,
+        parent_expansion: ParentExpansion,
+        content_budget: usize,
+    ) -> Result<CallToolResult, McpError> {
+        let resolved_scopes = if args.scopes.is_empty() {
+            None
+        } else {
+            Some(self.resolve_query_scopes(&args.scopes).await?)
+        };
+        let query = args.query.clone();
+        let query_vec = self.embed_query(&args.query).await;
+        let (provider, model, dim) = match (&self.embedder, query_vec.as_deref()) {
+            (Some(e), Some(_)) => (e.provider().to_string(), e.model().to_string(), e.dim()),
+            _ => (String::new(), String::new(), 0),
+        };
+        let _bump_actor = Self::bump_actor_from_parts(parts);
+
+        let passage_hits = if let Some(scopes) = &resolved_scopes {
+            let mut all_hits: Vec<ai_memory_store::PassageHit> = Vec::new();
+            for &(ws, proj) in scopes {
+                let hits = self
+                    .reader
+                    .search_passages_hybrid(
+                        ws,
+                        proj,
+                        query.clone(),
+                        query_vec.as_deref().map(<[f32]>::to_vec),
+                        provider.clone(),
+                        model.clone(),
+                        dim,
+                        limit,
+                    )
+                    .await
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                all_hits.extend(hits);
+            }
+            all_hits
+        } else {
+            let (ws, proj) = self
+                .effective_ids_for_read_args_with_actor(
+                    args.workspace.as_deref(),
+                    args.project.as_deref(),
+                    aps_actor,
+                )
+                .await?;
+            self.reader
+                .search_passages_hybrid(
+                    ws,
+                    proj,
+                    query.clone(),
+                    query_vec.as_deref().map(<[f32]>::to_vec),
+                    provider,
+                    model,
+                    dim,
+                    limit,
+                )
+                .await
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?
+        };
+
+        let hits = passage_hits
+            .into_iter()
+            .map(|ph| self.build_passage_hit(ph, parent_expansion, content_budget))
+            .collect();
+
+        let response = MemoryQueryPassageResponse {
+            hits,
+            global_hits: Vec::new(),
+            global_scope_hits: Vec::new(),
+            streams_active: explain.then(|| {
+                let mut streams = vec!["fts", "entity"];
+                if query_vec.is_some() {
+                    streams.push("vector");
+                    if self.reader.retrieval_tuning().abstract_vectors {
+                        streams.push("abstract");
+                    }
+                }
+                streams.push("graph");
+                streams
+            }),
+        };
+        ok_json(&response)
+    }
+
+    /// Build a `PassageQueryHit` from a store `PassageHit`, applying
+    /// parent expansion and content budget.
+    fn build_passage_hit(
+        &self,
+        ph: ai_memory_store::PassageHit,
+        parent_expansion: ParentExpansion,
+        content_budget: usize,
+    ) -> PassageQueryHit {
+        let text = if content_budget > 0 && ph.text.len() > content_budget {
+            ph.text[..content_budget].to_string()
+        } else {
+            ph.text
+        };
+        let parent = match parent_expansion {
+            ParentExpansion::None => None,
+            ParentExpansion::Section => Some(PassageParent::Section {
+                section_id: ph.section_id,
+                heading_path: ph.heading_path.clone(),
+            }),
+            ParentExpansion::Document => Some(PassageParent::Document(PassageParentDocument {
+                workspace_id: ph.workspace_id,
+                project_id: ph.project_id,
+                path: ph.page_path.clone(),
+                title: ph.page_title.clone(),
+            })),
+        };
+        PassageQueryHit {
+            passage_id: ph.passage_id,
+            section_id: ph.section_id,
+            page_id: ph.page_id,
+            page_path: ph.page_path,
+            page_title: ph.page_title,
+            heading_path: ph.heading_path,
+            text,
+            start_byte: ph.start_byte,
+            end_byte: ph.end_byte,
+            rank: ph.rank,
+            lexical_rank: ph.lexical_rank,
+            dense_rank: ph.dense_rank,
+            rrf_score: ph.rrf_score,
+            parent,
+        }
+    }
+
     /// Search the compiled wiki via FTS5/entity/vector/graph retrieval. Default,
     /// explicit project, and explicit `scopes` searches fall back to bounded
     /// raw observation search when no compiled page matches; `global=true`
@@ -1917,6 +2179,28 @@ impl AiMemoryServer {
         let limit = args.limit.unwrap_or(self.default_limit).clamp(1, 100);
         let include_expired = args.include_expired.unwrap_or(false);
         let explain = args.explain.unwrap_or(false);
+        let unit = args.unit.unwrap_or(QueryUnit::Page);
+        let content_budget = args.content_budget.unwrap_or(DEFAULT_CONTENT_BUDGET);
+        let parent_expansion = args.parent_expansion.unwrap_or(ParentExpansion::None);
+        // A repo that opted into `[recall] default_global` (published on the
+        // ActiveProject by the hook) makes a query with NO explicit scoping
+        // behave as `global=true`. Precedence is strict: an explicit
+        // `global` / `scopes` / `workspace` / `project` arg always wins, so
+        // this only fires when the caller passed none of them.
+        if unit == QueryUnit::Passage {
+            let _ = include_expired;
+            return self
+                .memory_query_passage(
+                    &aps_actor,
+                    &parts,
+                    &args,
+                    limit,
+                    explain,
+                    parent_expansion,
+                    content_budget,
+                )
+                .await;
+        }
         // A repo that opted into `[recall] default_global` (published on the
         // ActiveProject by the hook) makes a query with NO explicit scoping
         // behave as `global=true`. Precedence is strict: an explicit
@@ -5126,6 +5410,9 @@ mod tests {
                         include_expired: None,
                         explain: Some(true),
                         as_of: None,
+                    unit: None,
+                    parent_expansion: None,
+                    content_budget: None,
                     }),
                     test_optional_parts(),
                 )
@@ -5157,6 +5444,9 @@ mod tests {
                         include_expired: None,
                         explain: None,
                         as_of: None,
+                    unit: None,
+                    parent_expansion: None,
+                    content_budget: None,
                     }),
                     test_optional_parts(),
                 )
@@ -6745,6 +7035,9 @@ mod tests {
             include_expired: None,
             explain: Some(true),
             as_of,
+            unit: None,
+            parent_expansion: None,
+            content_budget: None,
         };
 
         // Historical instant → the superseded version answers.
@@ -6783,6 +7076,9 @@ mod tests {
                     include_expired: None,
                     explain: Some(true),
                     as_of: Some(jiff::Timestamp::now().to_string()),
+                unit: None,
+                parent_expansion: None,
+                content_budget: None,
                 }),
                 OptionalParts(test_parts_default()),
             )
@@ -6852,6 +7148,9 @@ mod tests {
                     include_expired: None,
                     explain: None,
                     as_of: None,
+                unit: None,
+                parent_expansion: None,
+                content_budget: None,
                 }),
                 OptionalParts(test_parts_default()),
             )
@@ -6877,6 +7176,9 @@ mod tests {
                     include_expired: None,
                     explain: Some(true),
                     as_of: None,
+                unit: None,
+                parent_expansion: None,
+                content_budget: None,
                 }),
                 OptionalParts(test_parts_default()),
             )
@@ -6902,6 +7204,113 @@ mod tests {
         let fused = details["fused"].as_f64().unwrap();
         let authority = details["authority"].as_f64().unwrap();
         assert!((rank + fused * authority).abs() < f64::EPSILON);
+    }
+
+    /// G1: `memory_query` with `unit: "passage"` returns passage-level hits
+    /// (not whole-page bodies) sourced from the passage index built by E1.
+    #[tokio::test]
+    async fn memory_query_passage_unit_returns_passage_hits() {
+        let (_tmp, _store, server, _ws, _pj) = setup_server().await;
+        let result = server
+            .memory_query(
+                Parameters(QueryArgs {
+                    query: "karpathy".into(),
+                    limit: Some(5),
+                    project: None,
+                    scopes: Vec::new(),
+                    workspace: None,
+                    global: None,
+                    include_expired: None,
+                    explain: None,
+                    as_of: None,
+                    unit: Some(QueryUnit::Passage),
+                    parent_expansion: None,
+                    content_budget: None,
+                }),
+                OptionalParts(test_parts_default()),
+            )
+            .await
+            .unwrap();
+        let text = match result.content.first().and_then(|c| c.as_text()) {
+            Some(t) => t.text.clone(),
+            None => panic!("expected text content"),
+        };
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let hits = value["hits"].as_array().expect("hits array");
+        assert!(!hits.is_empty(), "expected at least one passage hit");
+        let hit = &hits[0];
+        assert!(hit.get("passage_id").is_some(), "hit missing passage_id");
+        assert!(hit.get("page_path").is_some(), "hit missing page_path");
+        assert_eq!(hit["page_path"], "foo.md");
+        assert!(hit.get("text").is_some(), "hit missing passage text");
+    }
+
+    /// G1: `parent_expansion: "document"` on a passage-mode query attaches
+    /// the owning page's workspace/project/path/title as parent context.
+    #[tokio::test]
+    async fn memory_query_passage_unit_with_document_parent_expansion() {
+        let (_tmp, _store, server, _ws, _pj) = setup_server().await;
+        let result = server
+            .memory_query(
+                Parameters(QueryArgs {
+                    query: "karpathy".into(),
+                    limit: Some(5),
+                    project: None,
+                    scopes: Vec::new(),
+                    workspace: None,
+                    global: None,
+                    include_expired: None,
+                    explain: None,
+                    as_of: None,
+                    unit: Some(QueryUnit::Passage),
+                    parent_expansion: Some(ParentExpansion::Document),
+                    content_budget: None,
+                }),
+                OptionalParts(test_parts_default()),
+            )
+            .await
+            .unwrap();
+        let text = result.content.first().and_then(|c| c.as_text()).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&text.text).unwrap();
+        let hit = &value["hits"][0];
+        let parent = &hit["parent"];
+        assert!(!parent.is_null(), "expected a document parent to be attached");
+        assert_eq!(parent["path"], "foo.md");
+        assert_eq!(parent["title"], "Foo");
+    }
+
+    /// G1: a small `content_budget` truncates passage text instead of
+    /// returning the full passage body.
+    #[tokio::test]
+    async fn memory_query_passage_unit_respects_content_budget() {
+        let (_tmp, _store, server, _ws, _pj) = setup_server().await;
+        let result = server
+            .memory_query(
+                Parameters(QueryArgs {
+                    query: "karpathy".into(),
+                    limit: Some(5),
+                    project: None,
+                    scopes: Vec::new(),
+                    workspace: None,
+                    global: None,
+                    include_expired: None,
+                    explain: None,
+                    as_of: None,
+                    unit: Some(QueryUnit::Passage),
+                    parent_expansion: None,
+                    content_budget: Some(5),
+                }),
+                OptionalParts(test_parts_default()),
+            )
+            .await
+            .unwrap();
+        let text = result.content.first().and_then(|c| c.as_text()).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&text.text).unwrap();
+        let hit_text = value["hits"][0]["text"].as_str().unwrap();
+        assert!(
+            hit_text.chars().count() <= 5,
+            "expected content_budget to cap passage text, got {hit_text:?}"
+        );
     }
 
     /// With NO embedder configured — the default deployment —
@@ -6970,6 +7379,9 @@ mod tests {
                         include_expired: None,
                         explain: Some(true),
                         as_of: None,
+                    unit: None,
+                    parent_expansion: None,
+                    content_budget: None,
                     }),
                     OptionalParts(test_parts_default()),
                 )
@@ -7057,6 +7469,9 @@ mod tests {
             include_expired: None,
             explain: None,
             as_of: None,
+        unit: None,
+        parent_expansion: None,
+        content_budget: None,
         };
 
         let result = server
@@ -7134,6 +7549,9 @@ mod tests {
                     include_expired: None,
                     explain: None,
                     as_of: None,
+                unit: None,
+                parent_expansion: None,
+                content_budget: None,
                 }),
                 OptionalParts(test_parts_default()),
             )
@@ -7262,6 +7680,9 @@ mod tests {
                     include_expired: None,
                     explain: None,
                     as_of: None,
+                unit: None,
+                parent_expansion: None,
+                content_budget: None,
                 }),
                 OptionalParts(test_parts_default()),
             )
@@ -7341,6 +7762,9 @@ mod tests {
                     include_expired: None,
                     explain: None,
                     as_of: None,
+                unit: None,
+                parent_expansion: None,
+                content_budget: None,
                 }),
                 test_optional_parts(),
             )
@@ -7436,6 +7860,9 @@ mod tests {
                         include_expired: None,
                         explain: None,
                         as_of: None,
+                    unit: None,
+                    parent_expansion: None,
+                    content_budget: None,
                     }),
                     test_optional_parts(),
                 )
@@ -7502,6 +7929,9 @@ mod tests {
                         include_expired: None,
                         explain: None,
                         as_of: None,
+                    unit: None,
+                    parent_expansion: None,
+                    content_budget: None,
                     }),
                     test_optional_parts(),
                 )
@@ -7544,6 +7974,9 @@ mod tests {
                     include_expired: None,
                     explain: None,
                     as_of: None,
+                unit: None,
+                parent_expansion: None,
+                content_budget: None,
                 }),
                 test_optional_parts(),
             )
@@ -7619,6 +8052,9 @@ mod tests {
                         include_expired: None,
                         explain: None,
                         as_of: None,
+                    unit: None,
+                    parent_expansion: None,
+                    content_budget: None,
                     }),
                     test_optional_parts(),
                 )
@@ -7685,6 +8121,9 @@ mod tests {
                     include_expired: None,
                     explain: None,
                     as_of: None,
+                unit: None,
+                parent_expansion: None,
+                content_budget: None,
                 }),
                 OptionalParts(test_parts_default()),
             )
@@ -8728,6 +9167,9 @@ mod tests {
                     include_expired: None,
                     explain: Some(true),
                     as_of: None,
+                unit: None,
+                parent_expansion: None,
+                content_budget: None,
                 }),
                 OptionalParts(test_parts_default()),
             )
@@ -8837,6 +9279,9 @@ mod tests {
                     include_expired: None,
                     explain: Some(true),
                     as_of: None,
+                unit: None,
+                parent_expansion: None,
+                content_budget: None,
                 }),
                 OptionalParts(test_parts_default()),
             )
@@ -8884,6 +9329,9 @@ mod tests {
                     include_expired: Some(true),
                     explain: None,
                     as_of: None,
+                unit: None,
+                parent_expansion: None,
+                content_budget: None,
                 }),
                 OptionalParts(test_parts_default()),
             )
@@ -8964,6 +9412,9 @@ mod tests {
                     include_expired: None,
                     explain: None,
                     as_of: None,
+                unit: None,
+                parent_expansion: None,
+                content_budget: None,
                 }),
                 OptionalParts(test_parts_default()),
             )
@@ -8996,6 +9447,9 @@ mod tests {
                     include_expired: None,
                     explain: None,
                     as_of: None,
+                unit: None,
+                parent_expansion: None,
+                content_budget: None,
                 }),
                 OptionalParts(test_parts_default()),
             )
@@ -9032,6 +9486,9 @@ mod tests {
                     include_expired: None,
                     explain: None,
                     as_of: None,
+                unit: None,
+                parent_expansion: None,
+                content_budget: None,
                 }),
                 OptionalParts(test_parts_default()),
             )
@@ -11897,6 +12354,9 @@ mod tests {
                     include_expired: None,
                     explain: None,
                     as_of: None,
+                unit: None,
+                parent_expansion: None,
+                content_budget: None,
                 }),
                 OptionalParts(test_parts_default()),
             )
@@ -11931,6 +12391,9 @@ mod tests {
                     include_expired: None,
                     explain: None,
                     as_of: None,
+                unit: None,
+                parent_expansion: None,
+                content_budget: None,
                 }),
                 OptionalParts(test_parts_default()),
             )

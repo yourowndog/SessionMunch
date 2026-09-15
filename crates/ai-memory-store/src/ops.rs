@@ -820,6 +820,52 @@ pub fn backfill_entity_index(conn: &mut Connection) -> StoreResult<EntityBackfil
     Ok(summary)
 }
 
+/// Rebuild the section/passage index for all latest pages in a scope,
+/// processing in bounded batches. Returns the count of pages processed.
+pub fn backfill_sections(
+    conn: &mut Connection,
+    workspace_id: &WorkspaceId,
+    project_id: &ProjectId,
+    batch_size: usize,
+) -> StoreResult<u64> {
+    let tx = conn.transaction()?;
+    let rows: Vec<(Vec<u8>,)> = tx
+        .prepare(
+            "SELECT p.id FROM pages p
+             WHERE p.workspace_id = ?1 AND p.project_id = ?2 AND p.is_latest = 1",
+        )?
+        .query_map([workspace_id.as_bytes(), project_id.as_bytes()], |row| {
+            Ok((row.get::<_, Vec<u8>>(0)?,))
+        })?
+        .collect::<Result<_, _>>()?;
+    drop(tx);
+
+    let batch_size = batch_size.max(1);
+    let mut count: u64 = 0;
+    for chunk in rows.chunks(batch_size) {
+        let tx = conn.transaction()?;
+        for (page_id_bytes,) in chunk {
+            let page_id = PageId::from_slice(page_id_bytes)?;
+            let body: String = tx
+                .query_row(
+                    "SELECT body FROM pages WHERE id = ?1",
+                    params![page_id_bytes],
+                    |row| row.get(0),
+                )?;
+            crate::passage_index::replace_page_sections_and_passages(
+                &tx,
+                page_id,
+                *workspace_id,
+                *project_id,
+                &body,
+            )?;
+            count += 1;
+        }
+        tx.commit()?;
+    }
+    Ok(count)
+}
+
 pub(crate) fn upsert_page_in_tx(
     tx: &rusqlite::Transaction<'_>,
     page: &NewPage,
@@ -922,6 +968,15 @@ pub(crate) fn upsert_page_in_tx(
         attach_entities_in_tx(tx, &new_id, page, now)?;
         refresh_incoming_links_for_path(tx, page, &new_id)?;
         insert_evidence_in_tx(tx, &new_id, &page.evidence, now)?;
+        // Rebuild the section/passage index for this page version in the same
+        // transaction (AGENTS.md invariant #3: indexes commit with the data).
+        crate::passage_index::replace_page_sections_and_passages(
+            tx,
+            new_id,
+            page.workspace_id,
+            page.project_id,
+            &page.body,
+        )?;
         audit(
             tx,
             "supersede_page",
@@ -963,6 +1018,15 @@ pub(crate) fn upsert_page_in_tx(
     attach_entities_in_tx(tx, &new_id, page, now)?;
     refresh_incoming_links_for_path(tx, page, &new_id)?;
     insert_evidence_in_tx(tx, &new_id, &page.evidence, now)?;
+    // Rebuild the section/passage index for this page version in the same
+    // transaction (AGENTS.md invariant #3: indexes commit with the data).
+    crate::passage_index::replace_page_sections_and_passages(
+        tx,
+        new_id,
+        page.workspace_id,
+        page.project_id,
+        &page.body,
+    )?;
     audit(
         tx,
         "create_page",
@@ -3363,7 +3427,7 @@ pub enum Compaction {
 /// being made about it. A list inside a string literal cannot be compared to
 /// anything, and the failure mode of getting it wrong is silent — text stays
 /// searchable after an operator asked for it to be reclaimed.
-const ALL_FTS_INDEXES: &[&str] = &["observations_fts", "pages_fts", "workstream_events_fts"];
+const ALL_FTS_INDEXES: &[&str] = &["observations_fts", "page_passages_fts", "pages_fts", "workstream_events_fts"];
 
 /// Rebuild every FTS5 index, then `VACUUM`. Runs after the caller's
 /// transaction has committed: `VACUUM` cannot run inside one, and a rebuild is
@@ -4209,6 +4273,18 @@ pub fn move_project_workspace(
         "UPDATE pages SET workspace_id = ?1 WHERE project_id = ?2",
         params![&to[..], &pid[..]],
     )? as u64;
+    // page_sections/page_passages denormalize workspace_id/project_id for
+    // scoped passage queries (plan: "passage tables carry and filter
+    // workspace/project on every stream") — restamp them alongside pages or
+    // their scope goes stale after a project move.
+    tx.execute(
+        "UPDATE page_sections SET workspace_id = ?1 WHERE project_id = ?2",
+        params![&to[..], &pid[..]],
+    )?;
+    tx.execute(
+        "UPDATE page_passages SET workspace_id = ?1 WHERE project_id = ?2",
+        params![&to[..], &pid[..]],
+    )?;
     let sessions_moved = tx.execute(
         "UPDATE sessions SET workspace_id = ?1 WHERE project_id = ?2",
         params![&to[..], &pid[..]],

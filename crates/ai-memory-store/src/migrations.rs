@@ -901,4 +901,145 @@ mod tests {
         assert!(after.contains("superseded_at IS NOT NULL"), "{after}");
         assert!(!after.contains("supersedes IS NULL"), "{after}");
     }
+
+    /// V64 (D1b): the passage-level schema must create page_sections,
+    /// page_passages, the page_passages_fts virtual table, the
+    /// page_passage_embeddings table, and enforce the FK cascade from
+    /// page_sections to page_passages.
+    #[test]
+    fn v64_page_sections_passages_migration_creates_schema() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_to(&mut conn, 64).unwrap();
+
+        // page_sections table exists with expected columns
+        let section_cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(page_sections)")
+            .unwrap()
+            .query_map([], |row| row.get(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(section_cols.contains(&"id".to_string()));
+        assert!(section_cols.contains(&"page_id".to_string()));
+        assert!(section_cols.contains(&"workspace_id".to_string()));
+        assert!(section_cols.contains(&"project_id".to_string()));
+        assert!(section_cols.contains(&"ordinal".to_string()));
+        assert!(section_cols.contains(&"level".to_string()));
+        assert!(section_cols.contains(&"heading".to_string()));
+        assert!(section_cols.contains(&"heading_path".to_string()));
+        assert!(section_cols.contains(&"body".to_string()));
+        assert!(section_cols.contains(&"start_byte".to_string()));
+        assert!(section_cols.contains(&"end_byte".to_string()));
+        assert!(section_cols.contains(&"content_sha256".to_string()));
+
+        // page_passages table exists with expected columns
+        let passage_cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(page_passages)")
+            .unwrap()
+            .query_map([], |row| row.get(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(passage_cols.contains(&"id".to_string()));
+        assert!(passage_cols.contains(&"section_id".to_string()));
+        assert!(passage_cols.contains(&"page_id".to_string()));
+        assert!(passage_cols.contains(&"workspace_id".to_string()));
+        assert!(passage_cols.contains(&"project_id".to_string()));
+        assert!(passage_cols.contains(&"ordinal".to_string()));
+        assert!(passage_cols.contains(&"text".to_string()));
+        assert!(passage_cols.contains(&"start_byte".to_string()));
+        assert!(passage_cols.contains(&"end_byte".to_string()));
+        assert!(passage_cols.contains(&"token_count".to_string()));
+        assert!(passage_cols.contains(&"content_sha256".to_string()));
+
+        // FTS table exists
+        let fts_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'page_passages_fts'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(fts_exists, 1);
+
+        // page_passage_embeddings table exists
+        let emb_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'page_passage_embeddings'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(emb_exists, 1);
+
+        // FK cascade from page_sections to page_passages
+        // First create required parent data (workspace, project, page)
+        let workspace_id = "11111111-1111-1111-1111-111111111111";
+        let project_id = "22222222-2222-2222-2222-222222222222";
+        let page_id = "33333333-3333-3333-3333-333333333333";
+        let section_id = "44444444-4444-4444-4444-444444444444";
+        let passage_id = "55555555-5555-5555-5555-555555555555";
+
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        conn.execute(
+            "INSERT INTO workspaces (id, name, created_at) VALUES (?, 'test', 1)",
+            params![workspace_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO projects (id, workspace_id, name, created_at) VALUES (?, ?, 'test', 1)",
+            params![project_id, workspace_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO pages (id, workspace_id, project_id, path, title, tier, body, body_sha256, frontmatter_json, is_latest, pinned, created_at, updated_at) VALUES (?, ?, ?, 'test.md', 'test', 'semantic', 'body', ?, '{}', 1, 0, 1, 1)",
+            params![page_id, workspace_id, project_id, [0u8; 32]],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO page_sections (id, page_id, workspace_id, project_id, ordinal, level, heading, heading_path, body, start_byte, end_byte, content_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![section_id, page_id, workspace_id, project_id, 0, 1, "Title", "Title", "Body", 0, 4, [0u8; 32]],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO page_passages (id, section_id, page_id, workspace_id, project_id, ordinal, heading_path, text, start_byte, end_byte, token_count, content_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![passage_id, section_id, page_id, workspace_id, project_id, 0, "Title", "Text", 0, 4, 1, [0u8; 32]],
+        )
+        .unwrap();
+
+        // FTS index reflects passage insert
+        let fts_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM page_passages_fts WHERE text MATCH 'Text'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(fts_count, 1);
+
+        // Unique constraint on (page_id, ordinal)
+        let dup = conn.execute(
+            "INSERT INTO page_sections (id, page_id, workspace_id, project_id, ordinal, level, heading, heading_path, body, start_byte, end_byte, content_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params!["44444444-4444-4444-4444-444444444444", page_id, page_id, page_id, 0, 1, "Title2", "Title2", "Body2", 0, 5, [0u8; 32]],
+        );
+        assert!(dup.is_err(), "duplicate (page_id, ordinal) must be rejected");
+
+        // Unique constraint on (section_id, ordinal)
+        let dup2 = conn.execute(
+            "INSERT INTO page_passages (id, section_id, page_id, workspace_id, project_id, ordinal, heading_path, text, start_byte, end_byte, token_count, content_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params!["55555555-5555-5555-5555-555555555555", section_id, page_id, page_id, page_id, 0, "Title", "Text2", 0, 5, 1, [0u8; 32]],
+        );
+        assert!(dup2.is_err(), "duplicate (section_id, ordinal) must be rejected");
+
+        // Deleting the section cascades to the passage
+        conn.execute("DELETE FROM page_sections WHERE id = ?", params![section_id]).unwrap();
+        let passage_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM page_passages WHERE id = ?",
+                params![passage_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(passage_count, 0);
+    }
 }

@@ -16,6 +16,7 @@ uuid.workspace = true
 jiff.workspace = true
 regex.workspace = true
 tracing.workspace = true
+pulldown-cmark = { version = "0.12", default-features = false }
 # JsonSchema on Tier/PageKind so the consolidation prompt's
 # structured-output schema enforces enum membership instead of
 # producing `{ "type": "string" }` with no constraints (which lets
