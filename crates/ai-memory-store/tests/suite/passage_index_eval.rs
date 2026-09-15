@@ -276,18 +276,26 @@ async fn passage_index_frozen_eval() {
         mrr_scores.iter().sum::<f64>() / mrr_scores.len() as f64
     };
 
-    // Calculate nDCG@5
-    let ndcg_scores: Vec<f64> = category_ranks.values()
+    // Calculate nDCG@5.
+    // Each probe has exactly one relevant document, so IDCG@5 = 1/log2(1+1) = 1
+    // (the ideal ranking places the single relevant item at rank 1). DCG@5 for
+    // a hit at `rank` is 1/log2(rank+1) (standard log2(rank+1) discount, not
+    // log2(rank) — log2(1)=0 would divide by zero for a rank-1 hit and yield
+    // +inf, which is a bug, not a perfect score). nDCG@5 per probe is then
+    // DCG@5 / IDCG@5 = 1/log2(rank+1), and a probe with no hit in the top 5
+    // contributes 0. Averaged over every probe, not just the ones that hit.
+    let ndcg_per_probe: Vec<f64> = category_ranks.values()
         .flat_map(|ranks| {
-            ranks.iter().flatten()
-                .filter(|r| **r <= 5)
-                .map(|r| 1.0 / (*r as f64).log2())
+            ranks.iter().map(|maybe_rank| match maybe_rank {
+                Some(r) if *r <= 5 => 1.0 / ((*r as f64) + 1.0).log2(),
+                _ => 0.0,
+            })
         })
         .collect();
-    let ndcg = if ndcg_scores.is_empty() {
+    let ndcg = if ndcg_per_probe.is_empty() {
         0.0
     } else {
-        ndcg_scores.iter().sum::<f64>() / ndcg_scores.len().min(5) as f64
+        ndcg_per_probe.iter().sum::<f64>() / ndcg_per_probe.len() as f64
     };
 
     // Latency statistics
