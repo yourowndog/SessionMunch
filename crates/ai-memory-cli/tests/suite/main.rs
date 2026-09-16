@@ -6,6 +6,7 @@
 //! so a new file must be declared here (`scripts/check-test-suites.*` enforces it).
 
 mod autoscope_env;
+mod backfill_sections;
 mod completions;
 mod hook_drain;
 mod hook_payload;

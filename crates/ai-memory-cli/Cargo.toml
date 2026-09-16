@@ -88,6 +88,10 @@ tempfile.workspace = true
 
 [dev-dependencies]
 ai-memory-test-support.workspace = true
+# The backfill end-to-end test asserts on the derived section/passage
+# tables directly; nothing in the public store API exposes their row
+# counts, and the pre-G1 fixture shape can only be produced with SQL.
+rusqlite.workspace = true
 tempfile.workspace = true
 rstest.workspace = true
 tower.workspace = true
