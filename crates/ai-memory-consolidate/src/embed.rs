@@ -13,7 +13,9 @@ use std::sync::Arc;
 
 use ai_memory_core::{ProjectId, WorkspaceId};
 use ai_memory_llm::Embedder;
-use ai_memory_store::{EmbeddingWrite, PassageEmbeddingWrite, ReaderPool, WriterHandle, f32_vec_to_bytes};
+use ai_memory_store::{
+    EmbeddingWrite, PassageEmbeddingWrite, ReaderPool, WriterHandle, f32_vec_to_bytes,
+};
 use ai_memory_wiki::Wiki;
 use serde::Serialize;
 use thiserror::Error;
@@ -280,28 +282,78 @@ async fn flush_embedding_batch(
 
 /// Backfill passage-level embeddings for one workspace/project.
 ///
-/// This is a stub implementation that demonstrates the backfill architecture
-/// without directly querying the database. In production, this would be extended
-/// with a reader method to get passage candidates for embedding.
+/// Queries all passages in the project that lack a current `(provider, model, dim)`
+/// embedding row. For each passage, computes the embedding using the provided embedder
+/// and writes it to the store in batches.
+///
+/// Per-passage provider failures increment [`EmbedBackfillCounts::failed`] and do not
+/// abort the run; only store errors on the candidate lookups propagate.
 ///
 /// # Errors
-/// Propagates any store error.
+/// Propagates any store error encountered while reading candidates.
 pub async fn run_passage_embedding_backfill(
-    _reader: &ReaderPool,
-    _writer: &WriterHandle,
-    _embedder: &Arc<dyn Embedder>,
-    _workspace_id: WorkspaceId,
-    _project_id: ProjectId,
-    _options: EmbedBackfillOptions,
+    reader: &ReaderPool,
+    writer: &WriterHandle,
+    embedder: &Arc<dyn Embedder>,
+    workspace_id: WorkspaceId,
+    project_id: ProjectId,
+    options: EmbedBackfillOptions,
 ) -> Result<EmbedBackfillCounts, EmbedBackfillError> {
-    // Stub: would query passages via reader, compute embeddings, and write via writer
-    // This demonstrates the API design without requiring database-level dependencies
-    // in consolidate. A real implementation adds a reader method to get passages
-    // and iterates as in run_embedding_backfill.
-    Ok(EmbedBackfillCounts::default())
+    let provider = embedder.provider().to_string();
+    let model = embedder.model().to_string();
+    let dim = embedder.dim();
+
+    // Get passages needing embeddings
+    let candidates = if options.reembed {
+        // For reembed, get all passages (use empty provider/model/dim to get everything)
+        reader
+            .passage_candidates(workspace_id, project_id, "", "", 0)
+            .await?
+    } else {
+        // Get only passages missing current embeddings
+        reader
+            .passage_candidates(workspace_id, project_id, &provider, &model, dim)
+            .await?
+    };
+
+    let mut counts = EmbedBackfillCounts::default();
+    let mut pending = Vec::with_capacity(EMBEDDING_WRITE_BATCH);
+
+    for cand in candidates {
+        if options.dry_run {
+            counts.would_embed += 1;
+            continue;
+        }
+
+        if cand.text.trim().is_empty() {
+            counts.skipped += 1;
+            continue;
+        }
+
+        match embedder.embed_document(&cand.text).await {
+            Ok(vec) => {
+                pending.push(PassageEmbeddingWrite {
+                    passage_id: cand.id,
+                    vector_bytes: f32_vec_to_bytes(&vec),
+                    provider: provider.clone(),
+                    model: model.clone(),
+                    dim,
+                });
+                if pending.len() >= EMBEDDING_WRITE_BATCH {
+                    flush_passage_embedding_batch(writer, &mut pending, &mut counts).await;
+                }
+            }
+            Err(e) => {
+                warn!(passage_id = %cand.id, error = %e, "embed_passages: provider call failed");
+                counts.failed += 1;
+            }
+        }
+    }
+
+    flush_passage_embedding_batch(writer, &mut pending, &mut counts).await;
+    Ok(counts)
 }
 
-#[allow(dead_code)]
 async fn flush_passage_embedding_batch(
     writer: &WriterHandle,
     pending: &mut Vec<PassageEmbeddingWrite>,

@@ -9,7 +9,7 @@ use std::time::Duration;
 use ai_memory_consolidate::{
     AutoImproveReviewConfig, Consolidator, EmbedBackfillOptions, ObservationRetention,
     ScheduledAutoImproveSettings, run_auto_improve_scheduler_tick, run_embedding_backfill,
-    run_lint, run_sweep_with_options,
+    run_lint, run_passage_embedding_backfill, run_sweep_with_options,
 };
 use ai_memory_core::{ActiveProject, ProjectId, Sanitizer, WorkspaceId};
 use ai_memory_hooks::{
@@ -1969,6 +1969,33 @@ async fn run_scheduled_embedding_backfill_tick(
                 );
             }
         }
+
+        // Also run passage-level embedding backfill
+        match run_passage_embedding_backfill(
+            reader,
+            writer,
+            embedder,
+            scope.workspace_id,
+            scope.project_id,
+            EmbedBackfillOptions::default(),
+        )
+        .await
+        {
+            Ok(counts) => {
+                outcome.embedded += counts.embedded;
+                outcome.skipped += counts.skipped;
+                outcome.failed += counts.failed;
+            }
+            Err(e) => {
+                outcome.errors += 1;
+                tracing::warn!(
+                    workspace = %scope.workspace_name,
+                    project = %scope.project_name,
+                    error = %e,
+                    "scheduled passage embedding backfill failed for scope"
+                );
+            }
+        }
     }
 
     Ok(outcome)
@@ -3618,7 +3645,7 @@ mod tests {
         assert_eq!(outcome.scopes, 2);
         assert_eq!(outcome.errors, 0);
         assert_eq!(outcome.failed, 0);
-        assert_eq!(outcome.embedded, 2);
+        assert_eq!(outcome.embedded, 4); // 2 pages + 2 passages
         for project in [first, second] {
             let embedded = store
                 .reader
@@ -3670,7 +3697,7 @@ mod tests {
             run_scheduled_embedding_backfill_tick(&store.reader, &store.writer, &wiki, &embedder)
                 .await
                 .unwrap();
-        assert_eq!((first_pass.embedded, first_pass.skipped), (2, 0));
+        assert_eq!((first_pass.embedded, first_pass.skipped), (4, 0)); // 2 pages + 2 passages
 
         let second_pass =
             run_scheduled_embedding_backfill_tick(&store.reader, &store.writer, &wiki, &embedder)
