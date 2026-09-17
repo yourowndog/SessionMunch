@@ -4,7 +4,7 @@
 //! headings, preserving byte offsets into the source text.
 
 use crate::ids::PageId;
-use pulldown_cmark::{Event, Options, Tag, TagEnd, Parser};
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
 /// A section of a Markdown document between headings.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,13 +71,13 @@ pub fn count_tokens(text: &str) -> usize {
 pub fn parse_sections(body: &str, page_id: PageId) -> Vec<Section> {
     let mut sections = Vec::new();
     let mut heading_stack: Vec<(u32, String)> = Vec::new();
-    
+
     // First pass: collect all headings with their byte ranges
     let opts = Options::empty();
     let mut headings: Vec<HeadingInfo> = Vec::new();
     let mut current_heading: Option<(u32, String, usize)> = None; // (level, text, start_byte)
     let mut in_heading = false;
-    
+
     for (event, range) in Parser::new_ext(body, opts).into_offset_iter() {
         match event {
             Event::Start(Tag::Heading { level, .. }) => {
@@ -103,7 +103,7 @@ pub fn parse_sections(body: &str, page_id: PageId) -> Vec<Section> {
             _ => {}
         }
     }
-    
+
     // Now build sections between headings
     let mut section_ordinal = 0;
 
@@ -137,17 +137,20 @@ pub fn parse_sections(body: &str, page_id: PageId) -> Vec<Section> {
         });
         return sections;
     }
-    
+
     // Process each heading as a section boundary
     for (idx, heading) in headings.iter().enumerate() {
         let section_start = heading.start_byte;
-        let section_end = headings.get(idx + 1).map(|h| h.start_byte).unwrap_or(body.len());
-        
+        let section_end = headings
+            .get(idx + 1)
+            .map(|h| h.start_byte)
+            .unwrap_or(body.len());
+
         // The section includes the heading and content up to next heading
         let body_text = body[section_start..section_end].to_string();
-        
+
         let heading_path = compute_heading_path(&mut heading_stack, heading.level, &heading.text);
-        
+
         sections.push(Section {
             page_id,
             ordinal: section_ordinal,
@@ -160,7 +163,7 @@ pub fn parse_sections(body: &str, page_id: PageId) -> Vec<Section> {
         });
         section_ordinal += 1;
     }
-    
+
     sections
 }
 
@@ -260,7 +263,10 @@ pub fn split_passages(section: &Section) -> Vec<Passage> {
 
             // Start new passage with overlap from previous
             let overlap_start = find_overlap_start_byte(&current_ranges, body, OVERLAP_TOKENS);
-            current_ranges = vec![(overlap_start, current_ranges.last().unwrap().1), (para_start, para_end)];
+            current_ranges = vec![
+                (overlap_start, current_ranges.last().unwrap().1),
+                (para_start, para_end),
+            ];
             current_token_count = count_tokens(&body[overlap_start..para_end]);
         } else {
             // Add this paragraph to current passage
@@ -310,7 +316,8 @@ fn emit_passage_from_ranges(
     // Calculate trimmed byte positions
     let leading_ws = merged_text.len() - merged_text.trim_start().len();
     let trimmed_start = merged_start + leading_ws;
-    let trimmed_end = merged_start + (merged_text.len() - (merged_text.len() - merged_text.trim_end().len()));
+    let trimmed_end =
+        merged_start + (merged_text.len() - (merged_text.len() - merged_text.trim_end().len()));
 
     // Verify invariant: body[trimmed_start..trimmed_end] == trimmed
     debug_assert_eq!(&body[trimmed_start..trimmed_end], trimmed);
@@ -362,7 +369,12 @@ fn find_overlap_byte_pos(text: &str, overlap_tokens: usize) -> usize {
     0
 }
 
-fn split_long_text(text: &str, base_offset: usize, section_ordinal: usize, start_ordinal: usize) -> Vec<Passage> {
+fn split_long_text(
+    text: &str,
+    base_offset: usize,
+    section_ordinal: usize,
+    start_ordinal: usize,
+) -> Vec<Passage> {
     let mut result = Vec::new();
     let mut remaining = text;
     let mut offset = base_offset;
@@ -396,7 +408,12 @@ fn split_long_text(text: &str, base_offset: usize, section_ordinal: usize, start
             if matches!(c, '.' | '!' | '?') {
                 // Check if next char is whitespace or end
                 let next_bytes = &remaining[i + c.len_utf8()..];
-                if next_bytes.is_empty() || next_bytes.chars().next().is_some_and(|ch| ch.is_whitespace()) {
+                if next_bytes.is_empty()
+                    || next_bytes
+                        .chars()
+                        .next()
+                        .is_some_and(|ch| ch.is_whitespace())
+                {
                     sentence_end = Some(i + c.len_utf8());
                 }
             }
@@ -409,7 +426,8 @@ fn split_long_text(text: &str, base_offset: usize, section_ordinal: usize, start
             pos
         } else {
             // Fallback: split at word boundary near token budget
-            let target_chars = (remaining.len() * 320 / count_tokens(remaining)).min(remaining.len());
+            let target_chars =
+                (remaining.len() * 320 / count_tokens(remaining)).min(remaining.len());
             remaining
                 .char_indices()
                 .find(|(i, c)| c.is_whitespace() && *i > target_chars / 2 && *i < target_chars * 2)
@@ -582,8 +600,14 @@ mod tests {
 
         assert_eq!(sections.len(), 2);
         // Verify byte offsets slice correctly
-        assert_eq!(&body[sections[0].start_byte..sections[0].end_byte], sections[0].body);
-        assert_eq!(&body[sections[1].start_byte..sections[1].end_byte], sections[1].body);
+        assert_eq!(
+            &body[sections[0].start_byte..sections[0].end_byte],
+            sections[0].body
+        );
+        assert_eq!(
+            &body[sections[1].start_byte..sections[1].end_byte],
+            sections[1].body
+        );
 
         // Check unicode chars in heading text
         assert_eq!(sections[0].heading, "Café");
@@ -609,11 +633,19 @@ mod tests {
         assert_passage_byte_ranges_valid(&sections[0].body, &passages);
 
         // Should create multiple passages due to token budget
-        assert!(passages.len() >= 2, "Expected multiple passages, got {}", passages.len());
+        assert!(
+            passages.len() >= 2,
+            "Expected multiple passages, got {}",
+            passages.len()
+        );
 
         // Check each passage <= 420 tokens
         for p in &passages {
-            assert!(count_tokens(&p.text) <= 420, "Passage exceeds 420 tokens: {}", count_tokens(&p.text));
+            assert!(
+                count_tokens(&p.text) <= 420,
+                "Passage exceeds 420 tokens: {}",
+                count_tokens(&p.text)
+            );
         }
 
         // Check overlap - adjacent passages should share content
@@ -624,7 +656,10 @@ mod tests {
             let words0: std::collections::HashSet<_> = p0.split_whitespace().collect();
             let words1: std::collections::HashSet<_> = p1.split_whitespace().collect();
             let overlap: Vec<_> = words0.intersection(&words1).collect();
-            assert!(!overlap.is_empty(), "Expected overlap between adjacent passages");
+            assert!(
+                !overlap.is_empty(),
+                "Expected overlap between adjacent passages"
+            );
         }
     }
 
@@ -678,7 +713,10 @@ mod tests {
         assert_passage_byte_ranges_valid(&sections[0].body, &passages);
 
         // Should not panic, should produce multiple passages
-        assert!(!passages.is_empty(), "Expected passages for multibyte content");
+        assert!(
+            !passages.is_empty(),
+            "Expected passages for multibyte content"
+        );
 
         // All passages should have content
         for p in &passages {
@@ -702,7 +740,11 @@ mod tests {
         assert_passage_byte_ranges_valid(&sections[0].body, &passages);
 
         // Concatenate all passage text
-        let concatenated = passages.iter().map(|p| p.text.as_str()).collect::<Vec<_>>().join("");
+        let concatenated = passages
+            .iter()
+            .map(|p| p.text.as_str())
+            .collect::<Vec<_>>()
+            .join("");
 
         // Count occurrences of the unique marker
         let marker_count = concatenated.matches("unique_marker").count();

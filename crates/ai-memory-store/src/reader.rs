@@ -2047,7 +2047,12 @@ impl ReaderPool {
                 .to_string();
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map(
-                params![fts_query, workspace_id.as_bytes(), project_id.as_bytes(), limit as i64],
+                params![
+                    fts_query,
+                    workspace_id.as_bytes(),
+                    project_id.as_bytes(),
+                    limit as i64
+                ],
                 |row| {
                     let passage_id_bytes: Vec<u8> = row.get(0)?;
                     let section_id_bytes: Vec<u8> = row.get(1)?;
@@ -2079,9 +2084,8 @@ impl ReaderPool {
             )?;
             let mut hits = Vec::new();
             for row in rows {
-                let (
-                    pid, sid, page_id, ws, proj, path, title, heading_path, text, s, e, _rank,
-                ) = row?;
+                let (pid, sid, page_id, ws, proj, path, title, heading_path, text, s, e, _rank) =
+                    row?;
                 hits.push(PassageHit {
                     passage_id: uuid_from_stored_bytes(&pid, "page_passages.id")?,
                     section_id: uuid_from_stored_bytes(&sid, "page_passages.section_id")?,
@@ -2100,11 +2104,7 @@ impl ReaderPool {
                     rrf_score: None,
                 });
             }
-            hits.sort_by(|a, b| {
-                a.passage_id
-                    .as_bytes()
-                    .cmp(b.passage_id.as_bytes())
-            });
+            hits.sort_by(|a, b| a.passage_id.as_bytes().cmp(b.passage_id.as_bytes()));
             for (i, hit) in hits.iter_mut().enumerate() {
                 hit.lexical_rank = Some(i + 1);
             }
@@ -2189,9 +2189,8 @@ impl ReaderPool {
             )?;
             let mut scored = Vec::new();
             for row in rows {
-                let (
-                    pid, sid, page_id, ws, proj, path, title, heading_path, text, s, e, emb,
-                ) = row?;
+                let (pid, sid, page_id, ws, proj, path, title, heading_path, text, s, e, emb) =
+                    row?;
                 let query_norm = l2_normalize(&query_vector);
                 let emb_norm = l2_normalize(&bytes_to_f32_vec(&emb, dim)?);
                 let cosine = dot_f32(&query_norm, &emb_norm);
@@ -4221,6 +4220,60 @@ impl ReaderPool {
             let mut out = Vec::new();
             for r in rows {
                 out.push(r??);
+            }
+            Ok(out)
+        })
+        .await
+    }
+
+    /// Get all passages in a workspace/project that need embeddings.
+    ///
+    /// Returns passages lacking a current `(provider, model, dim)` embedding row,
+    /// or all passages if `reembed` is true. Used by passage embedding backfill.
+    ///
+    /// # Errors
+    /// Propagates any SQL or pool error.
+    pub async fn passage_candidates(
+        &self,
+        workspace_id: WorkspaceId,
+        project_id: ProjectId,
+        provider: &str,
+        model: &str,
+        dim: u32,
+    ) -> StoreResult<Vec<PassageEmbedCandidate>> {
+        let provider = provider.to_string();
+        let model = model.to_string();
+        self.with_conn(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT pp.id, pp.text FROM page_passages pp \
+                 LEFT JOIN page_passage_embeddings ppe \
+                   ON pp.id = ppe.passage_id \
+                   AND ppe.provider = ?3 \
+                   AND ppe.model = ?4 \
+                   AND ppe.dim = ?5 \
+                 WHERE pp.workspace_id = ?1 AND pp.project_id = ?2 \
+                   AND ppe.passage_id IS NULL",
+            )?;
+            let rows = stmt.query_map(
+                params![
+                    workspace_id.as_bytes(),
+                    project_id.as_bytes(),
+                    provider.as_str(),
+                    model.as_str(),
+                    dim as i64,
+                ],
+                |row| {
+                    let id_bytes: Vec<u8> = row.get(0)?;
+                    let text: String = row.get(1)?;
+                    Ok((id_bytes, text))
+                },
+            )?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (id_bytes, text) = row?;
+                let id =
+                    uuid::Uuid::from_slice(&id_bytes).map_err(|_| rusqlite::Error::InvalidQuery)?;
+                out.push(PassageEmbedCandidate { id, text });
             }
             Ok(out)
         })
@@ -8870,6 +8923,16 @@ pub fn f32_vec_to_bytes(v: &[f32]) -> Vec<u8> {
 }
 
 /// One row's worth of input for the M8 retention formula.
+/// One passage needing embedding for backfill.
+#[derive(Debug, Clone)]
+pub struct PassageEmbedCandidate {
+    /// Stable passage identifier (UUID).
+    pub id: uuid::Uuid,
+    /// Passage text to embed.
+    pub text: String,
+}
+
+/// One decay candidate for the page decay (forget) sweep.
 #[derive(Debug, Clone, Serialize)]
 pub struct DecayCandidate {
     /// Stable identifier.

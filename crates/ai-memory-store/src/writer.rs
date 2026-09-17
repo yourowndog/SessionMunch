@@ -1480,7 +1480,7 @@ impl WriterHandle {
             batch_size,
             reply: tx,
         })
-            .await?;
+        .await?;
         rx.await.map_err(|_| StoreError::WriterClosed)?
     }
 
@@ -2994,7 +2994,8 @@ fn worker_loop(mut conn: Connection, mut rx: mpsc::Receiver<WriteCmd>) {
                 batch_size,
                 reply,
             } => {
-                let result = ops::backfill_sections(&mut conn, &workspace_id, &project_id, batch_size);
+                let result =
+                    ops::backfill_sections(&mut conn, &workspace_id, &project_id, batch_size);
                 send_or_warn(reply, result, "backfill_sections");
             }
             WriteCmd::SoftDeleteForDecayIfLatest {

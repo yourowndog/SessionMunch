@@ -20,8 +20,8 @@ pub mod scaffolding;
 pub use scaffolding::looks_like_scaffolding;
 pub mod routing_snippet;
 pub mod sanitize;
-pub mod slots;
 pub mod sections;
+pub mod slots;
 pub mod user;
 mod workstream;
 

@@ -1,8 +1,8 @@
 //! Tests for replace_page_sections_and_passages and backfill_sections.
 
 use ai_memory_core::{NewPage, PagePath, ProjectId, Tier, WorkspaceId};
-use ai_memory_store::scope::create_explicit_scope;
 use ai_memory_store::Store;
+use ai_memory_store::scope::create_explicit_scope;
 use rusqlite::Connection;
 use serde_json::json;
 use tempfile::TempDir;
@@ -171,7 +171,6 @@ async fn supersede_through_writer_replaces_derived_rows() {
     );
 }
 
-
 /// Deleting a page's sections must cascade-delete its passages (FK
 /// `page_passages.section_id -> page_sections.id ON DELETE CASCADE`), and the
 /// `page_passages_fts` triggers must keep the FTS index in sync.
@@ -268,11 +267,7 @@ async fn backfill_batch_size_one() {
     store.writer.upsert_page(page1).await.unwrap();
     store.writer.upsert_page(page2).await.unwrap();
 
-    let processed = store
-        .writer
-        .backfill_sections(ws, proj, 1)
-        .await
-        .unwrap();
+    let processed = store.writer.backfill_sections(ws, proj, 1).await.unwrap();
 
     assert_eq!(processed, 2, "backfill must process both latest pages");
 }
@@ -296,11 +291,7 @@ async fn backfill_batch_bounds() {
 
     // A batch_size of 0 must be treated as at least 1, not panic or loop
     // forever.
-    let processed_zero_batch = store
-        .writer
-        .backfill_sections(ws, proj, 0)
-        .await
-        .unwrap();
+    let processed_zero_batch = store.writer.backfill_sections(ws, proj, 0).await.unwrap();
     assert_eq!(processed_zero_batch, 5);
 
     // A batch_size larger than the row count must process all rows exactly

@@ -1,9 +1,9 @@
 //! Struct mappings for page_sections and page_passages tables.
 
+use crate::error::StoreResult;
 use ai_memory_core::sections;
 use ai_memory_core::sections::count_tokens;
 use ai_memory_core::{PageId, ProjectId, WorkspaceId};
-use crate::error::StoreResult;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -123,9 +123,8 @@ impl PagePassage {
         Digest::update(&mut hasher, ordinal.to_be_bytes());
         Digest::update(&mut hasher, content_hash);
         let bytes: [u8; 32] = hasher.finalize().into();
-        Uuid::from_slice(&bytes).unwrap_or_else(|_| {
-            Uuid::from_bytes(bytes[..16].try_into().unwrap())
-        })
+        Uuid::from_slice(&bytes)
+            .unwrap_or_else(|_| Uuid::from_bytes(bytes[..16].try_into().unwrap()))
     }
 
     /// Build a [`PagePassage`] row from a parsed passage's fields, computing

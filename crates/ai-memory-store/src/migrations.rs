@@ -1022,17 +1022,27 @@ mod tests {
             "INSERT INTO page_sections (id, page_id, workspace_id, project_id, ordinal, level, heading, heading_path, body, start_byte, end_byte, content_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params!["44444444-4444-4444-4444-444444444444", page_id, page_id, page_id, 0, 1, "Title2", "Title2", "Body2", 0, 5, [0u8; 32]],
         );
-        assert!(dup.is_err(), "duplicate (page_id, ordinal) must be rejected");
+        assert!(
+            dup.is_err(),
+            "duplicate (page_id, ordinal) must be rejected"
+        );
 
         // Unique constraint on (section_id, ordinal)
         let dup2 = conn.execute(
             "INSERT INTO page_passages (id, section_id, page_id, workspace_id, project_id, ordinal, heading_path, text, start_byte, end_byte, token_count, content_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params!["55555555-5555-5555-5555-555555555555", section_id, page_id, page_id, page_id, 0, "Title", "Text2", 0, 5, 1, [0u8; 32]],
         );
-        assert!(dup2.is_err(), "duplicate (section_id, ordinal) must be rejected");
+        assert!(
+            dup2.is_err(),
+            "duplicate (section_id, ordinal) must be rejected"
+        );
 
         // Deleting the section cascades to the passage
-        conn.execute("DELETE FROM page_sections WHERE id = ?", params![section_id]).unwrap();
+        conn.execute(
+            "DELETE FROM page_sections WHERE id = ?",
+            params![section_id],
+        )
+        .unwrap();
         let passage_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM page_passages WHERE id = ?",

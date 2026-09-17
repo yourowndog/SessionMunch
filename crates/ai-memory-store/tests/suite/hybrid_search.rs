@@ -1,9 +1,9 @@
 //! Tests for search_passages_hybrid and related passage retrieval functions.
 
 use ai_memory_core::{NewPage, PagePath, ProjectId, Tier, WorkspaceId};
-use ai_memory_store::scope::create_explicit_scope;
 use ai_memory_store::Store;
 use ai_memory_store::reader::f32_vec_to_bytes;
+use ai_memory_store::scope::create_explicit_scope;
 use rusqlite::Connection;
 use serde_json::json;
 use tempfile::TempDir;
@@ -98,14 +98,29 @@ async fn search_passages_lexical_only_returns_results() {
     // Search with only lexical (no query_vector)
     let hits = store
         .reader
-        .search_passages_hybrid(ws, proj, "word".to_string(), None, "test".to_string(), "model".to_string(), 768, 10)
+        .search_passages_hybrid(
+            ws,
+            proj,
+            "word".to_string(),
+            None,
+            "test".to_string(),
+            "model".to_string(),
+            768,
+            10,
+        )
         .await
         .unwrap();
 
     assert!(!hits.is_empty(), "expected lexical hits");
     for hit in &hits {
-        assert!(hit.lexical_rank.is_some(), "all hits should have lexical_rank");
-        assert!(hit.dense_rank.is_none(), "no dense_rank without query_vector");
+        assert!(
+            hit.lexical_rank.is_some(),
+            "all hits should have lexical_rank"
+        );
+        assert!(
+            hit.dense_rank.is_none(),
+            "no dense_rank without query_vector"
+        );
         assert!(hit.rrf_score.is_some());
     }
 }
@@ -121,7 +136,16 @@ async fn search_passages_hybrid_empty_query_returns_empty() {
     // Empty query should return empty
     let hits = store
         .reader
-        .search_passages_hybrid(ws, proj, "".to_string(), None, "test".to_string(), "model".to_string(), 768, 10)
+        .search_passages_hybrid(
+            ws,
+            proj,
+            "".to_string(),
+            None,
+            "test".to_string(),
+            "model".to_string(),
+            768,
+            10,
+        )
         .await
         .unwrap();
 
@@ -139,7 +163,16 @@ async fn search_passages_hybrid_zero_limit_returns_empty() {
     // Zero limit should return empty
     let hits = store
         .reader
-        .search_passages_hybrid(ws, proj, "text".to_string(), None, "test".to_string(), "model".to_string(), 768, 0)
+        .search_passages_hybrid(
+            ws,
+            proj,
+            "text".to_string(),
+            None,
+            "test".to_string(),
+            "model".to_string(),
+            768,
+            0,
+        )
         .await
         .unwrap();
 
@@ -154,17 +187,32 @@ async fn search_passages_dense_rejects_wrong_dim() {
     let page = make_page(ws, proj, "notes/dim.md", "# Title\n\nBody text.");
     store.writer.upsert_page(page).await.unwrap();
 
-    // Query with wrong dim (512 elements) but dim param set to 768 
+    // Query with wrong dim (512 elements) but dim param set to 768
     // should error at the dim check before even querying embeddings
     let result = store
         .reader
-        .search_passages_hybrid(ws, proj, "text".to_string(), Some(make_query_vec(512)), "test".to_string(), "model".to_string(), 768, 10)
+        .search_passages_hybrid(
+            ws,
+            proj,
+            "text".to_string(),
+            Some(make_query_vec(512)),
+            "test".to_string(),
+            "model".to_string(),
+            768,
+            10,
+        )
         .await;
 
-    assert!(result.is_err(), "dense search with mismatched dim should error");
+    assert!(
+        result.is_err(),
+        "dense search with mismatched dim should error"
+    );
     let err = result.unwrap_err();
     let err_str = err.to_string();
-    assert!(err_str.contains("dim"), "error should mention dimension mismatch: {err_str}");
+    assert!(
+        err_str.contains("dim"),
+        "error should mention dimension mismatch: {err_str}"
+    );
 }
 
 #[tokio::test]
@@ -179,30 +227,64 @@ async fn search_passages_hybrid_workspace_isolation() {
     let (ws2, proj2) = (scope2.workspace_id, scope2.project_id);
 
     // Page in workspace 1
-    let page1 = make_page(ws1, proj1, "notes/ws1.md", "# Title\n\nUniqueTokenWorkspace1.");
+    let page1 = make_page(
+        ws1,
+        proj1,
+        "notes/ws1.md",
+        "# Title\n\nUniqueTokenWorkspace1.",
+    );
     store.writer.upsert_page(page1).await.unwrap();
 
     // Page in workspace 2
-    let page2 = make_page(ws2, proj2, "notes/ws2.md", "# Title\n\nUniqueTokenWorkspace2.");
+    let page2 = make_page(
+        ws2,
+        proj2,
+        "notes/ws2.md",
+        "# Title\n\nUniqueTokenWorkspace2.",
+    );
     store.writer.upsert_page(page2).await.unwrap();
 
     // Search in workspace 1 should NOT find workspace 2's passage
     let hits = store
         .reader
-        .search_passages_hybrid(ws1, proj1, "UniqueTokenWorkspace2".to_string(), None, "test".to_string(), "model".to_string(), 768, 10)
+        .search_passages_hybrid(
+            ws1,
+            proj1,
+            "UniqueTokenWorkspace2".to_string(),
+            None,
+            "test".to_string(),
+            "model".to_string(),
+            768,
+            10,
+        )
         .await
         .unwrap();
 
-    assert!(hits.is_empty(), "passage from different workspace must not appear");
+    assert!(
+        hits.is_empty(),
+        "passage from different workspace must not appear"
+    );
 
     // Search in workspace 2 should find its own passage
     let hits2 = store
         .reader
-        .search_passages_hybrid(ws2, proj2, "UniqueTokenWorkspace2".to_string(), None, "test".to_string(), "model".to_string(), 768, 10)
+        .search_passages_hybrid(
+            ws2,
+            proj2,
+            "UniqueTokenWorkspace2".to_string(),
+            None,
+            "test".to_string(),
+            "model".to_string(),
+            768,
+            10,
+        )
         .await
         .unwrap();
 
-    assert!(!hits2.is_empty(), "should find passage in its own workspace");
+    assert!(
+        !hits2.is_empty(),
+        "should find passage in its own workspace"
+    );
 }
 
 #[tokio::test]
@@ -217,26 +299,57 @@ async fn search_passages_hybrid_project_isolation() {
     let (_, proj2) = (scope2.workspace_id, scope2.project_id);
 
     // Page in project 1
-    let page1 = make_page(ws, proj1, "notes/proj1.md", "# Title\n\nUniqueTokenProject1.");
+    let page1 = make_page(
+        ws,
+        proj1,
+        "notes/proj1.md",
+        "# Title\n\nUniqueTokenProject1.",
+    );
     store.writer.upsert_page(page1).await.unwrap();
 
     // Page in project 2
-    let page2 = make_page(ws, proj2, "notes/proj2.md", "# Title\n\nUniqueTokenProject2.");
+    let page2 = make_page(
+        ws,
+        proj2,
+        "notes/proj2.md",
+        "# Title\n\nUniqueTokenProject2.",
+    );
     store.writer.upsert_page(page2).await.unwrap();
 
     // Search in project 1 should NOT find project 2's passage
     let hits = store
         .reader
-        .search_passages_hybrid(ws, proj1, "UniqueTokenProject2".to_string(), None, "test".to_string(), "model".to_string(), 768, 10)
+        .search_passages_hybrid(
+            ws,
+            proj1,
+            "UniqueTokenProject2".to_string(),
+            None,
+            "test".to_string(),
+            "model".to_string(),
+            768,
+            10,
+        )
         .await
         .unwrap();
 
-    assert!(hits.is_empty(), "passage from different project must not appear");
+    assert!(
+        hits.is_empty(),
+        "passage from different project must not appear"
+    );
 
     // Search in project 2 should find its own passage
     let hits2 = store
         .reader
-        .search_passages_hybrid(ws, proj2, "UniqueTokenProject2".to_string(), None, "test".to_string(), "model".to_string(), 768, 10)
+        .search_passages_hybrid(
+            ws,
+            proj2,
+            "UniqueTokenProject2".to_string(),
+            None,
+            "test".to_string(),
+            "model".to_string(),
+            768,
+            10,
+        )
         .await
         .unwrap();
 
@@ -249,7 +362,12 @@ async fn search_passages_hybrid_dense_only_works_when_lexical_empty() {
     let (ws, proj) = make_scope(&store).await;
 
     // Create a page with content that won't match lexically
-    let page = make_page(ws, proj, "notes/dense.md", "# Heading\n\nThis passage has unique dense content.");
+    let page = make_page(
+        ws,
+        proj,
+        "notes/dense.md",
+        "# Heading\n\nThis passage has unique dense content.",
+    );
     let page_id = store.writer.upsert_page(page).await.unwrap();
 
     // Get passage ID
@@ -282,7 +400,10 @@ async fn search_passages_hybrid_dense_only_works_when_lexical_empty() {
         .await
         .unwrap();
 
-    assert!(!hits.is_empty(), "dense-only path should work when lexical returns nothing");
+    assert!(
+        !hits.is_empty(),
+        "dense-only path should work when lexical returns nothing"
+    );
     for hit in &hits {
         assert!(hit.dense_rank.is_some(), "hits should have dense_rank");
     }
@@ -294,7 +415,12 @@ async fn search_passages_hybrid_rrf_fusion_prefers_both_streams() {
     let (ws, proj) = make_scope(&store).await;
 
     // Create a page with content that matches both lexically and densely
-    let page = make_page(ws, proj, "notes/fusion.md", "# Heading\n\nThis unique keyword appears here for testing fusion.");
+    let page = make_page(
+        ws,
+        proj,
+        "notes/fusion.md",
+        "# Heading\n\nThis unique keyword appears here for testing fusion.",
+    );
     let page_id = store.writer.upsert_page(page).await.unwrap();
 
     // Get passage ID
@@ -330,13 +456,22 @@ async fn search_passages_hybrid_rrf_fusion_prefers_both_streams() {
     assert!(!hits.is_empty(), "hybrid search should return hits");
     // The passage appearing in both streams should have both ranks set
     let hit = &hits[0];
-    assert!(hit.lexical_rank.is_some(), "should have lexical_rank from FTS");
-    assert!(hit.dense_rank.is_some(), "should have dense_rank from embeddings");
+    assert!(
+        hit.lexical_rank.is_some(),
+        "should have lexical_rank from FTS"
+    );
+    assert!(
+        hit.dense_rank.is_some(),
+        "should have dense_rank from embeddings"
+    );
     assert!(hit.rrf_score.is_some(), "should have RRF score");
     // RRF score for appearing in both should be higher than single-stream
     let rrf = hit.rrf_score.unwrap();
     // 1/(60+1) + 1/(60+1) ≈ 0.0328 for rank 1 in both
-    assert!(rrf > 1.0 / 61.0, "RRF score for dual-stream hit should exceed single-stream");
+    assert!(
+        rrf > 1.0 / 61.0,
+        "RRF score for dual-stream hit should exceed single-stream"
+    );
 }
 
 #[tokio::test]
@@ -357,7 +492,16 @@ async fn search_passages_hybrid_overlapping_passages_deduplicated() {
     // Search for a token that appears in multiple passages
     let hits = store
         .reader
-        .search_passages_hybrid(ws, proj, "Token50".to_string(), None, "test".to_string(), "model".to_string(), 768, 10)
+        .search_passages_hybrid(
+            ws,
+            proj,
+            "Token50".to_string(),
+            None,
+            "test".to_string(),
+            "model".to_string(),
+            768,
+            10,
+        )
         .await
         .unwrap();
 
@@ -365,7 +509,10 @@ async fn search_passages_hybrid_overlapping_passages_deduplicated() {
     // but we verify no duplicate passage_ids
     let mut seen = std::collections::HashSet::new();
     for hit in &hits {
-        assert!(seen.insert(hit.passage_id), "passage_id must be unique in results");
+        assert!(
+            seen.insert(hit.passage_id),
+            "passage_id must be unique in results"
+        );
     }
 }
 
@@ -404,7 +551,10 @@ async fn search_passages_hybrid_tail_blindness_regression() {
             |row| row.get(0),
         )
         .unwrap();
-    assert!(page_body_len > 10000, "page body must be >10000 bytes for tail test");
+    assert!(
+        page_body_len > 10000,
+        "page body must be >10000 bytes for tail test"
+    );
 
     // Get passage ID for a passage at the tail
     let passage_id: Vec<u8> = conn
@@ -436,10 +586,20 @@ async fn search_passages_hybrid_tail_blindness_regression() {
         .unwrap();
 
     // The tail passage should be found despite being at byte >8000
-    assert!(!hits.is_empty(), "tail-blindness: dense retrieval must find passage at byte >8000");
+    assert!(
+        !hits.is_empty(),
+        "tail-blindness: dense retrieval must find passage at byte >8000"
+    );
     let hit = &hits[0];
-    assert!(hit.start_byte > 8000, "found passage must be at byte >8000, got {}", hit.start_byte);
-    assert!(hit.dense_rank.is_some(), "should have dense_rank from tail passage embedding");
+    assert!(
+        hit.start_byte > 8000,
+        "found passage must be at byte >8000, got {}",
+        hit.start_byte
+    );
+    assert!(
+        hit.dense_rank.is_some(),
+        "should have dense_rank from tail passage embedding"
+    );
 }
 
 #[tokio::test]
@@ -448,26 +608,58 @@ async fn search_passages_hybrid_rrf_deterministic_tie_break() {
     let (ws, proj) = make_scope(&store).await;
 
     // Create two pages with identical content structure, same lexical match
-    let page1 = make_page(ws, proj, "notes/a.md", "# Title\n\nShared keyword appears here.");
-    let page2 = make_page(ws, proj, "notes/b.md", "# Title\n\nShared keyword appears here.");
+    let page1 = make_page(
+        ws,
+        proj,
+        "notes/a.md",
+        "# Title\n\nShared keyword appears here.",
+    );
+    let page2 = make_page(
+        ws,
+        proj,
+        "notes/b.md",
+        "# Title\n\nShared keyword appears here.",
+    );
     store.writer.upsert_page(page1).await.unwrap();
     store.writer.upsert_page(page2).await.unwrap();
 
     // Search with same query twice - results must be deterministically ordered
     let hits1 = store
         .reader
-        .search_passages_hybrid(ws, proj, "Shared".to_string(), None, "test".to_string(), "model".to_string(), 768, 10)
+        .search_passages_hybrid(
+            ws,
+            proj,
+            "Shared".to_string(),
+            None,
+            "test".to_string(),
+            "model".to_string(),
+            768,
+            10,
+        )
         .await
         .unwrap();
 
     let hits2 = store
         .reader
-        .search_passages_hybrid(ws, proj, "Shared".to_string(), None, "test".to_string(), "model".to_string(), 768, 10)
+        .search_passages_hybrid(
+            ws,
+            proj,
+            "Shared".to_string(),
+            None,
+            "test".to_string(),
+            "model".to_string(),
+            768,
+            10,
+        )
         .await
         .unwrap();
 
     // Results must be identically ordered (deterministic tie-break by passage_id)
-    assert_eq!(hits1.len(), hits2.len(), "both runs should return same number of hits");
+    assert_eq!(
+        hits1.len(),
+        hits2.len(),
+        "both runs should return same number of hits"
+    );
     for (h1, h2) in hits1.iter().zip(hits2.iter()) {
         assert_eq!(
             h1.passage_id, h2.passage_id,
@@ -482,7 +674,12 @@ async fn store_passage_embeddings_writes_to_table() {
     let (ws, proj) = make_scope(&store).await;
 
     // Create a page with a passage
-    let page = make_page(ws, proj, "notes/embed_test.md", "# Heading\n\nTest passage content here.");
+    let page = make_page(
+        ws,
+        proj,
+        "notes/embed_test.md",
+        "# Heading\n\nTest passage content here.",
+    );
     let page_id = store.writer.upsert_page(page).await.unwrap();
 
     // Get the passage ID that was created
@@ -535,5 +732,8 @@ async fn store_passage_embeddings_writes_to_table() {
         )
         .unwrap();
 
-    assert_eq!(retrieved_vec, embedding_bytes, "retrieved embedding should match written vector");
+    assert_eq!(
+        retrieved_vec, embedding_bytes,
+        "retrieved embedding should match written vector"
+    );
 }

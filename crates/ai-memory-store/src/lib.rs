@@ -22,6 +22,7 @@ mod fts_query;
 mod maintenance;
 mod migrations;
 mod ops;
+pub mod passage_index;
 pub mod password;
 mod reader;
 mod retrieval_tuning;
@@ -31,7 +32,6 @@ pub mod users;
 pub mod web_sessions;
 mod workstream;
 mod writer;
-pub mod passage_index;
 
 pub use fts_query::prepare_fts5_query;
 
@@ -50,14 +50,16 @@ pub use decay::{
 };
 pub use error::{StoreError, StoreResult};
 pub use maintenance::MaintenanceJob;
-pub use passage_index::{PagePassage, PageSection};
 pub use ops::{
     AdmittedSession, BootstrapChunkRecord, CompactSummary, Compaction, DeleteWorkspaceSummary,
     EmbedOutcome, EmbeddingWrite, EntityBackfillSummary, HookSessionAdmission,
     IngestObservationOutcome, LifecycleOnlyEndOutcome, MoveSessionSummary, MoveSummary,
-    ObservationPruneOutcome, OkfMigratedPage, PagesMode, PassageEmbeddingWrite, PurgeSessionSummary, PurgeSummary,
-    ReorgSummary, backfill_entity_index, purge_session, record_embed_failure,
+    ObservationPruneOutcome, OkfMigratedPage, PagesMode, PassageEmbeddingWrite,
+    PurgeSessionSummary, PurgeSummary, ReorgSummary, backfill_entity_index, purge_session,
+    record_embed_failure,
 };
+pub use passage_index::{PagePassage, PageSection};
+pub use reader::PassageEmbedCandidate;
 pub use reader::{
     ActivityWindow, AgentSessionCount, AuditEvent, AuditLogFilter, AutoImproveCandidateSession,
     BriefPageBody, BriefingPage, BriefingSnapshot, ClientActivity, ContaminationFinding,

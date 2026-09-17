@@ -861,12 +861,11 @@ pub fn backfill_sections(
         let tx = conn.transaction()?;
         for (page_id_bytes,) in chunk {
             let page_id = PageId::from_slice(page_id_bytes)?;
-            let body: String = tx
-                .query_row(
-                    "SELECT body FROM pages WHERE id = ?1",
-                    params![page_id_bytes],
-                    |row| row.get(0),
-                )?;
+            let body: String = tx.query_row(
+                "SELECT body FROM pages WHERE id = ?1",
+                params![page_id_bytes],
+                |row| row.get(0),
+            )?;
             crate::passage_index::replace_page_sections_and_passages(
                 &tx,
                 page_id,
@@ -3474,7 +3473,12 @@ pub enum Compaction {
 /// being made about it. A list inside a string literal cannot be compared to
 /// anything, and the failure mode of getting it wrong is silent — text stays
 /// searchable after an operator asked for it to be reclaimed.
-const ALL_FTS_INDEXES: &[&str] = &["observations_fts", "page_passages_fts", "pages_fts", "workstream_events_fts"];
+const ALL_FTS_INDEXES: &[&str] = &[
+    "observations_fts",
+    "page_passages_fts",
+    "pages_fts",
+    "workstream_events_fts",
+];
 
 /// Rebuild every FTS5 index, then `VACUUM`. Runs after the caller's
 /// transaction has committed: `VACUUM` cannot run inside one, and a rebuild is
