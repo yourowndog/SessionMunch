@@ -1093,7 +1093,7 @@ pub fn approve_proposal(
         return Ok(ApproveAutoImproveProposalResult::Conflict);
     }
 
-    let page_id = ops::upsert_page_in_tx(&tx, &input.page, now)?;
+    let (page_id, _passages) = ops::upsert_page_in_tx(&tx, &input.page, now)?;
     mark_decision_in_tx(&tx, input, "approved", Some(page_id), None, now)?;
     insert_event_in_tx(
         &tx,

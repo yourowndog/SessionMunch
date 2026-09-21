@@ -161,6 +161,16 @@ impl PagePassage {
     }
 }
 
+/// A passage created during section/passage indexing, with enough data
+/// for the caller to compute an embedding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreatedPassage {
+    /// Deterministic id of the passage row.
+    pub id: Uuid,
+    /// Full text to embed.
+    pub text: String,
+}
+
 /// Atomically replace all sections and passages for a page version inside a transaction.
 ///
 /// Deletes existing `page_sections` rows for the given `page_id`; the FK
@@ -170,6 +180,9 @@ impl PagePassage {
 /// and `split_passages`. The `page_embeddings` and `page_abstract_embeddings`
 /// rows are NOT touched.
 ///
+/// Returns the list of passages created, so the caller can compute embeddings
+/// and persist them via [`crate::ops::store_passage_embeddings`].
+///
 /// # Errors
 /// Returns [`StoreError::DatabaseError`] if any SQL operation fails.
 pub fn replace_page_sections_and_passages(
@@ -178,7 +191,7 @@ pub fn replace_page_sections_and_passages(
     workspace_id: WorkspaceId,
     project_id: ProjectId,
     body: &str,
-) -> StoreResult<()> {
+) -> StoreResult<Vec<CreatedPassage>> {
     // 1. Delete old sections — FK cascade from page_sections → page_passages
     //    will delete page_passages rows. The page_passages_fts AFTER DELETE trigger
     //    will clean the FTS index rows.
@@ -191,6 +204,7 @@ pub fn replace_page_sections_and_passages(
     let parsed_sections = sections::parse_sections(body, page_id);
 
     // 3. Insert new sections and passages
+    let mut created_passages = Vec::new();
     for section in &parsed_sections {
         let heading_path_str = heading_path_json(section);
         let section_row = PageSection::new(
@@ -257,10 +271,15 @@ pub fn replace_page_sections_and_passages(
                     passage_row.content_sha256,
                 ],
             )?;
+
+            created_passages.push(CreatedPassage {
+                id: passage_row.id,
+                text: passage_row.text.clone(),
+            });
         }
     }
 
-    Ok(())
+    Ok(created_passages)
 }
 
 /// Convert a section's heading_path Vec<String> to a JSON string for storage.

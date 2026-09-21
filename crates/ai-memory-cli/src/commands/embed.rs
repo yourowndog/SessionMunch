@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::cli::EmbedArgs;
+use crate::cli::{EmbedArgs, EmbedPassagesArgs};
 use crate::config::Config;
 use crate::http_client::{ServerEndpoint, post_json};
 
@@ -15,6 +15,15 @@ struct EmbedRequest {
     reembed: bool,
     dry_run: bool,
     all_projects: bool,
+}
+
+/// Request sent to `POST /admin/embed-passages`.
+#[derive(Serialize)]
+struct EmbedPassagesRequest {
+    workspace: String,
+    project: String,
+    max_pages: usize,
+    batch_size: usize,
 }
 
 /// Run the `embed` subcommand.
@@ -67,6 +76,37 @@ pub async fn run(config: &Config, args: EmbedArgs) -> Result<()> {
     } else {
         println!("{}", serde_json::to_string_pretty(&report)?);
     }
+    Ok(())
+}
+
+/// Run the `embed-passages` subcommand.
+///
+/// Sends a request to the server to backfill embeddings for passages
+/// that were recently added or missed during the initial embed pass.
+///
+/// # Errors
+/// Returns an error if the server is unreachable or returns a non-2xx
+/// response.
+pub async fn embed_passages(config: &Config, args: EmbedPassagesArgs) -> Result<()> {
+    let endpoint = ServerEndpoint::from_config_resolving_auth(config).await;
+    let (workspace, project) = super::resolve_scope(
+        config,
+        args.workspace.as_deref(),
+        args.project.as_deref(),
+    )?;
+    let report: serde_json::Value = post_json(
+        &endpoint,
+        "/admin/embed-passages",
+        &EmbedPassagesRequest {
+            workspace,
+            project,
+            max_pages: args.max_passages,
+            batch_size: 32,
+        },
+    )
+    .await?;
+
+    println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
 }
 

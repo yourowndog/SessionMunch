@@ -62,6 +62,10 @@ fn compute_heading_path(stack: &mut Vec<(u32, String)>, level: u32, heading: &st
 /// Count whitespace-separated tokens (the whitespace-count approximation used
 /// throughout this parser's 320-target/420-max/48-overlap budget; documented
 /// as an approximation of true model tokenization, not an exact count).
+///
+/// Sol amendment 2: when a token count exceeds hard maximum and no sentence
+/// boundary is found, this function drives the byte-length fallback that
+/// splits on UTF-8 character boundaries for degenerate/very long tokens.
 pub fn count_tokens(text: &str) -> usize {
     text.split_whitespace().count()
 }
@@ -476,6 +480,84 @@ fn split_long_text(
     result
 }
 
+// ---------------------------------------------------------------------------
+// Sol amendment 3: cross-encoder trait/boundary scaffold (interface only)
+// Reranking is not a dependency until lexical + dense + RRF passes evaluation (H1).
+// ---------------------------------------------------------------------------
+
+/// Score for a single (passage, query) pair from a cross-encoder reranker.
+///
+/// The value is an arbitrary float produced by the underlying model;
+/// callers must not assume a specific range until the model is fixed.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct CrossEncoderScore(pub f32);
+
+/// A re-usable cross-encoder session that can score (passage, query) pairs.
+///
+/// Sol amendment 3: trait only — no concrete implementation until H1 gate.
+/// A future implementation might wrap `ort` (ONNX Runtime) or `candle` to
+/// load a local ONNX model (e.g. `ms-marco-MiniLM-L-6-v2`).
+pub trait CrossEncoder: Send + Sync {
+    /// Score a single (passage, query) pair.
+    ///
+    /// Returns `None` if scoring is unavailable or the model is not loaded;
+    /// the retrieval pipeline falls back to the RRF order in that case
+    /// (Sol amendment 3: failure/timeouts preserve RRF order).
+    fn score(&self, passage: &str, query: &str) -> Option<CrossEncoderScore>;
+
+    /// Score a batch of (passage, query) pairs.
+    ///
+    /// Default implementation calls `score` per pair. A concrete impl should
+    /// override this for efficient batch inference.
+    fn score_batch(
+        &self,
+        passages: &[&str],
+        query: &str,
+    ) -> Vec<Option<CrossEncoderScore>> {
+        passages.iter().map(|p| self.score(p, query)).collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sol amendment 4: enrichment-hook interface (scaffold only)
+/// Future/optional ingestion-time semantic enrichment: a strong LLM may
+/// generate retrieval titles, summaries, entities, or classification tags
+/// for passages.  Derived metadata only — original text remains authoritative.
+/// Do not implement enrichment in D1 unless D1 naturally requires the interface.
+/// Enrichment metadata attached to a passage at ingestion time.
+///
+/// All fields optional; the presence of enrichment must never be required
+/// for correct retrieval. Original passage text is always authoritative
+/// (Sol amendment 4).
+#[derive(Debug, Clone, Default)]
+pub struct PassageEnrichment {
+    /// LLM-generated retrieval title (shorter, more descriptive than heading path).
+    pub title: Option<String>,
+    /// One-sentence summary of the passage content.
+    pub summary: Option<String>,
+    /// Named entities extracted from the passage.
+    pub entities: Option<Vec<String>>,
+    /// Free-form classification labels.
+    pub labels: Option<Vec<String>>,
+}
+
+/// Enrichment hook called at ingestion time for a new passage.
+///
+/// Sol amendment 4: interface only — no implementation in D1.
+/// A future writer (D2) calls `enrich()` synchronously or via a background
+/// queue; a `None` return is a no-op, never a failure.
+pub trait EnrichmentHook: Send + Sync {
+    /// Produce enrichment metadata for the given passage text and heading path.
+    ///
+    /// Returns `None` if enrichment is unavailable, disabled, or times out.
+    /// The calling pipeline treats `None` as a no-op — original text stays authoritative.
+    fn enrich(
+        &self,
+        passage_text: &str,
+        heading_path: &[String],
+    ) -> Option<PassageEnrichment>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -593,6 +675,25 @@ mod tests {
     }
 
     #[test]
+    fn test_indented_code_heading_ignored() {
+        // Four-space indented block after blank line is a code block in CommonMark
+        let body = "# Real H1\n\n    # Not a heading\n\n## Real H2";
+        let page_id = test_page_id();
+        let sections = parse_sections(body, page_id);
+
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].heading, "Real H1");
+        assert_eq!(sections[1].heading, "Real H2");
+        // The indented code should be in first section's body
+        assert!(sections[0].body.contains("# Not a heading"));
+
+        for section in &sections {
+            let passages = split_passages(section);
+            assert_passage_byte_ranges_valid(&section.body, &passages);
+        }
+    }
+
+    #[test]
     fn test_unicode_offsets() {
         let body = "# Café\n\nCafé has café.\n\n## Résumé";
         let page_id = test_page_id();
@@ -698,6 +799,29 @@ mod tests {
         assert!(passages.len() >= 2);
         for p in &passages {
             assert!(!p.text.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_preamble_with_heading() {
+        // Preamble should be captured as level-0 section before first heading
+        let body = "Intro paragraph before any heading.\n\nMore intro.\n\n# First H1\n\nContent under heading.";
+        let page_id = test_page_id();
+        let sections = parse_sections(body, page_id);
+
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].level, 0);
+        assert!(sections[0].heading.is_empty());
+        assert!(sections[0].heading_path.is_empty());
+        assert!(sections[0].body.contains("Intro paragraph"));
+        assert!(sections[0].body.contains("More intro"));
+        assert_eq!(sections[1].level, 1);
+        assert_eq!(sections[1].heading, "First H1");
+        assert_eq!(sections[1].heading_path, vec!["First H1"]);
+
+        for section in &sections {
+            let passages = split_passages(section);
+            assert_passage_byte_ranges_valid(&section.body, &passages);
         }
     }
 

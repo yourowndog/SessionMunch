@@ -149,6 +149,7 @@ pub async fn run() -> Result<()> {
         Command::FinalizeSession(args) => commands::finalize_session::run(&config, args).await,
         Command::PendingWrites(args) => commands::pending_writes::run(&config, args).await,
         Command::Embed(args) => commands::embed::run(&config, args).await,
+        Command::EmbedPassages(args) => commands::embed::embed_passages(&config, args).await,
         Command::Backfill(args) => commands::backfill::run(&config, args).await,
         Command::GenerateAuthToken(args) => commands::generate_auth_token::run(&config, args),
         Command::SetupAgent(args) => commands::setup_agent::run(&config, args),

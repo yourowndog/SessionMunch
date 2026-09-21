@@ -1,7 +1,7 @@
 //! Tests for replace_page_sections_and_passages and backfill_sections.
 
 use ai_memory_core::{NewPage, PagePath, ProjectId, Tier, WorkspaceId};
-use ai_memory_store::Store;
+use ai_memory_store::{PassageEmbeddingWrite, Store, f32_vec_to_bytes};
 use ai_memory_store::scope::create_explicit_scope;
 use rusqlite::Connection;
 use serde_json::json;
@@ -302,4 +302,220 @@ async fn backfill_batch_bounds() {
         .await
         .unwrap();
     assert_eq!(processed_large_batch, 5);
+}
+
+/// Writing a page through the writer path creates section/passage rows.
+/// A subsequent call to `store_passage_embeddings` persists real embedding
+/// vectors to `page_passage_embeddings`, and `passage_candidates` returns
+/// no more candidates for that triple (the gap is filled).
+///
+/// This is the TDD proof that the dense write path actually produces
+/// rows on a real page upsert — not just test fixtures seeded by hand.
+#[tokio::test]
+async fn upsert_page_then_store_passage_embeddings_persists_dense_vector() {
+    let (_tmp, store) = make_store();
+    let (ws, proj) = make_scope(&store).await;
+
+    // Write a page with a heading + body so it produces at least one passage.
+    let page = make_page(
+        ws,
+        proj,
+        "notes/embed_test.md",
+        "# Embedding Test\n\nThis passage contains distinctive vocabulary for testing.",
+    );
+    let page_id = store.writer.upsert_page(page).await.unwrap();
+
+    // Verify sections and passages were created.
+    let conn = Connection::open(store.db_path()).unwrap();
+    assert!(
+        count_sections(&conn, page_id.as_bytes()) > 0,
+        "upsert must create section rows"
+    );
+    assert!(
+        count_passages(&conn, page_id.as_bytes()) > 0,
+        "upsert must create passage rows"
+    );
+
+    // Passage embeddings table is empty before we write any.
+    let embeds_before: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM page_passage_embeddings",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(embeds_before, 0, "no embeddings written yet");
+
+    // Enumerate candidates (passages missing embeddings for the test triple).
+    const PROVIDER: &str = "test-embedder";
+    const MODEL: &str = "test-model-128";
+    const DIM: u32 = 128;
+
+    let candidates = store
+        .reader
+        .passage_candidates(ws, proj, PROVIDER, MODEL, DIM)
+        .await
+        .unwrap();
+    assert!(
+        !candidates.is_empty(),
+        "page with passages must appear as candidate (no embeddings yet)"
+    );
+
+    // Write deterministic embeddings for each candidate.
+    let writes: Vec<PassageEmbeddingWrite> = candidates
+        .iter()
+        .map(|c| {
+            // Deterministic 128-dim vector: all zeros except index 0 = 1.0
+            let mut vec = vec![0.0f32; DIM as usize];
+            vec[0] = 1.0;
+            PassageEmbeddingWrite {
+                passage_id: c.id,
+                vector_bytes: f32_vec_to_bytes(&vec),
+                provider: PROVIDER.to_string(),
+                model: MODEL.to_string(),
+                dim: DIM,
+            }
+        })
+        .collect();
+
+    store.writer.store_passage_embeddings(writes).await.unwrap();
+
+    // Verify embedding rows landed.
+    let embeds_after: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM page_passage_embeddings",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        embeds_after > 0,
+        "store_passage_embeddings must have written rows to page_passage_embeddings"
+    );
+
+    // Candidates for the same triple must now be empty.
+    let candidates_after = store
+        .reader
+        .passage_candidates(ws, proj, PROVIDER, MODEL, DIM)
+        .await
+        .unwrap();
+    assert!(
+        candidates_after.is_empty(),
+        "passage_candidates must return empty after embeddings are written"
+    );
+}
+
+/// Backfill path: pages written through the writer path that predate the
+/// embedding model should be fillable via `passage_candidates` +
+/// `store_passage_embeddings`. After backfill, `search_passages_hybrid`
+/// with a matching query vector must return hits with `dense_rank` set,
+/// proving the dense stream genuinely participates in RRF fusion.
+#[tokio::test]
+async fn backfill_populates_embeddings_and_dense_stream_participates_in_hybrid_search() {
+    let (_tmp, store) = make_store();
+    let (ws, proj) = make_scope(&store).await;
+
+    // Write two pages with distinctive vocabulary.
+    let page_a = make_page(
+        ws,
+        proj,
+        "notes/alpha.md",
+        "# Alpha Page\n\nThe alpha section contains unique alpha tokens.",
+    );
+    let page_b = make_page(
+        ws,
+        proj,
+        "notes/beta.md",
+        "# Beta Page\n\nThe beta section contains unique beta tokens.",
+    );
+    store.writer.upsert_page(page_a).await.unwrap();
+    store.writer.upsert_page(page_b).await.unwrap();
+
+    // No embeddings yet — all passages are candidates.
+    const PROVIDER: &str = "hybrid-test-embedder";
+    const MODEL: &str = "hash-128";
+    const DIM: u32 = 128;
+
+    let candidates = store
+        .reader
+        .passage_candidates(ws, proj, PROVIDER, MODEL, DIM)
+        .await
+        .unwrap();
+    assert!(
+        !candidates.is_empty(),
+        "both pages should produce passage candidates"
+    );
+
+    // Deterministic embedder: each word hashes to one dimension.
+    fn deterministic_embed(text: &str, dim: usize) -> Vec<f32> {
+        let mut vec = vec![0.0f32; dim];
+        for word in text.split_whitespace() {
+            let w = word.to_lowercase();
+            let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+            for b in w.bytes() {
+                h ^= u64::from(b);
+                h = h.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+            let bucket = (h % dim as u64) as usize;
+            vec[bucket] += 1.0;
+        }
+        let norm = vec.iter().map(|v| v * v).sum::<f32>().sqrt();
+        if norm > 0.0 {
+            for v in &mut vec {
+                *v /= norm;
+            }
+        }
+        vec
+    }
+
+    // Backfill: embed each candidate and write.
+    let writes: Vec<PassageEmbeddingWrite> = candidates
+        .iter()
+        .map(|c| PassageEmbeddingWrite {
+            passage_id: c.id,
+            vector_bytes: f32_vec_to_bytes(&deterministic_embed(&c.text, DIM as usize)),
+            provider: PROVIDER.to_string(),
+            model: MODEL.to_string(),
+            dim: DIM,
+        })
+        .collect();
+    store.writer.store_passage_embeddings(writes).await.unwrap();
+
+    // Query for "alpha" — the dense vector should be computed with the same
+    // embedder, and search_passages_hybrid should fuse dense + lexical via RRF.
+    let query_vec = deterministic_embed("alpha", DIM as usize);
+    let hits = store
+        .reader
+        .search_passages_hybrid(
+            ws,
+            proj,
+            "alpha".to_string(),
+            Some(query_vec),
+            PROVIDER.to_string(),
+            MODEL.to_string(),
+            DIM,
+            10,
+        )
+        .await
+        .unwrap();
+
+    // At least one hit must have surfaced via the dense stream.
+    let dense_participating = hits.iter().filter(|h| h.dense_rank.is_some()).count();
+    assert!(
+        dense_participating > 0,
+        "dense stream must participate in RRF fusion after backfill \
+         (got {} hits total, {} with dense_rank set)",
+        hits.len(),
+        dense_participating
+    );
+
+    // The alpha page should appear in the results.
+    let alpha_found = hits
+        .iter()
+        .take(5)
+        .any(|h| h.page_path.as_str() == "notes/alpha.md");
+    assert!(
+        alpha_found,
+        "alpha page must rank in top 5 for 'alpha' query when dense is enabled"
+    );
 }

@@ -195,7 +195,7 @@ pub struct PassageEmbeddingWrite {
 pub fn upsert_page(conn: &mut Connection, page: &NewPage) -> StoreResult<PageId> {
     let now = Timestamp::now().as_microsecond();
     let tx = conn.transaction()?;
-    let result_id = upsert_page_in_tx(&tx, page, now)?;
+    let (result_id, _passages) = upsert_page_in_tx(&tx, page, now)?;
     tx.commit()?;
     Ok(result_id)
 }
@@ -599,7 +599,7 @@ pub fn upsert_pages_batch(conn: &mut Connection, pages: &[NewPage]) -> StoreResu
     let tx = conn.transaction()?;
     let mut out = Vec::with_capacity(pages.len());
     for page in pages {
-        let id = upsert_page_in_tx(&tx, page, now)?;
+        let (id, _passages) = upsert_page_in_tx(&tx, page, now)?;
         out.push(id);
     }
     tx.commit()?;
@@ -884,7 +884,7 @@ pub(crate) fn upsert_page_in_tx(
     tx: &rusqlite::Transaction<'_>,
     page: &NewPage,
     now: i64,
-) -> StoreResult<PageId> {
+) -> StoreResult<(PageId, Vec<crate::passage_index::CreatedPassage>)> {
     let path_search = path_search_text(page.path.as_str());
     let body_sha256: [u8; 32] = {
         let mut hasher = Sha256::new();
@@ -937,7 +937,7 @@ pub(crate) fn upsert_page_in_tx(
             // page it reaffirmed (P2, docs/design-hindsight-borrowings.md
             // §3) — record the evidence against the still-current id.
             insert_evidence_in_tx(tx, &unchanged_id, &page.evidence, now)?;
-            return Ok(unchanged_id);
+            return Ok((unchanged_id, Vec::new()));
         }
         let frontmatter_str = stamped_frontmatter(conformed, now)?;
         let new_id = PageId::new();
@@ -984,7 +984,7 @@ pub(crate) fn upsert_page_in_tx(
         insert_evidence_in_tx(tx, &new_id, &page.evidence, now)?;
         // Rebuild the section/passage index for this page version in the same
         // transaction (AGENTS.md invariant #3: indexes commit with the data).
-        crate::passage_index::replace_page_sections_and_passages(
+        let passages = crate::passage_index::replace_page_sections_and_passages(
             tx,
             new_id,
             page.workspace_id,
@@ -1002,7 +1002,7 @@ pub(crate) fn upsert_page_in_tx(
                 .map(ai_memory_core::UserId::as_bytes),
             now,
         )?;
-        return Ok(new_id);
+        return Ok((new_id, passages));
     }
     let frontmatter_str = stamped_frontmatter(conformed, now)?;
     let new_id = PageId::new();
@@ -1034,7 +1034,7 @@ pub(crate) fn upsert_page_in_tx(
     insert_evidence_in_tx(tx, &new_id, &page.evidence, now)?;
     // Rebuild the section/passage index for this page version in the same
     // transaction (AGENTS.md invariant #3: indexes commit with the data).
-    crate::passage_index::replace_page_sections_and_passages(
+    let passages = crate::passage_index::replace_page_sections_and_passages(
         tx,
         new_id,
         page.workspace_id,
@@ -1052,7 +1052,7 @@ pub(crate) fn upsert_page_in_tx(
             .map(ai_memory_core::UserId::as_bytes),
         now,
     )?;
-    Ok(new_id)
+    Ok((new_id, passages))
 }
 
 /// Attach the normalized entity set to a new page version (V38). Entity

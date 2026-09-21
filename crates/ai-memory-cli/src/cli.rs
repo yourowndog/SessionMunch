@@ -135,6 +135,9 @@ pub enum Command {
     PendingWrites(PendingWritesArgs),
     /// Compute + store embeddings for every latest page (M9).
     Embed(EmbedArgs),
+    /// Backfill embeddings for passages that were recently added or
+    /// missed during the initial embed pass.
+    EmbedPassages(EmbedPassagesArgs),
     /// Backfill the section/passage index for latest pages (G1 outcome).
     Backfill(BackfillArgs),
     /// Generate a random hex bearer token for AI_MEMORY_AUTH_TOKEN.
@@ -1781,6 +1784,21 @@ pub struct EmbedArgs {
     /// same project sessions write into.
     #[arg(long)]
     pub project: Option<String>,
+}
+
+/// Arguments for `embed-passages`.
+#[derive(Debug, Args)]
+pub struct EmbedPassagesArgs {
+    /// Workspace name (auto-created if absent).
+    #[arg(long)]
+    pub workspace: Option<String>,
+    /// Project name. When omitted, auto-derived from the basename of
+    /// the current git repo root (or CWD if no git repo).
+    #[arg(long)]
+    pub project: Option<String>,
+    /// Maximum number of passages to process.
+    #[arg(long, default_value_t = 100)]
+    pub max_passages: usize,
 }
 
 /// Arguments for `backfill-sections`.

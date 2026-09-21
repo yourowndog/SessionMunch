@@ -21,6 +21,10 @@ pub use scaffolding::looks_like_scaffolding;
 pub mod routing_snippet;
 pub mod sanitize;
 pub mod sections;
+pub use sections::{
+    count_tokens, split_passages, parse_sections, Passage, Section, CrossEncoder,
+    CrossEncoderScore, EnrichmentHook, PassageEnrichment,
+};
 pub mod slots;
 pub mod user;
 mod workstream;

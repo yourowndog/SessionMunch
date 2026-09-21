@@ -54,7 +54,8 @@ use ai_memory_consolidate::{
     EmbedBackfillCounts, EmbedBackfillOptions, ObservationRetention, SourceCounts,
     prune_sources_to_budget, render_auto_improve_telemetry_report_markdown,
     render_curator_report_markdown, run_auto_improve_review, run_auto_improve_telemetry_report,
-    run_curator_report_with_breadth, run_embedding_backfill, run_lint, run_sweep_with_options,
+    run_curator_report_with_breadth, run_embedding_backfill, run_lint,
+    run_passage_embedding_backfill, run_sweep_with_options,
 };
 use ai_memory_core::{
     ActiveProject, AgentKind, AutoImproveProposalId, Capability, DEFAULT_PROJECT_NAME,
@@ -626,6 +627,7 @@ pub fn admin_router_with_sweep_tuning(
         .route("/admin/forget-sweep", post(handle_forget_sweep))
         .route("/admin/backfill-sections", post(handle_backfill_sections))
         .route("/admin/embed", post(handle_embed))
+        .route("/admin/embed-passages", post(handle_embed_passages))
         .route("/admin/commit", post(handle_commit))
         .route("/admin/checkpoints", get(handle_checkpoints))
         .route("/admin/restore-page", post(handle_restore_page))
@@ -742,7 +744,69 @@ fn authz_status(err: ai_memory_core::AuthzError) -> StatusCode {
 // backup
 // ---------------------------------------------------------------------
 
-/// Handler for `POST /admin/backup`.
+/// JSON request body for `POST /admin/embed-passages`.
+#[derive(Deserialize)]
+struct PassageEmbedRequest {
+    /// Workspace name (must already exist).
+    #[serde(default = "default_workspace")]
+    workspace: String,
+    /// Project name (must already exist).
+    #[serde(default = "default_project")]
+    project: String,
+    /// When true, re-embed passages that already have a matching
+    /// `(provider, model, dim)` row.
+    #[serde(default)]
+    reembed: bool,
+    /// When true, count passages that would be embedded without
+    /// calling the embedder or writing anything.
+    #[serde(default)]
+    dry_run: bool,
+}
+
+/// Handler for `POST /admin/embed-passages`.
+///
+/// Backfill passage-embedding vectors for passages that were recently added or
+/// missed during the initial embed pass. Uses the configured embedder and
+/// processes passages in batches.
+async fn handle_embed_passages(
+    State(state): State<Arc<AdminState>>,
+    Json(req): Json<PassageEmbedRequest>,
+) -> impl IntoResponse {
+    let Some(embedder) = state.embedder.as_ref().cloned() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "embedder not configured on server"
+            })),
+        );
+    };
+    let (ws, proj) = match lookup_ws_proj_no_create(&state, &req.workspace, &req.project).await {
+        Ok(ids) => ids,
+        Err(e) => return e,
+    };
+    let opts = EmbedBackfillOptions {
+        reembed: req.reembed,
+        dry_run: req.dry_run,
+    };
+    match run_passage_embedding_backfill(&state.reader, &state.writer, &embedder, ws, proj, opts).await {
+        Ok(counts) => {
+            info!(?counts, "passage embedding backfill complete");
+            (
+                StatusCode::OK,
+                Json(serde_json::to_value(counts).unwrap_or_else(|_| serde_json::json!({}))),
+            )
+        }
+        Err(e) => {
+            warn!(error = %e, "passage embedding backfill failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+        }
+    }
+}
+
+/// Handler for `POST /admin/commit`.
 ///
 /// Snapshots the live SQLite DB via the online backup API, then
 /// tar-gzips `wiki/`, the snapshot, and `config.toml` (if present)
