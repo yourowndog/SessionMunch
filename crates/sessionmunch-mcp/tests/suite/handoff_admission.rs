@@ -13,16 +13,16 @@
 //! same way `autoscope_multiuser.rs` does, and point the chain at a real
 //! webhook host that records every request it receives.
 
-use sessionmunch_mcp::SessionMunchServer;
-use sessionmunch_mcp::auth::{AuthState, require_bearer};
-use sessionmunch_store::Store;
-use sessionmunch_wiki::Wiki;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use serde_json::json;
+use sessionmunch_mcp::SessionMunchServer;
+use sessionmunch_mcp::auth::{AuthState, require_bearer};
+use sessionmunch_store::Store;
+use sessionmunch_wiki::Wiki;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tempfile::TempDir;

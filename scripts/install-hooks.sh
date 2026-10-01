@@ -14,7 +14,7 @@
 #                                                generated-plugin agents print hints)
 #   --to <dir>                               install root (default: $HOME/.sessionmunch/hooks)
 #   --ref <release-tag>                      release tag to pull (default: latest)
-#   --repo <owner/repo>                      release repository (default: akitaonrails/ai-memory)
+#   --repo <owner/repo>                      release repository (default: yourowndog/SessionMunch)
 #
 # After installation, render the matching agent config snippet:
 #   sessionmunch install-hooks --agent claude-code --hooks-dir ~/.sessionmunch/hooks
@@ -28,7 +28,7 @@ set -euo pipefail
 AGENT="claude-code"
 TO="$HOME/.sessionmunch/hooks"
 REF="latest"
-REPO="akitaonrails/ai-memory"
+REPO="yourowndog/SessionMunch"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in

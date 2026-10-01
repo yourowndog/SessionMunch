@@ -4,12 +4,12 @@
 //! verify it appears in `/admin/search` results. Also tests that an
 //! unknown tier returns 422.
 
-use sessionmunch_mcp::{AdminState, admin_router};
-use sessionmunch_store::{DecayParams, Store};
-use sessionmunch_wiki::Wiki;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::json;
+use sessionmunch_mcp::{AdminState, admin_router};
+use sessionmunch_store::{DecayParams, Store};
+use sessionmunch_wiki::Wiki;
 use tempfile::TempDir;
 use tower::ServiceExt;
 

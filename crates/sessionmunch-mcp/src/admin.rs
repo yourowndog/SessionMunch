@@ -48,6 +48,17 @@ use std::io::Seek;
 use std::path::PathBuf;
 use std::pin::Pin;
 
+use axum::Json;
+use axum::Router;
+use axum::body::Body;
+use axum::extract::{Query, State};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, patch, post};
+use flate2::Compression;
+use flate2::write::GzEncoder;
+use serde::{Deserialize, Serialize};
 use sessionmunch_consolidate::{
     AutoImproveReviewConfig, AutoImproveTelemetryParams, AutoImproveTelemetryReport, Bootstrap,
     BootstrapConfig, BootstrapOutcome, BootstrapSource, CuratorParams, CuratorReport,
@@ -72,17 +83,6 @@ use sessionmunch_store::{
 use sessionmunch_wiki::{
     AdmissionContext, AdmissionOp, Markdown, SessionPageFile, Wiki, WikiError, WritePageRequest,
 };
-use axum::Json;
-use axum::Router;
-use axum::body::Body;
-use axum::extract::{Query, State};
-use axum::http::{HeaderMap, StatusCode, header};
-use axum::middleware::Next;
-use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch, post};
-use flate2::Compression;
-use flate2::write::GzEncoder;
-use serde::{Deserialize, Serialize};
 use tokio_util::io::ReaderStream;
 use tracing::{info, warn};
 
@@ -1948,7 +1948,8 @@ fn dry_run_outcome(
     let counts = SourceCounts::from_sources(&kept);
     let chunk_budget =
         sessionmunch_consolidate::effective_chunk_budget(chunk_input_tokens, max_input_tokens);
-    let llm_chunks = sessionmunch_consolidate::plan_bootstrap_chunks(kept.clone(), chunk_budget).len();
+    let llm_chunks =
+        sessionmunch_consolidate::plan_bootstrap_chunks(kept.clone(), chunk_budget).len();
     let outcome = BootstrapOutcome {
         sources_collected: collected,
         sources_sent,
@@ -7427,11 +7428,15 @@ fn map_user_store_err(e: sessionmunch_store::StoreError) -> (StatusCode, Json<se
             StatusCode::CONFLICT,
             Json(serde_json::json!({ "error": msg })),
         ),
-        sessionmunch_store::StoreError::Memory(sessionmunch_core::MemoryError::InvalidUsername(msg))
-        | sessionmunch_store::StoreError::Memory(sessionmunch_core::MemoryError::InvalidEmail(msg))
-        | sessionmunch_store::StoreError::Memory(sessionmunch_core::MemoryError::InvalidPassword(msg)) => {
-            validation_error(msg)
-        }
+        sessionmunch_store::StoreError::Memory(
+            sessionmunch_core::MemoryError::InvalidUsername(msg),
+        )
+        | sessionmunch_store::StoreError::Memory(sessionmunch_core::MemoryError::InvalidEmail(
+            msg,
+        ))
+        | sessionmunch_store::StoreError::Memory(
+            sessionmunch_core::MemoryError::InvalidPassword(msg),
+        ) => validation_error(msg),
         other => internal_err(other.to_string()),
     }
 }
@@ -7439,14 +7444,14 @@ fn map_user_store_err(e: sessionmunch_store::StoreError) -> (StatusCode, Json<se
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::to_bytes;
+    use axum::http::Request;
     use sessionmunch_core::{
         ActorContext, AgentKind, IdentityKey, NewObservation, NewSession, ObservationKind,
     };
     use sessionmunch_core::{Sanitized, Sanitizer};
     use sessionmunch_llm::{ChatRequest, ChatResponse, LlmResult};
     use sessionmunch_store::Store;
-    use axum::body::to_bytes;
-    use axum::http::Request;
     use tempfile::TempDir;
     use tower::ServiceExt;
 
@@ -8998,12 +9003,14 @@ mod tests {
                 .unwrap(),
             ))
             .unwrap();
-        req.extensions_mut().insert(sessionmunch_core::ActorContext {
-            issuer: Some("https://issuer.example".into()),
-            sub: Some("subject-42".into()),
-            ..sessionmunch_core::ActorContext::anonymous()
-        });
-        req.extensions_mut().insert(sessionmunch_core::AuthLevel::Root);
+        req.extensions_mut()
+            .insert(sessionmunch_core::ActorContext {
+                issuer: Some("https://issuer.example".into()),
+                sub: Some("subject-42".into()),
+                ..sessionmunch_core::ActorContext::anonymous()
+            });
+        req.extensions_mut()
+            .insert(sessionmunch_core::AuthLevel::Root);
 
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
@@ -9241,10 +9248,11 @@ mod tests {
         ))
         .layer(axum::middleware::from_fn(
             |mut req: Request<Body>, next: axum::middleware::Next| async move {
-                req.extensions_mut().insert(sessionmunch_core::ActorContext {
-                    user: Some("the-operator".into()),
-                    ..sessionmunch_core::ActorContext::default()
-                });
+                req.extensions_mut()
+                    .insert(sessionmunch_core::ActorContext {
+                        user: Some("the-operator".into()),
+                        ..sessionmunch_core::ActorContext::default()
+                    });
                 next.run(req).await
             },
         ));
@@ -9902,9 +9910,9 @@ mod tests {
     /// webhook and assert it carries the real project name.
     #[tokio::test]
     async fn purge_project_admission_carries_the_project_name() {
-        use sessionmunch_wiki::{AdmissionChain, FailurePolicy, WebhookConfig};
         use axum::http::HeaderMap;
         use axum::routing::post;
+        use sessionmunch_wiki::{AdmissionChain, FailurePolicy, WebhookConfig};
         use std::sync::Mutex;
 
         let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -10011,10 +10019,10 @@ mod tests {
     /// with `403 user '' not allowed to purge_project`.
     #[tokio::test]
     async fn purge_project_admission_carries_the_actor() {
-        use sessionmunch_core::ActorContext;
-        use sessionmunch_wiki::{AdmissionChain, FailurePolicy, WebhookConfig};
         use axum::http::HeaderMap;
         use axum::routing::post;
+        use sessionmunch_core::ActorContext;
+        use sessionmunch_wiki::{AdmissionChain, FailurePolicy, WebhookConfig};
         use std::sync::Mutex;
 
         let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -10127,9 +10135,9 @@ mod tests {
     /// intact.
     #[tokio::test]
     async fn scope_guard_blocks_purge_without_actor_allows_with_actor() {
+        use axum::routing::post;
         use sessionmunch_core::ActorContext;
         use sessionmunch_wiki::{AdmissionChain, FailurePolicy, WebhookConfig};
-        use axum::routing::post;
 
         // scope-guard emulation: allow `purge_project` only when the admission
         // payload's actor is "alice"; deny (403) otherwise.
@@ -10238,9 +10246,9 @@ mod tests {
     /// rejects `/admin/move-project` even though purge/move admission was fixed.
     #[tokio::test]
     async fn move_project_merge_copy_admission_carries_the_actor() {
+        use axum::routing::post;
         use sessionmunch_core::ActorContext;
         use sessionmunch_wiki::{AdmissionChain, FailurePolicy, WebhookConfig};
-        use axum::routing::post;
 
         let app = Router::new().route(
             "/guard",
@@ -10355,8 +10363,9 @@ mod tests {
         let wiki = Wiki::new(tmp.path(), store.writer.clone())
             .unwrap()
             .with_store_reader(store.reader.clone());
-        let active =
-            sessionmunch_core::ActiveProject::with_mode(sessionmunch_core::ActiveProjectMode::PerActor);
+        let active = sessionmunch_core::ActiveProject::with_mode(
+            sessionmunch_core::ActiveProjectMode::PerActor,
+        );
         let mut state = admin_state_for_store(&tmp, &store, wiki);
         state.active_project = active.clone();
         let router = admin_router(state);
@@ -10437,8 +10446,9 @@ mod tests {
         let wiki = Wiki::new(tmp.path(), store.writer.clone())
             .unwrap()
             .with_store_reader(store.reader.clone());
-        let active =
-            sessionmunch_core::ActiveProject::with_mode(sessionmunch_core::ActiveProjectMode::PerActor);
+        let active = sessionmunch_core::ActiveProject::with_mode(
+            sessionmunch_core::ActiveProjectMode::PerActor,
+        );
         let mut state = admin_state_for_store(&tmp, &store, wiki);
         state.active_project = active.clone();
         let router = admin_router(state);
@@ -10742,8 +10752,9 @@ mod tests {
         let wiki = Wiki::new(tmp.path(), store.writer.clone())
             .unwrap()
             .with_store_reader(store.reader.clone());
-        let active =
-            sessionmunch_core::ActiveProject::with_mode(sessionmunch_core::ActiveProjectMode::PerActor);
+        let active = sessionmunch_core::ActiveProject::with_mode(
+            sessionmunch_core::ActiveProjectMode::PerActor,
+        );
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         let mut state = admin_state_for_store(&tmp, &store, wiki);
         state.active_project = active.clone();
@@ -11901,7 +11912,8 @@ mod tests {
         // API credentials require the pepper.
         let router = router.layer(axum::middleware::from_fn(
             |mut req: Request<Body>, next: axum::middleware::Next| async move {
-                req.extensions_mut().insert(sessionmunch_core::AuthLevel::Root);
+                req.extensions_mut()
+                    .insert(sessionmunch_core::AuthLevel::Root);
                 req.extensions_mut().insert(ActorContext::anonymous());
                 next.run(req).await
             },

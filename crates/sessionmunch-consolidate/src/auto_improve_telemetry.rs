@@ -1,9 +1,9 @@
 //! Report-only telemetry for auto-improvement proposal outcomes.
 
-use sessionmunch_core::{ProjectId, WorkspaceId};
-use sessionmunch_store::{AutoImproveTelemetryAggregate, AutoImproveTelemetryCount, ReaderPool};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
+use sessionmunch_core::{ProjectId, WorkspaceId};
+use sessionmunch_store::{AutoImproveTelemetryAggregate, AutoImproveTelemetryCount, ReaderPool};
 
 const US_PER_DAY: i64 = 86_400_000_000;
 

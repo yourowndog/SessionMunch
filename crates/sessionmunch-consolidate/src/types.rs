@@ -1,8 +1,8 @@
 //! Public-facing consolidation types.
 
-use sessionmunch_core::{PageId, PagePath, Tier};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sessionmunch_core::{PageId, PagePath, Tier};
 
 /// JSON-schema-validated structured output from the LLM. The Karpathy
 /// wiki pattern is "compile then keep current"; this is what one

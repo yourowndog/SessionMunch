@@ -102,8 +102,9 @@ mod tests {
 
     #[test]
     fn force_with_explicit_project_stays_scoped() {
-        let cli = Cli::try_parse_from(["sessionmunch", "backfill", "--force", "--project", "myproj"])
-            .unwrap();
+        let cli =
+            Cli::try_parse_from(["sessionmunch", "backfill", "--force", "--project", "myproj"])
+                .unwrap();
         let Command::Backfill(args) = cli.command else {
             panic!("expected backfill command");
         };

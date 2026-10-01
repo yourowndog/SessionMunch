@@ -15,6 +15,7 @@
 
 use std::sync::Arc;
 
+use anyhow::Result;
 use sessionmunch_core::{ActorContext, PagePath, ProjectId, SessionId, WorkspaceId};
 use sessionmunch_llm::LlmProvider;
 use sessionmunch_store::{
@@ -22,7 +23,6 @@ use sessionmunch_store::{
     ReaderPool, SkippedProposal, StageAutoImproveRun, WriterHandle,
 };
 use sessionmunch_wiki::Wiki;
-use anyhow::Result;
 use tracing::info;
 
 use crate::{AutoImproveReport, AutoImproveReviewConfig, run_auto_improve_review};

@@ -23,17 +23,17 @@
 //! operator actually configures: `[auth].actor_proxy_bearer_token` plus an
 //! ingress asserting `X-Memory-Actor-Issuer` and `X-Memory-Actor-Sub`.
 
-use sessionmunch_core::{ActorContext, IdentityKey};
-use sessionmunch_mcp::SessionMunchServer;
-use sessionmunch_mcp::auth::{AuthState, require_bearer};
-use sessionmunch_store::Store;
-use sessionmunch_wiki::Wiki;
 use axum::Router;
 use axum::body::Body;
 use axum::http::Request;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use serde_json::{Value, json};
+use sessionmunch_core::{ActorContext, IdentityKey};
+use sessionmunch_mcp::SessionMunchServer;
+use sessionmunch_mcp::auth::{AuthState, require_bearer};
+use sessionmunch_store::Store;
+use sessionmunch_wiki::Wiki;
 use std::sync::Arc;
 use tempfile::TempDir;
 use tower::ServiceExt;

@@ -52,10 +52,10 @@ pub(crate) fn run_to(conn: &mut rusqlite::Connection, target: u32) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::{Connection, params};
     use sessionmunch_core::{
         AgentKind, HandoffId, NewObservation, NewSession, ObservationKind, SessionId,
     };
-    use rusqlite::{Connection, params};
 
     /// A store migrated by a newer build (an applied version above anything
     /// this binary embeds) must fail to open with the actionable

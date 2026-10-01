@@ -306,7 +306,9 @@ fn emit_extension_setup_hint(args: &SetupAgentArgs) -> Result<()> {
             "MCP tools come through the same generated Pi bridge extension; no native mcp.json is written."
         );
     } else {
-        println!("Also run `sessionmunch install-mcp --client {mcp_client}` to wire MCP separately.");
+        println!(
+            "Also run `sessionmunch install-mcp --client {mcp_client}` to wire MCP separately."
+        );
     }
     Ok(())
 }

@@ -5,6 +5,10 @@
 //! with `tower::ServiceExt::oneshot`.
 
 use super::common::{get, post, spawn_capture_hook};
+use axum::Router;
+use axum::http::StatusCode;
+use axum::routing::post as route_post;
+use serde_json::json;
 use sessionmunch_core::{
     ActorContext, AgentKind, NewHandoff, NewObservation, NewSession, ObservationKind, PagePath,
     ProjectId, Sanitized, Sanitizer, SessionId, Tier, WorkspaceId,
@@ -14,10 +18,6 @@ use sessionmunch_store::{DecayParams, PrepareWorkstreamRun, Store, WorkstreamSel
 use sessionmunch_wiki::{
     AdmissionChain, AdmissionOp, FailurePolicy, WebhookConfig, Wiki, WritePageRequest,
 };
-use axum::Router;
-use axum::http::StatusCode;
-use axum::routing::post as route_post;
-use serde_json::json;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 

@@ -7,13 +7,13 @@
 //! - the seeded wiki file appears in the tarball at the per-project path,
 //! - the seeded file's content inside the tarball matches the original body.
 
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use flate2::read::GzDecoder;
 use sessionmunch_core::{PagePath, Tier};
 use sessionmunch_mcp::{AdminState, admin_router};
 use sessionmunch_store::{DecayParams, Store};
 use sessionmunch_wiki::{Wiki, WritePageRequest};
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
-use flate2::read::GzDecoder;
 use std::io::Read as _;
 use tar::Archive;
 use tempfile::TempDir;

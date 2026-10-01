@@ -7,9 +7,9 @@
 //! operator was actually in, and the caller's cutoff keeps a long-idle server
 //! from resurrecting a scope the live pointer would have expired.
 
+use rusqlite::{Connection, params};
 use sessionmunch_core::{ProjectId, WorkspaceId};
 use sessionmunch_store::Store;
-use rusqlite::{Connection, params};
 
 const NOW: i64 = 1_700_000_000_000_000;
 

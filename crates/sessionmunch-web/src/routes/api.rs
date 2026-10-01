@@ -3,17 +3,17 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use axum::extract::{Path, Query, RawQuery, State};
+use axum::http::{HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use axum::{Json, Router};
+use serde::{Deserialize, Serialize};
 use sessionmunch_core::{ObservationKind, PageId, PagePath, ProjectId, SessionId, WorkspaceId};
 use sessionmunch_store::{
     BriefingSnapshot, HealthPage, ObservationOrder, ObservationPage, ObservationRecord, PageHit,
     RelatedPage, ScopeName, ScopeResolutionError, SessionSummary, lookup_existing_scope,
     resolve_many_existing_scopes,
 };
-use axum::extract::{Path, Query, RawQuery, State};
-use axum::http::{HeaderValue, StatusCode, header};
-use axum::response::{IntoResponse, Response};
-use axum::{Json, Router};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::state::WebState;
@@ -719,12 +719,15 @@ async fn handoffs_handler(
     let (workspace_id, project_id) = lookup_project(&state, &workspace, &project).await?;
     let handoff_state = match query.state.as_deref().map(str::trim) {
         None | Some("") => None,
-        Some(raw) => Some(raw.parse::<sessionmunch_core::HandoffState>().map_err(|_| {
-            json_error(
-                StatusCode::BAD_REQUEST,
-                format!("unknown handoff state: {raw}"),
-            )
-        })?),
+        Some(raw) => Some(
+            raw.parse::<sessionmunch_core::HandoffState>()
+                .map_err(|_| {
+                    json_error(
+                        StatusCode::BAD_REQUEST,
+                        format!("unknown handoff state: {raw}"),
+                    )
+                })?,
+        ),
     };
     let level = auth.as_ref().map(|axum::Extension(level)| *level);
     let owner_filter = if query.all_owners {
@@ -1384,8 +1387,8 @@ fn hex_value(byte: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::{internal_error, serves_handoff_body};
-    use sessionmunch_core::{AuthLevel, OwnerFilter};
     use axum::{Extension, body::to_bytes};
+    use sessionmunch_core::{AuthLevel, OwnerFilter};
 
     /// The `all_owners` recovery switch routes `Any` into the listing. Reading
     /// past ownership must cost root — not merely a token the server accepted,

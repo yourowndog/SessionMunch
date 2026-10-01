@@ -483,7 +483,7 @@ fn posix_wrapper_auto_selects_podman_when_docker_is_unavailable() {
         "Podman was not invoked: {args}"
     );
     assert!(
-        flags.contains(&"docker.io/akitaonrails/ai-memory:latest"),
+        flags.contains(&"docker.io/yourowndog/sessionmunch:latest"),
         "default image must not require Podman short-name resolution: {args}"
     );
 }
@@ -543,7 +543,8 @@ fn wrapper_updates_and_install_docs_use_verified_release_assets() {
     for path in ["README.md", "docs/install.md", "docs/windows.md"] {
         let docs = read_repo(path);
         assert!(
-            !docs.contains("raw.githubusercontent.com/akitaonrails/ai-memory/main/bin/sessionmunch"),
+            !docs
+                .contains("raw.githubusercontent.com/akitaonrails/ai-memory/main/bin/sessionmunch"),
             "{path} must not install an executable from mutable main"
         );
     }

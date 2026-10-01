@@ -102,6 +102,6 @@ stale script cannot ship alongside a newer binary.
 Docker users can generate a script without a local install:
 
 ```bash
-docker run --rm akitaonrails/ai-memory:latest completions fish \
+docker run --rm yourowndog/sessionmunch:latest completions fish \
   > ~/.config/fish/completions/sessionmunch.fish
 ```

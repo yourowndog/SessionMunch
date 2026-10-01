@@ -1,6 +1,8 @@
 //! Reader for the append-only `audit_log` table.
 
-use sessionmunch_core::{NewPage, NewUser, PagePath, ProjectId, Tier, UserId, UserRole, WorkspaceId};
+use sessionmunch_core::{
+    NewPage, NewUser, PagePath, ProjectId, Tier, UserId, UserRole, WorkspaceId,
+};
 use sessionmunch_store::{AuditLogFilter, Store};
 
 async fn seed_page(

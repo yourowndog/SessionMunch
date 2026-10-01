@@ -1,11 +1,11 @@
 //! Struct mappings for page_sections and page_passages tables.
 
 use crate::error::StoreResult;
+use rusqlite::params;
+use serde::{Deserialize, Serialize};
 use sessionmunch_core::sections;
 use sessionmunch_core::sections::count_tokens;
 use sessionmunch_core::{PageId, ProjectId, WorkspaceId};
-use rusqlite::params;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 

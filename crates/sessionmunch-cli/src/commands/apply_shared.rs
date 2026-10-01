@@ -395,7 +395,8 @@ mod tests {
                         [other]\n\
                         keep = \"this\"\n";
         let out = mutate_toml(original, |doc| {
-            doc["mcp_servers"]["sessionmunch"]["url"] = toml_edit::value("http://homelab:49374/mcp");
+            doc["mcp_servers"]["sessionmunch"]["url"] =
+                toml_edit::value("http://homelab:49374/mcp");
             Ok(())
         })
         .unwrap();

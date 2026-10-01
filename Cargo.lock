@@ -3341,7 +3341,7 @@ dependencies = [
 
 [[package]]
 name = "sessionmunch-cli"
-version = "2.2.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -3390,7 +3390,7 @@ dependencies = [
 
 [[package]]
 name = "sessionmunch-consolidate"
-version = "2.2.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3415,7 +3415,7 @@ dependencies = [
 
 [[package]]
 name = "sessionmunch-core"
-version = "2.2.1"
+version = "0.1.0"
 dependencies = [
  "jiff",
  "pulldown-cmark",
@@ -3431,7 +3431,7 @@ dependencies = [
 
 [[package]]
 name = "sessionmunch-eval"
-version = "2.2.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3453,7 +3453,7 @@ dependencies = [
 
 [[package]]
 name = "sessionmunch-hooks"
-version = "2.2.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3478,7 +3478,7 @@ dependencies = [
 
 [[package]]
 name = "sessionmunch-llm"
-version = "2.2.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3507,7 +3507,7 @@ dependencies = [
 
 [[package]]
 name = "sessionmunch-mcp"
-version = "2.2.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3541,7 +3541,7 @@ dependencies = [
 
 [[package]]
 name = "sessionmunch-store"
-version = "2.2.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -3567,11 +3567,11 @@ dependencies = [
 
 [[package]]
 name = "sessionmunch-test-support"
-version = "2.2.1"
+version = "0.1.0"
 
 [[package]]
 name = "sessionmunch-web"
-version = "2.2.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "askama",
@@ -3594,7 +3594,7 @@ dependencies = [
 
 [[package]]
 name = "sessionmunch-wiki"
-version = "2.2.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3626,7 +3626,7 @@ dependencies = [
 
 [[package]]
 name = "sessionmunch-workstream"
-version = "2.2.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "jiff",

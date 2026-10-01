@@ -4,11 +4,11 @@
 //! hot-path UNIQUE lookup. Human passwords never live in this module's
 //! KDF — see [`crate::password`].
 
-use sessionmunch_core::{NewUser, User, UserId, UserRole};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use jiff::Timestamp;
 use rusqlite::{Connection, OptionalExtension, params};
+use sessionmunch_core::{NewUser, User, UserId, UserRole};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
@@ -707,8 +707,8 @@ pub(crate) fn row_to_user(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::R
 mod tests {
     use super::*;
     use crate::api_credentials;
-    use sessionmunch_core::NewUser;
     use rusqlite::Connection;
+    use sessionmunch_core::NewUser;
 
     fn fresh_conn() -> Connection {
         let mut conn = Connection::open_in_memory().unwrap();

@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use sessionmunch_core::WorkstreamCheckpoint;
 use anyhow::{Context as _, Result};
+use sessionmunch_core::WorkstreamCheckpoint;
 use sha2::{Digest as _, Sha256};
 
 /// Stable identity used to select a workstream without relying only on CWD.

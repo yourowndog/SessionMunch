@@ -6,13 +6,13 @@ use std::io::{BufRead as _, BufReader, Read as _, Seek as _, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use sessionmunch_core::{
-    AgentKind, MANAGED_WORKSTREAM_PACKET_MARKER, NewWorkstreamEvent, WorkstreamEventKind,
-};
 use anyhow::{Context as _, Result, anyhow};
 use rusqlite::{Connection, OpenFlags, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sessionmunch_core::{
+    AgentKind, MANAGED_WORKSTREAM_PACKET_MARKER, NewWorkstreamEvent, WorkstreamEventKind,
+};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 

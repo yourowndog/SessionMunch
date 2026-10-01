@@ -1,8 +1,8 @@
 //! Pure, IO-free capture policy evaluation for native hooks and server defense.
 
-use sessionmunch_core::AgentKind;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value, json};
+use sessionmunch_core::AgentKind;
 
 /// Maximum number of `ignore_paths` entries (entries, not bytes).
 pub const MAX_IGNORE_PATTERNS: usize = 128;

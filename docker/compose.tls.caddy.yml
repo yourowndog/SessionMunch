@@ -18,7 +18,7 @@ name: sessionmunch-tls
 
 services:
   sessionmunch:
-    image: akitaonrails/ai-memory:latest
+    image: yourowndog/sessionmunch:latest
     container_name: sessionmunch
     restart: unless-stopped
     # No host port. Caddy reaches sessionmunch over the internal docker

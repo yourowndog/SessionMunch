@@ -11,11 +11,11 @@
 //! - `SESSIONMUNCH_SERVER_URL` — base URL of the running server.
 //! - `SESSIONMUNCH_AUTH_TOKEN` — bearer token if the server has auth enabled.
 
+use anyhow::{Context, Result};
 use sessionmunch_consolidate::{
     BootstrapOutcome, BootstrapSource, SourceCounts, collect_sources, discover_repo_root,
     prune_sources_to_budget,
 };
-use anyhow::{Context, Result};
 use tracing::info;
 
 use crate::cli::BootstrapArgs;
@@ -181,7 +181,8 @@ fn local_dry_run(
     let kept_counts = SourceCounts::from_sources(&kept);
     let chunk_budget =
         sessionmunch_consolidate::effective_chunk_budget(chunk_input_tokens, max_input_tokens);
-    let llm_chunks = sessionmunch_consolidate::plan_bootstrap_chunks(kept.clone(), chunk_budget).len();
+    let llm_chunks =
+        sessionmunch_consolidate::plan_bootstrap_chunks(kept.clone(), chunk_budget).len();
     BootstrapOutcome {
         sources_collected,
         sources_sent: kept.len(),

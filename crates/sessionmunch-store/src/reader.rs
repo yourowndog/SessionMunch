@@ -11,17 +11,17 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use jiff::Timestamp;
+use parking_lot::Mutex;
+use rusqlite::types::Value;
+use rusqlite::{Connection, OpenFlags, OptionalExtension, params, params_from_iter};
+use serde::{Deserialize, Serialize};
 use sessionmunch_core::{
     AgentKind, AutoImproveProposalId, AutoImproveRunId, Handoff, HandoffContent, HandoffId,
     HandoffLifecycle, HandoffOrigin, HandoffScope, HandoffState, IdentityKey, ManagedRunId,
     Observation, ObservationId, ObservationKind, OwnerFilter, PageId, PagePath, ProjectId,
     SessionId, User, UserId, WorkspaceId, WorkstreamEvent, WorkstreamId,
 };
-use jiff::Timestamp;
-use parking_lot::Mutex;
-use rusqlite::types::Value;
-use rusqlite::{Connection, OpenFlags, OptionalExtension, params, params_from_iter};
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 // `sessionmunch_core::Tier` is referenced via fully-qualified path inside the
 // DecayCandidate struct definition above to avoid a top-level import
@@ -9426,9 +9426,9 @@ fn row_to_handoff(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<Hando
                     .map(jiff::Timestamp::from_microsecond)
                     .transpose()
                     .map_err(|e| {
-                        StoreError::Memory(sessionmunch_core::MemoryError::MalformedRecord(format!(
-                            "bad accepted_at: {e}"
-                        )))
+                        StoreError::Memory(sessionmunch_core::MemoryError::MalformedRecord(
+                            format!("bad accepted_at: {e}"),
+                        ))
                     })?,
                 accepted_by_session: accepted_session,
                 accepted_by_user,

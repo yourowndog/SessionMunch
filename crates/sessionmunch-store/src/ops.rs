@@ -4865,11 +4865,11 @@ pub(crate) mod tests {
     //! deserve direct coverage so a regression surfaces with a
     //! one-line diff instead of a cascading e2e failure.
     use super::*;
+    use rusqlite::Connection;
     use sessionmunch_core::{
         FeedbackKind, LinkTarget, NewHandoff, NewPage, NewSession, PageEvidence, PageEvidenceKind,
         PagePath, ProjectId, Tier, UserId, WorkspaceId,
     };
-    use rusqlite::Connection;
     use std::io::Write;
     use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
@@ -9151,9 +9151,13 @@ pub(crate) mod tests {
         // Old but has a managed workstream: keep (not hollow).
         let with_workstream = get_or_create_project(&mut conn, &ws, "managed-only", None).unwrap();
         // Reserved + hollow + old: keep.
-        let global =
-            get_or_create_project(&mut conn, &ws, sessionmunch_core::GLOBAL_SCOPE_PROJECT, None)
-                .unwrap();
+        let global = get_or_create_project(
+            &mut conn,
+            &ws,
+            sessionmunch_core::GLOBAL_SCOPE_PROJECT,
+            None,
+        )
+        .unwrap();
 
         let eight_days_us: i64 = 8 * 24 * 60 * 60 * 1_000_000;
         for id in [&hollow, &with_data, &with_workstream, &global] {

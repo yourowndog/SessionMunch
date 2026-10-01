@@ -10,12 +10,12 @@
 //! `{provider, model, dim}` triples are a distinct family from plain
 //! `openai`; (4) the factory refuses to build without a base URL.
 
+use secrecy::SecretString;
+use serde_json::json;
 use sessionmunch_llm::{
     Embedder, EmbedderChoice, EmbedderConfig, LlmError, OpenAiCompatEmbedder, build_embedder,
     default_embedding_dim, try_default_embedding_dim,
 };
-use secrecy::SecretString;
-use serde_json::json;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 

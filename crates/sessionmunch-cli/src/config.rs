@@ -9,11 +9,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use sessionmunch_llm::{
-    AuthRequirement, Candidate, EmbedderChoice, EmbedderConfig, ExtraHeaders, FallbackLlmProvider,
-    LlmError, LlmProvider, LlmResult, OPENCODE_DEFAULT_MODEL, ProviderAuth, ProviderChoice,
-    ProviderConfig, ReasoningEffort, build_provider,
-};
 use anyhow::{Context, Result};
 use figment::{
     Figment,
@@ -21,6 +16,11 @@ use figment::{
 };
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
+use sessionmunch_llm::{
+    AuthRequirement, Candidate, EmbedderChoice, EmbedderConfig, ExtraHeaders, FallbackLlmProvider,
+    LlmError, LlmProvider, LlmResult, OPENCODE_DEFAULT_MODEL, ProviderAuth, ProviderChoice,
+    ProviderConfig, ReasoningEffort, build_provider,
+};
 
 /// Default HTTP bind address for the local single-user server.
 pub const DEFAULT_BIND: &str = "127.0.0.1:49374";
@@ -908,8 +908,10 @@ impl Default for AutoImproveSettings {
                 sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_MAX_REJECTION_CONTEXT,
             rejection_context_days:
                 sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_REJECTION_CONTEXT_DAYS,
-            max_final_body_chars: sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_MAX_FINAL_BODY_CHARS,
-            max_rule_page_tokens: sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_MAX_RULE_PAGE_TOKENS,
+            max_final_body_chars:
+                sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_MAX_FINAL_BODY_CHARS,
+            max_rule_page_tokens:
+                sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_MAX_RULE_PAGE_TOKENS,
             max_procedure_page_tokens:
                 sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_MAX_PROCEDURE_PAGE_TOKENS,
             include_raw_fallback: false,
@@ -2389,7 +2391,10 @@ mod tests {
             ..Config::default()
         };
         let err = cfg.reranker_choice().unwrap_err();
-        assert!(err.to_string().contains("SESSIONMUNCH_RERANKER=cross-encoder"));
+        assert!(
+            err.to_string()
+                .contains("SESSIONMUNCH_RERANKER=cross-encoder")
+        );
     }
 
     #[test]
@@ -2787,7 +2792,10 @@ mod tests {
             Some(SecretString::from("override-key")),
         );
 
-        assert_eq!(auth.source(), sessionmunch_llm::CredentialSource::CliOverride);
+        assert_eq!(
+            auth.source(),
+            sessionmunch_llm::CredentialSource::CliOverride
+        );
         assert_eq!(
             auth.require_api_key().unwrap().expose_secret(),
             "override-key"

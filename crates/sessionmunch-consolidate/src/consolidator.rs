@@ -7,7 +7,9 @@
 
 use std::sync::Arc;
 
-use sessionmunch_core::{AgentKind, Observation, PagePath, ProjectId, SessionId, Tier, WorkspaceId};
+use sessionmunch_core::{
+    AgentKind, Observation, PagePath, ProjectId, SessionId, Tier, WorkspaceId,
+};
 use sessionmunch_llm::{
     ChatMessage, ChatRequest, LlmError, LlmProvider, Role, complete_structured_with_operation_id,
 };
@@ -1419,8 +1421,8 @@ const SYSTEM_PROMPT: &str = include_str!("../prompts/single_consolidate_system.m
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sessionmunch_core::{ObservationId, ObservationKind, ProjectId, SessionId, WorkspaceId};
     use jiff::Timestamp;
+    use sessionmunch_core::{ObservationId, ObservationKind, ProjectId, SessionId, WorkspaceId};
 
     /// Helper for prompt construction tests.
     fn obs_of_size(body_len: usize) -> Observation {

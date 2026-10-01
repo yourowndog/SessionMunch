@@ -5,9 +5,9 @@
 //! own. The batch `move-session` must see those sessions, so "touching a
 //! scope" is: a `sessions` row in it OR at least one observation in it.
 
+use rusqlite::{Connection, params};
 use sessionmunch_core::{ProjectId, SessionId, WorkspaceId};
 use sessionmunch_store::Store;
-use rusqlite::{Connection, params};
 
 fn id(n: u8) -> [u8; 16] {
     let mut b = [0u8; 16];

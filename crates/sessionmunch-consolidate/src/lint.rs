@@ -17,14 +17,14 @@
 /// at compile time from `prompts/lint_system.md`.
 const LINT_SYSTEM_PROMPT: &str = include_str!("../prompts/lint_system.md");
 
-use sessionmunch_core::{PagePath, ProjectId, Tier, WorkspaceId};
-use sessionmunch_llm::{ChatMessage, ChatRequest, LlmProvider, Role, complete_structured};
-use sessionmunch_store::{DecayCandidate, ReaderPool};
-use sessionmunch_wiki::{AdmissionContext, AdmissionOp, Wiki, WritePageRequest};
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sessionmunch_core::{PagePath, ProjectId, Tier, WorkspaceId};
+use sessionmunch_llm::{ChatMessage, ChatRequest, LlmProvider, Role, complete_structured};
+use sessionmunch_store::{DecayCandidate, ReaderPool};
+use sessionmunch_wiki::{AdmissionContext, AdmissionOp, Wiki, WritePageRequest};
 use thiserror::Error;
 use tracing::warn;
 

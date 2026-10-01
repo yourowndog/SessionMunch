@@ -11,13 +11,13 @@
 //! reading the SQL: nothing is deleted at the shipped defaults, and the FTS
 //! index stops matching what the prune removed.
 
+use rusqlite::{Connection, params};
 use sessionmunch_consolidate::{ObservationRetention, run_sweep, run_sweep_with_options};
 use sessionmunch_core::{
     AgentKind, NewObservation, NewPage, NewSession, ObservationKind, PageId, PagePath, ProjectId,
     Sanitized, Sanitizer, SessionId, Tier, WorkspaceId,
 };
 use sessionmunch_store::{DecayParams, Store, WriterHandle};
-use rusqlite::{Connection, params};
 use tempfile::TempDir;
 
 const US_PER_DAY: i64 = 86_400_000_000;

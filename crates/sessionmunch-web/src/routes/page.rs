@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
-use sessionmunch_core::PagePath;
 use askama::Template;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
+use sessionmunch_core::PagePath;
 
 use crate::markdown;
 use crate::state::WebState;

@@ -29,13 +29,13 @@
 
 use std::collections::{HashMap, HashSet};
 
+use jiff::Timestamp;
+use serde::Serialize;
 use sessionmunch_core::{PageId, ProjectId, Tier, WorkspaceId};
 use sessionmunch_store::{
     DecayCandidate, DecayParams, ReaderPool, WriterHandle, retention_score_with_breadth,
 };
 use sessionmunch_wiki::Wiki;
-use jiff::Timestamp;
-use serde::Serialize;
 use thiserror::Error;
 
 /// One evicted page surfaced in the [`SweepReport`].

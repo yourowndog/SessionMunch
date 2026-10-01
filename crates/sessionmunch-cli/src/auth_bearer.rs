@@ -6,8 +6,8 @@
 
 use std::path::Path;
 
-use sessionmunch_llm::{OidcToken, refresh_access_token};
 use secrecy::ExposeSecret as _;
+use sessionmunch_llm::{OidcToken, refresh_access_token};
 
 /// Resolve the bearer for one server request: explicit/static token first,
 /// stored OIDC token second, and no token last.

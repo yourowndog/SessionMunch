@@ -18,7 +18,8 @@ fn repo_root() -> PathBuf {
 #[test]
 fn codebase_has_no_telemetry_or_analytics_sdks() {
     let root = repo_root();
-    let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).expect("read workspace Cargo.toml");
+    let cargo_toml =
+        fs::read_to_string(root.join("Cargo.toml")).expect("read workspace Cargo.toml");
 
     // Ensure no telemetry / tracking crates exist in workspace dependencies
     let forbidden_crates = [
@@ -34,7 +35,8 @@ fn codebase_has_no_telemetry_or_analytics_sdks() {
 
     for bad in &forbidden_crates {
         assert!(
-            !cargo_toml.contains(&format!("{}\n", bad)) && !cargo_toml.contains(&format!("{}\t", bad)),
+            !cargo_toml.contains(&format!("{}\n", bad))
+                && !cargo_toml.contains(&format!("{}\t", bad)),
             "Workspace Cargo.toml must not depend on telemetry sdk: {}",
             bad
         );

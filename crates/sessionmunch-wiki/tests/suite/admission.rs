@@ -12,15 +12,15 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use sessionmunch_core::{ActorContext, PagePath};
-use sessionmunch_wiki::{
-    AdmissionChain, AdmissionContext, AdmissionOp, FailurePolicy, Markdown, WebhookConfig,
-};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::{Value, json};
+use sessionmunch_core::{ActorContext, PagePath};
+use sessionmunch_wiki::{
+    AdmissionChain, AdmissionContext, AdmissionOp, FailurePolicy, Markdown, WebhookConfig,
+};
 
 /// Spawn an axum app on a random loopback port. Returns the base URL.
 async fn spawn_server(app: Router) -> String {

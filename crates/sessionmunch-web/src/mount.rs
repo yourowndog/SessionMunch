@@ -11,14 +11,14 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use sessionmunch_store::ReaderPool;
-use sessionmunch_wiki::Wiki;
 use anyhow::{Context, Result};
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderName, Method, Request, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use sessionmunch_store::ReaderPool;
+use sessionmunch_wiki::Wiki;
 use tower::service_fn;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
@@ -646,7 +646,8 @@ mod tests {
             dest_free_bytes: None,
         };
         std::fs::write(
-            tmp.path().join(sessionmunch_wiki::backup::BACKUP_RECEIPT_FILE),
+            tmp.path()
+                .join(sessionmunch_wiki::backup::BACKUP_RECEIPT_FILE),
             serde_json::to_vec(&receipt).unwrap(),
         )
         .unwrap();
@@ -694,7 +695,8 @@ mod tests {
             dest_free_bytes: None,
         };
         std::fs::write(
-            tmp.path().join(sessionmunch_wiki::backup::BACKUP_RECEIPT_FILE),
+            tmp.path()
+                .join(sessionmunch_wiki::backup::BACKUP_RECEIPT_FILE),
             serde_json::to_vec(&receipt).unwrap(),
         )
         .unwrap();

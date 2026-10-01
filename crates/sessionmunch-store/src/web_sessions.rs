@@ -1,10 +1,10 @@
 //! Web sessions: SHA-256 of `ams_…` secrets (no pepper) plus CSRF hashes.
 
-use sessionmunch_core::{SESSION_SECRET_PREFIX, User, UserId};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use jiff::Timestamp;
 use rusqlite::{Connection, OptionalExtension, params};
+use sessionmunch_core::{SESSION_SECRET_PREFIX, User, UserId};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 

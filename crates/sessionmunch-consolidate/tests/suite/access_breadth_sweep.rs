@@ -10,13 +10,13 @@
 //! prediction of what the sweep will evict, so a page the sweep keeps must not
 //! be reported cold.
 
+use rusqlite::params;
 use sessionmunch_consolidate::{
     CuratorParams, CuratorReport, run_curator_report_with_breadth, run_sweep,
     run_sweep_with_breadth,
 };
 use sessionmunch_core::{IdentityKey, NewPage, PageId, PagePath, ProjectId, Tier, WorkspaceId};
 use sessionmunch_store::{DecayParams, Store, WriterHandle, retention_score};
-use rusqlite::params;
 use tempfile::TempDir;
 
 const US_PER_DAY: i64 = 86_400_000_000;

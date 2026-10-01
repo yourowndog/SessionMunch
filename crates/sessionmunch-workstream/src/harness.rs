@@ -3,8 +3,8 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use sessionmunch_core::AgentKind;
 use anyhow::Result;
+use sessionmunch_core::AgentKind;
 use uuid::Uuid;
 
 /// Harnesses with native-session and transcript adapters.

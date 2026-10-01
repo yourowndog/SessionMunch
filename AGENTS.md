@@ -1,7 +1,7 @@
 <!-- sessionmunch:start -->
 ## Long-term memory (sessionmunch)
 
-This project uses [sessionmunch](https://github.com/akitaonrails/ai-memory)
+This project uses [sessionmunch](https://github.com/yourowndog/SessionMunch)
 for cross-session continuity.
 
 **Choose project scope from the MCP client's identity support.**

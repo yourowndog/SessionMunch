@@ -73,9 +73,9 @@ Checksum helpers for version `X.Y.Z`:
 version=X.Y.Z
 
 # Source package tarball
-curl -fsSL "https://github.com/akitaonrails/ai-memory/archive/refs/tags/v${version}.tar.gz" | sha256sum
+curl -fsSL "https://github.com/yourowndog/SessionMunch/archive/refs/tags/v${version}.tar.gz" | sha256sum
 
 # Binary package release artifacts
-curl -fsSL "https://github.com/akitaonrails/ai-memory/releases/download/v${version}/sessionmunch-linux-x86_64.tar.gz.sha256"
-curl -fsSL "https://github.com/akitaonrails/ai-memory/releases/download/v${version}/sessionmunch-linux-aarch64.tar.gz.sha256"
+curl -fsSL "https://github.com/yourowndog/SessionMunch/releases/download/v${version}/sessionmunch-linux-x86_64.tar.gz.sha256"
+curl -fsSL "https://github.com/yourowndog/SessionMunch/releases/download/v${version}/sessionmunch-linux-aarch64.tar.gz.sha256"
 ```

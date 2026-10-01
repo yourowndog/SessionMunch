@@ -8,11 +8,11 @@
 //! exist elsewhere, and still find the session in the listing of the scope
 //! that holds its work.
 
+use rusqlite::{Connection, params};
 use sessionmunch_core::{
     ActorContext, IdentityKey, ObservationKind, OwnerFilter, ProjectId, SessionId, WorkspaceId,
 };
 use sessionmunch_store::{ObservationOrder, ObservationPage, Store};
-use rusqlite::{Connection, params};
 
 const NOW: i64 = 1_700_000_000_000_000;
 

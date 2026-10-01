@@ -475,8 +475,8 @@ fn has_high_signal_terms(obs: &Observation) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sessionmunch_core::{ObservationId, ProjectId, SessionId, WorkspaceId};
     use jiff::Timestamp;
+    use sessionmunch_core::{ObservationId, ProjectId, SessionId, WorkspaceId};
 
     fn obs(
         idx: usize,

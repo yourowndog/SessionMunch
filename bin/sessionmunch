@@ -39,7 +39,7 @@
 #                           paths under $HOME are covered by the home bind mount)
 set -euo pipefail
 
-IMAGE="${SESSIONMUNCH_IMAGE:-docker.io/akitaonrails/ai-memory:latest}"
+IMAGE="${SESSIONMUNCH_IMAGE:-docker.io/yourowndog/sessionmunch:latest}"
 if [ -n "${SESSIONMUNCH_DOCKER:-}" ]; then
   DOCKER="${SESSIONMUNCH_DOCKER}"
 elif command -v docker >/dev/null 2>&1; then
@@ -55,7 +55,7 @@ DATA_VOLUME="${SESSIONMUNCH_DATA_VOLUME:-sessionmunch-data}"
 CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/sessionmunch"
 VERSION_CHECK_FILE="${CACHE_DIR}/last-version-check"
 HOOKS_STAGE_DIR="${HOME}/.local/share/sessionmunch/hooks"
-WRAPPER_URL="${SESSIONMUNCH_WRAPPER_URL:-https://github.com/akitaonrails/ai-memory/releases/latest/download/sessionmunch-wrapper}"
+WRAPPER_URL="${SESSIONMUNCH_WRAPPER_URL:-https://github.com/yourowndog/SessionMunch/releases/latest/download/sessionmunch-wrapper}"
 WRAPPER_SHA256_URL="${SESSIONMUNCH_WRAPPER_SHA256_URL:-${WRAPPER_URL}.sha256}"
 
 # ---- version-check helpers (best-effort; never block the wrapper) --------
@@ -485,7 +485,7 @@ native_host_binary() {
       ;;
   esac
   artifact="sessionmunch-${os}-${arch}"
-  base="https://github.com/akitaonrails/ai-memory/releases/latest/download/${artifact}.tar.gz"
+  base="https://github.com/yourowndog/SessionMunch/releases/latest/download/${artifact}.tar.gz"
   native_dir="${CACHE_DIR}/native-runner"
   binary="${native_dir}/sessionmunch"
   archive="${native_dir}/${artifact}.tar.gz"

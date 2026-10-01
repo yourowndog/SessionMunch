@@ -274,7 +274,8 @@ impl ProviderAuth {
                 Ok(path)
             }
             (AuthRequirement::OpenAiOAuthToken, None) => Err(LlmError::NotConfigured(
-                "openai-oauth token file missing; run `sessionmunch auth login openai-oauth`".into(),
+                "openai-oauth token file missing; run `sessionmunch auth login openai-oauth`"
+                    .into(),
             )),
             _ => Err(LlmError::NotConfigured(
                 "openai-oauth token file credential required".into(),

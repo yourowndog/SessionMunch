@@ -1,8 +1,8 @@
 //! Durable queue state for opt-in SessionEnd LLM consolidation.
 
-use sessionmunch_core::{ProjectId, SessionId, WorkspaceId};
 use jiff::Timestamp;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use sessionmunch_core::{ProjectId, SessionId, WorkspaceId};
 use uuid::Uuid;
 
 use crate::error::{StoreError, StoreResult};

@@ -33,13 +33,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use sessionmunch_core::{PagePath, ProjectId, Tier, WorkspaceId};
-use sessionmunch_llm::{ChatMessage, ChatRequest, LlmError, LlmProvider, Role, complete_structured};
-use sessionmunch_store::ReaderPool;
-use sessionmunch_wiki::{Wiki, WritePageRequest};
 use jiff::Timestamp;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sessionmunch_core::{PagePath, ProjectId, Tier, WorkspaceId};
+use sessionmunch_llm::{
+    ChatMessage, ChatRequest, LlmError, LlmProvider, Role, complete_structured,
+};
+use sessionmunch_store::ReaderPool;
+use sessionmunch_wiki::{Wiki, WritePageRequest};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tracing::{debug, info, warn};

@@ -1,7 +1,9 @@
 //! Wire envelope received on `POST /hook`.
 
-use sessionmunch_core::{AgentKind, OBSERVATION_BODY_MAX_BYTES, ObservationKind, truncate_utf8_bytes};
 use serde::{Deserialize, Serialize};
+use sessionmunch_core::{
+    AgentKind, OBSERVATION_BODY_MAX_BYTES, ObservationKind, truncate_utf8_bytes,
+};
 
 use crate::capture_policy::{
     ToolFamily, ToolObservationMetadata, tool_observation_metadata, tool_observation_outcome,

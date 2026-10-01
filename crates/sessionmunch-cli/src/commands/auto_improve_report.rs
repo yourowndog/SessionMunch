@@ -1,9 +1,9 @@
 //! `sessionmunch auto-improve-report` — read-only telemetry for auto-improvement outcomes.
 
-use sessionmunch_consolidate::AutoImproveTelemetryReport;
-use sessionmunch_store::SkippedProposal;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use sessionmunch_consolidate::AutoImproveTelemetryReport;
+use sessionmunch_store::SkippedProposal;
 
 use crate::cli::AutoImproveReportArgs;
 use crate::config::Config;

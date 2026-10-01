@@ -2,12 +2,12 @@
 
 use std::str::FromStr as _;
 
+use jiff::Timestamp;
+use rusqlite::{Connection, OptionalExtension as _, Transaction, params};
 use sessionmunch_core::{
     AgentKind, ManagedRunId, NewWorkstreamEvent, ProjectId, WorkspaceId, WorkstreamEvent,
     WorkstreamEventKind, WorkstreamId,
 };
-use jiff::Timestamp;
-use rusqlite::{Connection, OptionalExtension as _, Transaction, params};
 
 use crate::{StoreError, StoreResult};
 

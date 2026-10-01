@@ -1,9 +1,9 @@
 //! `sessionmunch curator` — rule-based report-only maintenance review.
 
-use sessionmunch_consolidate::CuratorReport;
-use sessionmunch_store::SkippedProposal;
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
+use sessionmunch_consolidate::CuratorReport;
+use sessionmunch_store::SkippedProposal;
 
 use crate::cli::CuratorArgs;
 use crate::config::Config;

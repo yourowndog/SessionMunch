@@ -8,8 +8,8 @@
 
 use std::collections::BTreeSet;
 
-use sessionmunch_core::{LinkTarget, PagePath};
 use serde::{Deserialize, Serialize};
+use sessionmunch_core::{LinkTarget, PagePath};
 
 use crate::error::WikiResult;
 

@@ -6,9 +6,9 @@
 //! per-cwd scope. These tests prove the reader resolves the scope from where
 //! the observations actually landed, independent of the stale session row.
 
+use rusqlite::{Connection, params};
 use sessionmunch_core::{ProjectId, SessionId, WorkspaceId};
 use sessionmunch_store::Store;
-use rusqlite::{Connection, params};
 
 fn id(n: u8) -> [u8; 16] {
     let mut b = [0u8; 16];

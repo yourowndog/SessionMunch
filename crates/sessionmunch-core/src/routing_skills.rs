@@ -115,7 +115,10 @@ mod tests {
         ("memory_auto_improve", "sessionmunch-learning-maintenance"),
         ("memory_lint", "sessionmunch-learning-maintenance"),
         ("memory_forget_sweep", "sessionmunch-learning-maintenance"),
-        ("memory_install_self_routing", "sessionmunch-routing-install"),
+        (
+            "memory_install_self_routing",
+            "sessionmunch-routing-install",
+        ),
     ];
     const PROJECT_SCOPED_SKILLS: &[&str] = &[
         "sessionmunch-retrieval",

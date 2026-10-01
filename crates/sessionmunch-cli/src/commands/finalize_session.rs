@@ -1,8 +1,8 @@
 //! `sessionmunch finalize-session` — manually synthesize SessionEnd for an agent.
 
-use sessionmunch_core::{AgentKind, SessionId};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use sessionmunch_core::{AgentKind, SessionId};
 
 use crate::cli::FinalizeSessionArgs;
 use crate::config::Config;

@@ -52,7 +52,7 @@ pub const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 300;
 /// Copilot provider keeps [`copilot::COPILOT_USER_AGENT`] instead: GitHub's
 /// Copilot API expects the editor-plugin agent and rejects requests without
 /// it.
-pub const DEFAULT_USER_AGENT: &str = concat!("ai-memory/", env!("CARGO_PKG_VERSION"));
+pub const DEFAULT_USER_AGENT: &str = concat!("sessionmunch/", env!("CARGO_PKG_VERSION"));
 
 /// `HTTP-Referer` ai-memory sends to OpenRouter.
 ///
@@ -62,10 +62,10 @@ pub const DEFAULT_USER_AGENT: &str = concat!("ai-memory/", env!("CARGO_PKG_VERSI
 /// [`factory::build_provider`] only when the `openai-compat` base URL points
 /// at `openrouter.ai`, so a non-OpenRouter compat endpoint (Ollama, vLLM,
 /// LM Studio) never receives these.
-pub const OPENROUTER_HTTP_REFERER: &str = "https://github.com/akitaonrails/ai-memory";
+pub const OPENROUTER_HTTP_REFERER: &str = "https://github.com/yourowndog/SessionMunch";
 
-/// `X-Title` ai-memory sends to OpenRouter. See [`OPENROUTER_HTTP_REFERER`].
-pub const OPENROUTER_X_TITLE: &str = "ai-memory";
+/// `X-Title` sessionmunch sends to OpenRouter. See [`OPENROUTER_HTTP_REFERER`].
+pub const OPENROUTER_X_TITLE: &str = "sessionmunch";
 
 pub mod anthropic;
 pub mod auth;

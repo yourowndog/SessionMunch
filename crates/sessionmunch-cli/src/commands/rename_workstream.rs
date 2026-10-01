@@ -1,8 +1,8 @@
 //! Checkout-local rename for managed workstreams.
 
+use anyhow::{Context as _, Result, bail};
 use sessionmunch_core::{RenameManagedWorkstreamRequest, RenamedManagedWorkstream};
 use sessionmunch_workstream::inspect_repository;
-use anyhow::{Context as _, Result, bail};
 
 use crate::cli::RenameWorkstreamArgs;
 use crate::config::Config;

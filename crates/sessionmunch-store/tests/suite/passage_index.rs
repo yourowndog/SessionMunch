@@ -1,10 +1,10 @@
 //! Tests for replace_page_sections_and_passages and backfill_sections.
 
+use rusqlite::Connection;
+use serde_json::json;
 use sessionmunch_core::{NewPage, PagePath, ProjectId, Tier, WorkspaceId};
 use sessionmunch_store::scope::create_explicit_scope;
 use sessionmunch_store::{PassageEmbeddingWrite, Store, f32_vec_to_bytes};
-use rusqlite::Connection;
-use serde_json::json;
 use tempfile::TempDir;
 
 /// Open a fresh store, keeping the backing `TempDir` alive for the caller's

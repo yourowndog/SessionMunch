@@ -20,12 +20,12 @@
 use std::collections::BTreeMap;
 use std::time::Instant;
 
+use serde_json::json;
 use sessionmunch_core::{NewPage, PagePath, Tier};
 use sessionmunch_store::PassageEmbeddingWrite;
 use sessionmunch_store::Store;
 use sessionmunch_store::f32_vec_to_bytes;
 use sessionmunch_store::scope::create_explicit_scope;
-use serde_json::json;
 use tempfile::TempDir;
 
 const RECALL_KS: &[usize] = &[1, 3, 5, 10];

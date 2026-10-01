@@ -51,7 +51,9 @@ use serde::{Deserialize, Serialize};
 
 use sessionmunch_consolidate::{ConsolidatedBatch, build_batch_request};
 use sessionmunch_core::{Observation, ObservationKind, ProjectId, SessionId, WorkspaceId};
-use sessionmunch_llm::{AuthRequirement, LlmProvider, ProviderAuth, ProviderChoice, ProviderConfig};
+use sessionmunch_llm::{
+    AuthRequirement, LlmProvider, ProviderAuth, ProviderChoice, ProviderConfig,
+};
 
 #[derive(clap::Args, Debug)]
 pub struct AbArgs {

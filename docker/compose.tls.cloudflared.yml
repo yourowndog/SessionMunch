@@ -33,7 +33,7 @@ name: sessionmunch-cloudflared
 
 services:
   sessionmunch:
-    image: akitaonrails/ai-memory:latest
+    image: yourowndog/sessionmunch:latest
     container_name: sessionmunch
     restart: unless-stopped
     # No host port. The tunnel reaches sessionmunch over the internal

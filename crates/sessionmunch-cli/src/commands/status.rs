@@ -4,9 +4,9 @@
 //! server; renders the response as human text or JSON. Never opens
 //! the store directly — the server is the source of truth.
 
-use sessionmunch_llm::{ProviderHealthSnapshot, ProviderHealthStatus, ProviderRoleHealthSnapshot};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use sessionmunch_llm::{ProviderHealthSnapshot, ProviderHealthStatus, ProviderRoleHealthSnapshot};
 
 use super::hook_spool::{SpoolHealth, spool_dir, spool_health};
 use crate::cli::StatusArgs;

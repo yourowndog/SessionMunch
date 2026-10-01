@@ -6,8 +6,8 @@
 //! prompts, hooks, or LLM output), so raw HTML is escaped and unsafe
 //! link schemes are neutralised.
 
-use sessionmunch_core::PagePath;
 use pulldown_cmark::{CowStr, Event, Options, Parser, Tag, html};
+use sessionmunch_core::PagePath;
 
 /// Render a markdown body to HTML using GFM-ish defaults.
 ///

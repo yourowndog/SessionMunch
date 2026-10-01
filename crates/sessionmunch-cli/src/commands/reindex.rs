@@ -17,9 +17,9 @@
 //! is NOT in the markdown and is not reconstructed; embeddings can be
 //! recomputed afterwards via `sessionmunch embed`.
 
+use anyhow::{Context, Result, bail};
 use sessionmunch_store::Store;
 use sessionmunch_wiki::Wiki;
-use anyhow::{Context, Result, bail};
 use tracing::info;
 
 use crate::cli::ReindexArgs;

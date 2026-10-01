@@ -46,7 +46,7 @@ function Get-WrapperSubcommand {
     return ""
 }
 
-$Image = Get-EnvOrDefault "SESSIONMUNCH_IMAGE" "akitaonrails/ai-memory:latest"
+$Image = Get-EnvOrDefault "SESSIONMUNCH_IMAGE" "yourowndog/sessionmunch:latest"
 $Docker = Get-EnvOrDefault "SESSIONMUNCH_DOCKER" "docker"
 $DataVolume = Get-EnvOrDefault "SESSIONMUNCH_DATA_VOLUME" "sessionmunch-data"
 

@@ -14,9 +14,9 @@
 //! guard at the top of `run` enforces this precondition by refusing to
 //! proceed when any sibling `sessionmunch` process is detected.
 
-use sessionmunch_store::Store;
 use anyhow::{Context, Result, bail};
 use flate2::read::GzDecoder;
+use sessionmunch_store::Store;
 use std::path::{Component, Path};
 use tracing::info;
 

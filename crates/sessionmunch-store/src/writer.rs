@@ -10,12 +10,12 @@
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
+use rusqlite::Connection;
 use sessionmunch_core::{
     AgentKind, ApiCredentialId, HandoffAcceptance, HandoffId, IdentityKey, ManagedRunId,
     NewHandoff, NewObservation, NewPage, NewSession, NewUser, ObservationId, OwnerFilter, PageId,
     PagePath, ProjectId, Sanitized, SessionId, UserId, UserRole, WorkspaceId,
 };
-use rusqlite::Connection;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 

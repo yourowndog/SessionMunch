@@ -23,7 +23,7 @@ pub use human_auth::{
     HumanAuthRuntime, expire_legacy_cookie_mw, internal_auth_router, public_auth_router,
     require_dual_auth, session_auth_router,
 };
-pub use server::{SessionMunchServer, MEMORY_INSTRUCTIONS};
+pub use server::{MEMORY_INSTRUCTIONS, SessionMunchServer};
 
 // Integration tests compile into this crate's test harness instead of a
 // separate binary: every test binary is another link and, on macOS and

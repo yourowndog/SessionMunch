@@ -199,6 +199,7 @@ fn create_private_file_if_missing(path: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::{Connection, params};
     use sessionmunch_core::{
         ActorContext, AgentKind, HandoffAcceptance, HandoffId, HandoffState, LinkTarget,
         ManagedRunId, NewHandoff, NewObservation, NewPage, NewSession, NewWorkstreamEvent,
@@ -206,7 +207,6 @@ mod tests {
         ProjectId, Sanitized, Sanitizer, SessionId, Tier, UserId, WorkspaceId, WorkstreamEventKind,
         WorkstreamId,
     };
-    use rusqlite::{Connection, params};
     use sha2::{Digest, Sha256};
     use tempfile::TempDir;
 

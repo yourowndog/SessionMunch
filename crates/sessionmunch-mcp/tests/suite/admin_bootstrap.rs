@@ -5,13 +5,13 @@
 //! to the router, and assert the response shape matches [`BootstrapOutcome`].
 //! The LLM path is covered by the consolidate-crate unit tests.
 
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use serde_json::json;
 use sessionmunch_consolidate::{BootstrapOutcome, BootstrapSource, SourceKind};
 use sessionmunch_mcp::{AdminState, admin_router};
 use sessionmunch_store::{DecayParams, Store};
 use sessionmunch_wiki::Wiki;
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
-use serde_json::json;
 use tempfile::TempDir;
 use tower::ServiceExt;
 

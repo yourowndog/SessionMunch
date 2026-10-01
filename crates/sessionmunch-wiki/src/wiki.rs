@@ -1384,10 +1384,9 @@ impl Wiki {
         author_id: Option<UserId>,
         admission_ctx: Option<AdmissionContext>,
     ) -> WikiResult<ApproveAutoImproveProposalResult> {
-        let reader = self
-            .store_reader
-            .as_ref()
-            .ok_or_else(|| sessionmunch_wiki_error("auto-improve approval requires a store reader"))?;
+        let reader = self.store_reader.as_ref().ok_or_else(|| {
+            sessionmunch_wiki_error("auto-improve approval requires a store reader")
+        })?;
         let detail = reader
             .auto_improve_proposal_detail(workspace_id, project_id, proposal_id)
             .await?
@@ -5477,7 +5476,9 @@ mod tests {
             .await;
         assert!(matches!(
             result,
-            Err(WikiError::Store(sessionmunch_store::StoreError::NotFound(_)))
+            Err(WikiError::Store(sessionmunch_store::StoreError::NotFound(
+                _
+            )))
         ));
         assert_eq!(std::fs::read(&abs).unwrap(), before);
         assert!(

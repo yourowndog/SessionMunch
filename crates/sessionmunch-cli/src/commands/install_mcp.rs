@@ -1842,7 +1842,10 @@ mod tests {
             entry["args"],
             json!(["mcp-bridge", "--server-url", "https://memory.example/mcp"])
         );
-        assert_eq!(entry["env"]["SESSIONMUNCH_AUTH_TOKEN"], "test-token-deadbeef");
+        assert_eq!(
+            entry["env"]["SESSIONMUNCH_AUTH_TOKEN"],
+            "test-token-deadbeef"
+        );
         assert!(entry.get("url").is_none());
         assert!(entry.get("headers").is_none());
 

@@ -5,6 +5,17 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use rmcp::handler::server::router::tool::ToolRouter;
+use rmcp::handler::server::wrapper::Parameters;
+use rmcp::model::{
+    CallToolResult, Content, Implementation, ListToolsResult, PaginatedRequestParams,
+    ProtocolVersion, ServerCapabilities, ServerInfo, Tool,
+};
+use rmcp::service::RequestContext;
+use rmcp::{
+    ErrorData as McpError, RoleServer, ServerHandler, schemars, tool, tool_handler, tool_router,
+};
+use serde::{Deserialize, Serialize};
 use sessionmunch_consolidate::{
     AutoImproveReviewConfig, Consolidator, ObservationRetention, projection::cap_text_with_marker,
     run_auto_improve_review, run_lint, run_sweep_with_options,
@@ -19,19 +30,10 @@ use sessionmunch_store::{
     CLIENT_ACTIVITY_MAX_NAME_CHARS, CLIENT_ACTIVITY_OVERFLOW_CLIENT, NewAutoImproveProposal,
     StageAutoImproveRun,
 };
-use sessionmunch_store::{DecayParams, PageHit, ReaderPool, ScopeName, ScopeResolver, WriterHandle};
+use sessionmunch_store::{
+    DecayParams, PageHit, ReaderPool, ScopeName, ScopeResolver, WriterHandle,
+};
 use sessionmunch_wiki::{Wiki, WikiError, WritePageRequest};
-use rmcp::handler::server::router::tool::ToolRouter;
-use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{
-    CallToolResult, Content, Implementation, ListToolsResult, PaginatedRequestParams,
-    ProtocolVersion, ServerCapabilities, ServerInfo, Tool,
-};
-use rmcp::service::RequestContext;
-use rmcp::{
-    ErrorData as McpError, RoleServer, ServerHandler, schemars, tool, tool_handler, tool_router,
-};
-use serde::{Deserialize, Serialize};
 
 const HANDOFF_SUMMARY_MAX_CHARS: usize = 3_000;
 const HANDOFF_ITEM_MAX_CHARS: usize = 1_500;
@@ -56,14 +58,17 @@ fn default_auto_improve_review_config() -> AutoImproveReviewConfig {
         max_patchable_pages: sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_MAX_PATCHABLE_PAGES,
         max_patchable_body_chars:
             sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_MAX_PATCHABLE_BODY_CHARS,
-        max_edits_per_proposal: sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_MAX_EDITS_PER_PROPOSAL,
-        max_edit_content_chars: sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_MAX_EDIT_CONTENT_CHARS,
+        max_edits_per_proposal:
+            sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_MAX_EDITS_PER_PROPOSAL,
+        max_edit_content_chars:
+            sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_MAX_EDIT_CONTENT_CHARS,
         max_changed_chars_per_proposal:
             sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_MAX_CHANGED_CHARS_PER_PROPOSAL,
         max_patch_edits_per_run:
             sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_MAX_PATCH_EDITS_PER_RUN,
         max_rejection_context: sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_MAX_REJECTION_CONTEXT,
-        rejection_context_days: sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_REJECTION_CONTEXT_DAYS,
+        rejection_context_days:
+            sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_REJECTION_CONTEXT_DAYS,
         max_final_body_chars: sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_MAX_FINAL_BODY_CHARS,
         max_rule_page_tokens: sessionmunch_consolidate::DEFAULT_AUTO_IMPROVE_MAX_RULE_PAGE_TOKENS,
         max_procedure_page_tokens:
@@ -1771,7 +1776,8 @@ impl SessionMunchServer {
         workspace_id: WorkspaceId,
         project_id: ProjectId,
         options: ProjectSearchOptions<'_>,
-    ) -> sessionmunch_store::StoreResult<Vec<(PageHit, Option<sessionmunch_store::SearchExplain>)>> {
+    ) -> sessionmunch_store::StoreResult<Vec<(PageHit, Option<sessionmunch_store::SearchExplain>)>>
+    {
         // `i64::MIN` as the expiry cutoff makes every stored TTL pass
         // the `expires_at > cutoff` guard, i.e. expired pages stay
         // searchable when the caller opted in.
@@ -2331,8 +2337,10 @@ impl SessionMunchServer {
             Some(self.resolve_query_scopes(&args.scopes).await?)
         };
         let hits = if let Some(scopes) = &resolved_scopes {
-            let mut hits_by_id: HashMap<PageId, (PageHit, Option<sessionmunch_store::SearchExplain>)> =
-                HashMap::new();
+            let mut hits_by_id: HashMap<
+                PageId,
+                (PageHit, Option<sessionmunch_store::SearchExplain>),
+            > = HashMap::new();
             for &(ws, proj) in scopes {
                 let hits = self
                     .search_project(
@@ -2794,7 +2802,11 @@ impl SessionMunchServer {
         // Anonymous), so this cannot mask a real unauthenticated request.
         // Treating "absent" as Anonymous instead would make this tool
         // permanently unusable over stdio the moment any user row exists.
-        let Some(level) = parts.extensions.get::<sessionmunch_core::AuthLevel>().copied() else {
+        let Some(level) = parts
+            .extensions
+            .get::<sessionmunch_core::AuthLevel>()
+            .copied()
+        else {
             return Ok(());
         };
         let distinguishes_operators = self
@@ -2802,7 +2814,10 @@ impl SessionMunchServer {
             .await
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         level
-            .authorize(sessionmunch_core::Capability::Admin, distinguishes_operators)
+            .authorize(
+                sessionmunch_core::Capability::Admin,
+                distinguishes_operators,
+            )
             .map_err(|e| McpError::invalid_request(e.message().to_string(), None))
     }
 
@@ -3576,8 +3591,9 @@ impl SessionMunchServer {
                 &aps_actor,
             )
             .await?;
-        let owner_filter =
-            sessionmunch_core::OwnerFilter::for_actor_context(&crate::actor::actor_from_parts(&parts));
+        let owner_filter = sessionmunch_core::OwnerFilter::for_actor_context(
+            &crate::actor::actor_from_parts(&parts),
+        );
 
         // Validate the cheap arguments before touching the store so a bad
         // call fails the same way whether or not the session exists.
@@ -3595,7 +3611,9 @@ impl SessionMunchServer {
             );
         let order = match args.order.as_deref().map(str::trim) {
             None | Some("") => sessionmunch_store::ObservationOrder::Asc,
-            Some(raw) if raw.eq_ignore_ascii_case("asc") => sessionmunch_store::ObservationOrder::Asc,
+            Some(raw) if raw.eq_ignore_ascii_case("asc") => {
+                sessionmunch_store::ObservationOrder::Asc
+            }
             Some(raw) if raw.eq_ignore_ascii_case("desc") => {
                 sessionmunch_store::ObservationOrder::Desc
             }
@@ -3876,7 +3894,12 @@ impl SessionMunchServer {
             owner_user,
         };
         let admission = self
-            .authorize_operation(ws, proj, sessionmunch_wiki::AdmissionOp::HandoffBegin, &parts)
+            .authorize_operation(
+                ws,
+                proj,
+                sessionmunch_wiki::AdmissionOp::HandoffBegin,
+                &parts,
+            )
             .await?;
         let id = self
             .writer
@@ -4095,7 +4118,9 @@ impl SessionMunchServer {
             self.require_admin_capability(&parts).await?;
             sessionmunch_core::OwnerFilter::Any
         } else {
-            sessionmunch_core::OwnerFilter::for_actor_context(&crate::actor::actor_from_parts(&parts))
+            sessionmunch_core::OwnerFilter::for_actor_context(&crate::actor::actor_from_parts(
+                &parts,
+            ))
         };
         let handoff = self
             .reader
@@ -4123,7 +4148,12 @@ impl SessionMunchServer {
         // permanently stuck.
         //
         let admission = self
-            .authorize_operation(ws, proj, sessionmunch_wiki::AdmissionOp::HandoffCancel, &parts)
+            .authorize_operation(
+                ws,
+                proj,
+                sessionmunch_wiki::AdmissionOp::HandoffCancel,
+                &parts,
+            )
             .await?;
         let cancelled = self
             .writer
@@ -5011,7 +5041,12 @@ mod tests {
             "missing request parts must degrade to anonymous stdio context instead of failing extraction"
         );
         assert!(parts.extensions.get::<AuthLevel>().is_none());
-        assert!(parts.extensions.get::<sessionmunch_core::UserId>().is_none());
+        assert!(
+            parts
+                .extensions
+                .get::<sessionmunch_core::UserId>()
+                .is_none()
+        );
         assert!(parts.extensions.get::<ActorContext>().is_none());
     }
 
@@ -6421,7 +6456,10 @@ mod tests {
             .into_iter()
             .find(|candidate| candidate.path == path)
             .unwrap();
-        assert_eq!(target.salience, Some(sessionmunch_store::decay::SALIENCE_MIN));
+        assert_eq!(
+            target.salience,
+            Some(sessionmunch_store::decay::SALIENCE_MIN)
+        );
         let other_page = store
             .reader
             .decay_candidates(ws, other)
@@ -6842,7 +6880,10 @@ mod tests {
         // An explicit but unknown project name fails closed instead of
         // silently falling through to the active pointer.
         let err = server
-            .effective_ids_with_actor(Some("does-not-exist"), &sessionmunch_core::ActorKey::default())
+            .effective_ids_with_actor(
+                Some("does-not-exist"),
+                &sessionmunch_core::ActorKey::default(),
+            )
             .await
             .expect_err("unknown explicit project must not fall back");
         assert!(

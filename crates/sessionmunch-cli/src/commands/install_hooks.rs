@@ -1431,7 +1431,10 @@ fn overlay_event_hooks(
 
 /// Remove only sessionmunch's entries for one event. Delete the event key when
 /// no third-party hooks remain so a rendered opt-out stays minimal.
-fn remove_sessionmunch_event_hooks(map: &mut serde_json::Map<String, serde_json::Value>, event: &str) {
+fn remove_sessionmunch_event_hooks(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    event: &str,
+) {
     overlay_event_hooks(map, event, &serde_json::Value::Array(Vec::new()));
     if map
         .get(event)
@@ -3853,7 +3856,10 @@ fn omp_extension_hint_in(
     omp_extension_path_in(env_override, profile).map_or_else(
         |_| {
             if let Some(name) = profile {
-                format!("~/.omp/profiles/{}/agent/extensions/sessionmunch-omp.ts", name)
+                format!(
+                    "~/.omp/profiles/{}/agent/extensions/sessionmunch-omp.ts",
+                    name
+                )
             } else {
                 "~/.omp/agent/extensions/sessionmunch-omp.ts".to_string()
             }
@@ -4796,7 +4802,9 @@ fn hook_source_candidates(
         "/usr/local/share/sessionmunch/hooks/{sub}"
     )));
     // Native Linux packages install hook sources under /usr/share.
-    candidates.push(PathBuf::from(format!("/usr/share/sessionmunch/hooks/{sub}")));
+    candidates.push(PathBuf::from(format!(
+        "/usr/share/sessionmunch/hooks/{sub}"
+    )));
     // Local install honourable mention: the bundle a previous `--apply`, or
     // docker `setup-agent`, staged under the data dir actually in use.
     if let Some(dir) = data_dir {
@@ -5991,7 +5999,11 @@ mod tests {
             let entries = hooks[event].as_array().unwrap();
             let ours = entries
                 .iter()
-                .find(|entry| serde_json::to_string(entry).unwrap().contains("sessionmunch"))
+                .find(|entry| {
+                    serde_json::to_string(entry)
+                        .unwrap()
+                        .contains("sessionmunch")
+                })
                 .unwrap_or_else(|| panic!("missing sessionmunch entry for {event}"));
             assert!(ours.get("matcher").is_none(), "event: {event}");
         }
@@ -6156,7 +6168,9 @@ mod tests {
         );
         // PowerShell form.
         assert_eq!(
-            project_strategy_from_text("$env:SESSIONMUNCH_PROJECT_STRATEGY='repo-root'; & /x/s.ps1"),
+            project_strategy_from_text(
+                "$env:SESSIONMUNCH_PROJECT_STRATEGY='repo-root'; & /x/s.ps1"
+            ),
             Some(ProjectStrategyArg::RepoRoot)
         );
         // Native flag, both spellings.
@@ -7324,7 +7338,10 @@ model = "gpt-5"
             .join("..")
             .join("hooks");
         assert!(
-            hooks_root.join("lib").join("sessionmunch-hook.ps1").is_file(),
+            hooks_root
+                .join("lib")
+                .join("sessionmunch-hook.ps1")
+                .is_file(),
             "PowerShell hooks require the shared lib helper"
         );
 
@@ -8471,7 +8488,8 @@ model = "gpt-5"
         ] {
             assert!(
                 hint.contains("custom")
-                    && (hint.ends_with("sessionmunch-omp.ts") || hint.ends_with("sessionmunch-pi.ts")),
+                    && (hint.ends_with("sessionmunch-omp.ts")
+                        || hint.ends_with("sessionmunch-pi.ts")),
                 "hint must point at the relocated agent home, got: {hint}"
             );
             assert!(
@@ -8623,7 +8641,9 @@ model = "gpt-5"
         let path = pi_extension_path_in(Some(std::ffi::OsString::from(custom))).unwrap();
         assert_eq!(
             path,
-            Path::new(custom).join("extensions").join("sessionmunch-pi.ts")
+            Path::new(custom)
+                .join("extensions")
+                .join("sessionmunch-pi.ts")
         );
 
         // Unset and blank both fall back to ~/.pi/agent/extensions/sessionmunch-pi.ts.

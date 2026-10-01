@@ -5,9 +5,9 @@
 //! session) plus clean controls, then asserts `audit_contamination` flags
 //! exactly the contaminated rows.
 
+use rusqlite::{Connection, params};
 use sessionmunch_core::{ProjectId, WorkspaceId};
 use sessionmunch_store::Store;
-use rusqlite::{Connection, params};
 
 fn id(n: u8) -> [u8; 16] {
     let mut b = [0u8; 16];

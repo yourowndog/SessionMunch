@@ -1,11 +1,11 @@
 //! Tests for search_passages_hybrid and related passage retrieval functions.
 
+use rusqlite::Connection;
+use serde_json::json;
 use sessionmunch_core::{NewPage, PagePath, ProjectId, Tier, WorkspaceId};
 use sessionmunch_store::Store;
 use sessionmunch_store::reader::f32_vec_to_bytes;
 use sessionmunch_store::scope::create_explicit_scope;
-use rusqlite::Connection;
-use serde_json::json;
 use tempfile::TempDir;
 
 /// Open a fresh store, keeping the backing `TempDir` alive for the caller's

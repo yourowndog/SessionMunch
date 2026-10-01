@@ -13,8 +13,8 @@
 //! opt-in path that re-introduces a sanitized, capped excerpt: the client-side
 //! [`transform_for_client`] and the server-side [`apply_assistant_backstop`].
 
-use sessionmunch_core::{AgentKind, Sanitizer, truncate_utf8_bytes};
 use serde::{Deserialize, Serialize};
+use sessionmunch_core::{AgentKind, Sanitizer, truncate_utf8_bytes};
 
 use crate::payload::{HookEnvelope, HookEvent};
 

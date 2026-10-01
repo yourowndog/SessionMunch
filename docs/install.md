@@ -26,7 +26,7 @@ path (docker + Claude Code). This page covers everything else:
 > **Shorthand.** Most snippets use `$TOKEN` and `homelab:49374`. If
 > you're following along verbatim:
 > ```bash
-> export TOKEN=$(docker run --rm akitaonrails/ai-memory:latest generate-auth-token)
+> export TOKEN=$(docker run --rm yourowndog/sessionmunch:latest generate-auth-token)
 > ```
 > and replace `homelab` with `localhost` if the server runs on the
 > same machine as the agent CLI.
@@ -60,7 +60,7 @@ docker run -d --name sessionmunch \
     -e SESSIONMUNCH_ALLOWED_HOSTS="<server-ip>,localhost,127.0.0.1" \
     -e SESSIONMUNCH_LLM_PROVIDER=anthropic \
     -e ANTHROPIC_API_KEY=sk-ant-... \
-    akitaonrails/ai-memory:latest
+    yourowndog/sessionmunch:latest
 ```
 
 See [Security](../README.md#security) in the README for why
@@ -751,14 +751,14 @@ including Pi and Zero, have lifecycle capture paths through `install-hooks`.
 
 ```bash
 # MCP snippet (merge into ~/.codex/config.toml):
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-mcp --client codex \
     --server-url "http://homelab:49374/mcp" \
     --auth-token "$TOKEN"
 
 # Hooks — extract scripts + render config:
 docker cp sessionmunch:/usr/local/share/sessionmunch/hooks ~/.sessionmunch/
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-hooks --agent codex \
         --hooks-dir ~/.sessionmunch/hooks \
         --server-url "http://homelab:49374" \
@@ -1138,7 +1138,7 @@ No first-party `install-mcp` client and no managed workstream
 ### OpenCode
 
 ```bash
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-mcp --client opencode \
     --server-url "http://homelab:49374/mcp" \
     --auth-token "$TOKEN"
@@ -1150,7 +1150,7 @@ sessionmunch install-hooks --agent opencode --apply \
     --auth-token "$TOKEN"
 
 # Docker-only preview path; redirect only if you want to write the file yourself:
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-hooks --agent opencode \
     --server-url "http://homelab:49374" \
     --auth-token "$TOKEN"
@@ -1166,7 +1166,7 @@ dir and session store, but its MCP schema and plugin API changed. Wire it
 with the `opencode2` client/agent names:
 
 ```bash
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-mcp --client opencode2 \
     --server-url "http://homelab:49374/mcp" \
     --auth-token "$TOKEN"
@@ -1228,7 +1228,7 @@ need neither.
 ### Oh My Pi / OMP
 
 ```bash
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-mcp --client omp \
     --server-url "http://homelab:49374/mcp" \
     --auth-token "$TOKEN"
@@ -1294,7 +1294,7 @@ using a bind mount:
 
 ```bash
 docker run --rm -v "$HOME/.sessionmunch:/host" \
-    akitaonrails/ai-memory:latest \
+    yourowndog/sessionmunch:latest \
     setup-agent --agent claude-code --to /host/hooks \
         --host-prefix "$HOME/.sessionmunch/hooks" \
         --server-url "http://homelab:49374" --auth-token "$TOKEN"
@@ -1318,75 +1318,75 @@ See [**`docs/mcp-install.md`**](mcp-install.md) for the per-client MCP
 config file path and snippet, or one-shot it via:
 
 ```bash
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-mcp --client cursor          --auth-token "$TOKEN" \
     --server-url "http://homelab:49374/mcp"
 
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-hooks --agent cursor         --auth-token "$TOKEN" \
     --server-url "http://homelab:49374"
 
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-mcp --client claude-desktop  --auth-token "$TOKEN" \
     --server-url "http://homelab:49374/mcp"
 
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-mcp --client gemini-cli      --auth-token "$TOKEN" \
     --server-url "http://homelab:49374/mcp"
 
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-hooks --agent gemini-cli     --auth-token "$TOKEN" \
     --server-url "http://homelab:49374"
 
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-mcp --client antigravity-cli --auth-token "$TOKEN" \
     --server-url "http://homelab:49374/mcp"
 
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-hooks --agent antigravity-cli --auth-token "$TOKEN" \
     --server-url "http://homelab:49374"
 
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-mcp --client grok            --auth-token "$TOKEN" \
     --server-url "http://homelab:49374/mcp"
 
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-hooks --agent grok            --auth-token "$TOKEN" \
     --server-url "http://homelab:49374"
 
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-mcp --client openclaw        --auth-token "$TOKEN" \
     --server-url "http://homelab:49374/mcp"
 
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-hooks --agent openclaw       --auth-token "$TOKEN" \
     --server-url "http://homelab:49374"
 
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-mcp --client kiro-cli        --auth-token "$TOKEN" \
     --server-url "https://memory.example/mcp"
 
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-hooks --agent kiro-cli       --auth-token "$TOKEN" \
     --server-url "https://memory.example"
 
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-mcp --client command-code    --auth-token "$TOKEN" \
     --server-url "http://homelab:49374/mcp"
 
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-hooks --agent command-code   --auth-token "$TOKEN" \
     --server-url "http://homelab:49374"
 
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-mcp --client vscode-copilot  --auth-token "$TOKEN" \
     --server-url "http://homelab:49374/mcp"
 
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-mcp --client zed             --auth-token "$TOKEN" \
     --server-url "http://homelab:49374/mcp"
 
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-mcp --client zcode           --auth-token "$TOKEN" \
     --server-url "http://homelab:49374/mcp"
 ```
@@ -1414,7 +1414,7 @@ run the server), download and verify the release installer. The installer then
 downloads and verifies the release's hook archive before writing any scripts:
 
 ```bash
-installer_base=https://github.com/akitaonrails/ai-memory/releases/latest/download/sessionmunch-install-hooks
+installer_base=https://github.com/yourowndog/SessionMunch/releases/latest/download/sessionmunch-install-hooks
 installer_tmp="$(mktemp -d)"
 trap 'rm -rf "$installer_tmp"' EXIT
 curl -fsSL "$installer_base" -o "$installer_tmp/sessionmunch-install-hooks"
@@ -1433,7 +1433,7 @@ trap - EXIT
 
 # Then render the JSON config (still wants `sessionmunch` somewhere —
 # either via docker as a one-shot, or installed locally):
-docker run --rm akitaonrails/ai-memory:latest \
+docker run --rm yourowndog/sessionmunch:latest \
     install-hooks --agent claude-code \
         --hooks-dir "$HOME/.sessionmunch/hooks" \
         --server-url "http://homelab:49374" \
@@ -1485,7 +1485,7 @@ other host, `mise` installs a tagged release binary directly from GitHub —
 no Rust toolchain needed:
 
 ```bash
-mise use -g github:akitaonrails/ai-memory
+mise use -g github:yourowndog/SessionMunch
 ```
 
 This uses [mise's GitHub backend](https://mise.jdx.dev/dev-tools/backends/github.html),
@@ -1501,7 +1501,7 @@ release assets follow this naming convention. By default mise also holds back
 the very newest release for a short safety window
 ([`minimum_release_age`](https://mise.jdx.dev/dev-tools/github-backend.html)),
 so a fresh tag may resolve to the previous version for a day or so; pin an
-exact tag with `mise use -g github:akitaonrails/ai-memory@1.30.0` to bypass
+exact tag with `mise use -g github:yourowndog/SessionMunch@1.30.0` to bypass
 that.
 
 `cargo install sessionmunch` is not available: the crate name is already taken
@@ -1517,7 +1517,7 @@ archives when you only need the client CLI.
 ```bash
 # Source checkout: the fork carries the SessionMunch line until the v0.1
 # release fixes the canonical repo URL (t_d85c39f4).
-git clone https://github.com/yourowndog/ai-memory ~/.sessionmunch
+git clone https://github.com/yourowndog/SessionMunch ~/.sessionmunch
 cd ~/.sessionmunch
 cargo build --release --workspace
 ./target/release/sessionmunch init                       # one-time
@@ -1676,7 +1676,7 @@ docker run -d --name sessionmunch \
     -v sessionmunch-data:/data \
     -e SESSIONMUNCH_LLM_PROVIDER=anthropic-oauth \
     -e ANTHROPIC_OAUTH_TOKEN=<token> \
-    akitaonrails/ai-memory:latest
+    yourowndog/sessionmunch:latest
 ```
 
 Both `ANTHROPIC_OAUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` are accepted;
@@ -1716,7 +1716,7 @@ docker run -d --name sessionmunch \
     -p 127.0.0.1:49374:49374 \
     -v sessionmunch-data:/data \
     -e SESSIONMUNCH_LLM_PROVIDER=openai-oauth \
-    akitaonrails/ai-memory:latest
+    yourowndog/sessionmunch:latest
 ```
 
 For a remote Docker host, run the login on that host against the same container
@@ -1753,7 +1753,7 @@ docker run -d --name sessionmunch \
     -p 127.0.0.1:49374:49374 \
     -v sessionmunch-data:/data \
     -e SESSIONMUNCH_LLM_PROVIDER=copilot \
-    akitaonrails/ai-memory:latest
+    yourowndog/sessionmunch:latest
 ```
 
 For a remote Docker host, run the login against the same data volume:
@@ -1782,7 +1782,7 @@ docker run -d --name sessionmunch \
     -e SESSIONMUNCH_LLM_PROVIDER=openai-compat \
     -e SESSIONMUNCH_LLM_BASE_URL=http://host.docker.internal:11434/v1 \
     -e SESSIONMUNCH_LLM_MODEL=qwen2.5-coder:14b \
-    akitaonrails/ai-memory:latest
+    yourowndog/sessionmunch:latest
 ```
 
 There is no safe default model for `openai-compat`; the env var is
@@ -1930,10 +1930,10 @@ docker exec sessionmunch sessionmunch backup --to /data/snapshot.tar.gz
 #    llm-test).
 #    Auth login is stateful: use docker exec against the running container or
 #    the wrapper so it writes into the same data volume as the server.
-docker run --rm akitaonrails/ai-memory:latest generate-auth-token
-docker run --rm akitaonrails/ai-memory:latest completions zsh
-docker run --rm akitaonrails/ai-memory:latest install-mcp --client cursor
-docker run --rm akitaonrails/ai-memory:latest --help     # full subcommand tree
+docker run --rm yourowndog/sessionmunch:latest generate-auth-token
+docker run --rm yourowndog/sessionmunch:latest completions zsh
+docker run --rm yourowndog/sessionmunch:latest install-mcp --client cursor
+docker run --rm yourowndog/sessionmunch:latest --help     # full subcommand tree
 ```
 
 | Subcommand | Pattern | What it does |
@@ -2235,7 +2235,7 @@ token:
 docker run -d --name sessionmunch \
     -p 127.0.0.1:49374:49374 \
     -v sessionmunch-data:/data \
-    akitaonrails/ai-memory:latest
+    yourowndog/sessionmunch:latest
 ```
 
 Notice the bind: `127.0.0.1:49374`, not `0.0.0.0:49374`. This is the

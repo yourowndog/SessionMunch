@@ -4,7 +4,7 @@
 
 Please **do not open a public GitHub issue** for security vulnerabilities.
 
-Report security issues by opening a [private security advisory](https://github.com/akitaonrails/ai-memory/security/advisories/new)
+Report security issues by opening a [private security advisory](https://github.com/yourowndog/SessionMunch/security/advisories/new)
 on GitHub. You will receive a response within 7 days. If the issue is confirmed
 we will aim to release a patch within 30 days and credit you in the changelog
 (unless you prefer to remain anonymous).

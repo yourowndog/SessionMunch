@@ -23,9 +23,9 @@
 
 use std::sync::Arc;
 
+use axum::Router;
 use sessionmunch_store::ReaderPool;
 use sessionmunch_wiki::Wiki;
-use axum::Router;
 
 mod markdown;
 pub mod mount;

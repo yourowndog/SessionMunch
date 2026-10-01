@@ -2,15 +2,15 @@
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use anyhow::{Context, Result, anyhow, bail};
+use secrecy::ExposeSecret as _;
+use serde::{Deserialize, Serialize};
 use sessionmunch_llm::{
     CODEX_CLIENT_ID, CopilotToken, DeviceAuthorizationResponse, GITHUB_ACCESS_TOKEN_URL,
     GITHUB_COPILOT_CLIENT_ID, GITHUB_DEVICE_CODE_URL, OIDC_DEFAULT_SCOPE, OPENAI_OAUTH_TOKEN_URL,
     OidcDiscovery, OidcToken, OidcTokenResponse, OpenAiOAuthToken, OpenAiOAuthTokenResponse,
     PollOutcome, discover, poll_token_once, request_device_code,
 };
-use anyhow::{Context, Result, anyhow, bail};
-use secrecy::ExposeSecret as _;
-use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 
 use crate::cli::{AuthArgs, AuthCommand, AuthProviderChoice};

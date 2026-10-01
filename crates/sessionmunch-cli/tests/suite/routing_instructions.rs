@@ -308,7 +308,11 @@ fn explicit_skill_scope_and_agent_override_instruction_target_inference() {
     );
     assert_success(output);
 
-    assert!(global_skills.join("sessionmunch-retrieval/SKILL.md").exists());
+    assert!(
+        global_skills
+            .join("sessionmunch-retrieval/SKILL.md")
+            .exists()
+    );
     assert!(!home.path().join(".agents/skills").exists());
     assert!(!project.path().join(".claude/skills").exists());
     assert!(!project.path().join(".agents/skills").exists());

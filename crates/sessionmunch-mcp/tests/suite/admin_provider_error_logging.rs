@@ -10,14 +10,14 @@
 use std::io;
 use std::sync::{Arc, Mutex};
 
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use serde_json::json;
 use sessionmunch_consolidate::{BootstrapSource, SourceKind};
 use sessionmunch_llm::{ChatRequest, ChatResponse, LlmError, LlmProvider, LlmResult};
 use sessionmunch_mcp::{AdminState, admin_router};
 use sessionmunch_store::{DecayParams, Store};
 use sessionmunch_wiki::Wiki;
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
-use serde_json::json;
 use tempfile::TempDir;
 use tower::ServiceExt;
 use tracing::Level;

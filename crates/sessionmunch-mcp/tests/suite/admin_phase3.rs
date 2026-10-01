@@ -8,6 +8,8 @@
 //! `tower::ServiceExt::oneshot`.
 
 use super::common::{get, post};
+use axum::http::StatusCode;
+use serde_json::json;
 use sessionmunch_core::{
     ActorContext, AgentKind, NewObservation, NewPage, NewSession, ObservationKind, PagePath,
     Sanitized, Sanitizer, SessionId, Tier,
@@ -20,8 +22,6 @@ use sessionmunch_store::{
 };
 use sessionmunch_wiki::Wiki;
 use sessionmunch_wiki::WritePageRequest;
-use axum::http::StatusCode;
-use serde_json::json;
 use std::sync::Arc;
 use tempfile::TempDir;
 

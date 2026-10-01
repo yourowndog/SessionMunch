@@ -41,7 +41,7 @@ or Docker. Each tagged release publishes a macOS tarball per architecture.
 # 1. Download the archive for your chip and extract it to a stable location.
 #    aarch64 = Apple Silicon (M-series); x86_64 = Intel.
 mkdir -p ~/Applications/sessionmunch && cd ~/Applications/sessionmunch
-curl -fsSL -O https://github.com/akitaonrails/ai-memory/releases/latest/download/sessionmunch-macos-aarch64.tar.gz
+curl -fsSL -O https://github.com/yourowndog/SessionMunch/releases/latest/download/sessionmunch-macos-aarch64.tar.gz
 tar -xzf sessionmunch-macos-aarch64.tar.gz
 # `curl` downloads are not Gatekeeper-quarantined, so the binary runs as-is.
 # If you downloaded via a browser instead, clear the quarantine flag once:
@@ -163,7 +163,7 @@ comes up empty after installing the wrapper.
 # wrapper thin-client commands (status, search, …) are not rejected with 403.
 docker run -d --name sessionmunch --restart unless-stopped \
     -p 127.0.0.1:49374:49374 -v sessionmunch-data:/data \
-    akitaonrails/ai-memory:latest
+    yourowndog/sessionmunch:latest
 
 # Wire the native host agent. The wrapper keeps these rendered URLs on loopback.
 sessionmunch install-mcp   --client claude-code --apply
@@ -182,7 +182,7 @@ Every scenario above leaves the server in the foreground: close that terminal
 and capture stops. The macOS counterpart of a systemd user unit is a
 **LaunchAgent** — a plist in `~/Library/LaunchAgents/` that the per-user
 launchd domain starts at login and restarts on failure. The repo ships one at
-`packaging/launchd/com.github.akitaonrails.sessionmunch.plist`, and the macOS
+`packaging/launchd/com.sessionmunch.server.plist`, and the macOS
 release tarballs include it.
 
 launchd expands nothing. A plist has no home specifier and no
@@ -201,11 +201,11 @@ SESSIONMUNCH_BIN=~/Applications/sessionmunch/sessionmunch
 
 sed -e "s|__SESSIONMUNCH_BIN__|$SESSIONMUNCH_BIN|" \
     -e "s|__HOME__|$HOME|" \
-    packaging/launchd/com.github.akitaonrails.sessionmunch.plist \
-    > ~/Library/LaunchAgents/com.github.akitaonrails.sessionmunch.plist
+    packaging/launchd/com.sessionmunch.server.plist \
+    > ~/Library/LaunchAgents/com.sessionmunch.server.plist
 
 launchctl bootstrap gui/$(id -u) \
-    ~/Library/LaunchAgents/com.github.akitaonrails.sessionmunch.plist
+    ~/Library/LaunchAgents/com.sessionmunch.server.plist
 ```
 
 The agent runs `sessionmunch serve --transport http --enable-web` and passes
@@ -255,14 +255,14 @@ and tighten the file, because `~/Library/LaunchAgents` is not private:
 ```
 
 ```bash
-chmod 600 ~/Library/LaunchAgents/com.github.akitaonrails.sessionmunch.plist
+chmod 600 ~/Library/LaunchAgents/com.sessionmunch.server.plist
 ```
 
 ### Removing the agent
 
 ```bash
-launchctl bootout gui/$(id -u)/com.github.akitaonrails.sessionmunch
-rm ~/Library/LaunchAgents/com.github.akitaonrails.sessionmunch.plist
+launchctl bootout gui/$(id -u)/com.sessionmunch
+rm ~/Library/LaunchAgents/com.sessionmunch.server.plist
 ```
 
 Nothing rotates the two log files; they grow without bound. Add a

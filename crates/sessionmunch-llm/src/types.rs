@@ -466,9 +466,12 @@ mod tests {
     }
     #[test]
     fn parse_accepts_both_separators_and_trims() {
-        let headers =
-            ExtraHeaders::parse(["x-opencode-session = ses-1", "  x-tool: sessionmunch  ", "  "])
-                .expect("valid entries");
+        let headers = ExtraHeaders::parse([
+            "x-opencode-session = ses-1",
+            "  x-tool: sessionmunch  ",
+            "  ",
+        ])
+        .expect("valid entries");
         assert_eq!(headers.get("x-opencode-session"), Some("ses-1"));
         assert_eq!(headers.get("x-tool"), Some("sessionmunch"));
     }
@@ -516,7 +519,10 @@ mod tests {
     #[case("anthropic-version: 2023-06-01")]
     fn parse_rejects_headers_sessionmunch_owns(#[case] entry: &str) {
         let err = ExtraHeaders::parse([entry]).expect_err("reserved header must fail closed");
-        assert!(err.to_string().contains("set by sessionmunch itself"), "{err}");
+        assert!(
+            err.to_string().contains("set by sessionmunch itself"),
+            "{err}"
+        );
     }
 
     #[test]

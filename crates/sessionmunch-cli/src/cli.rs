@@ -2719,8 +2719,8 @@ mod tests {
         assert!(args.dry_run);
         assert!(!args.stage);
 
-        let cli =
-            Cli::try_parse_from(["sessionmunch", "curator", "--stage"]).expect("curator stage parses");
+        let cli = Cli::try_parse_from(["sessionmunch", "curator", "--stage"])
+            .expect("curator stage parses");
         let Command::Curator(args) = cli.command else {
             panic!("expected curator command");
         };
@@ -3297,8 +3297,12 @@ mod tests {
 
     #[test]
     fn install_hooks_project_strategy_rejects_invalid_value() {
-        let result =
-            Cli::try_parse_from(["sessionmunch", "install-hooks", "--project-strategy", "bogus"]);
+        let result = Cli::try_parse_from([
+            "sessionmunch",
+            "install-hooks",
+            "--project-strategy",
+            "bogus",
+        ]);
         assert!(
             result.is_err(),
             "an unknown --project-strategy value must be rejected by value_enum"
@@ -3396,9 +3400,15 @@ mod tests {
 
     #[test]
     fn user_add_keeps_the_legacy_token_contract() {
-        let parsed =
-            Cli::try_parse_from(["sessionmunch", "user", "add", "--username", "alice", "--json"])
-                .expect("legacy user add parses");
+        let parsed = Cli::try_parse_from([
+            "sessionmunch",
+            "user",
+            "add",
+            "--username",
+            "alice",
+            "--json",
+        ])
+        .expect("legacy user add parses");
         let Command::User(args) = parsed.command else {
             panic!("expected user command");
         };

@@ -1163,7 +1163,11 @@ drop_subagent_captures = "true"
         // A marker's explicit `project` wins over repo-root derivation, while
         // the baked default strategy is still forwarded.
         let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::write(tmp.path().join(".sessionmunch.toml"), "project = \"pinned\"\n").unwrap();
+        std::fs::write(
+            tmp.path().join(".sessionmunch.toml"),
+            "project = \"pinned\"\n",
+        )
+        .unwrap();
         let qs = marker_query_suffix(tmp.path().to_str().unwrap(), Some("repo-root"));
         assert!(qs.contains("&project=pinned"), "{qs}");
         assert!(qs.contains("&project_strategy=repo-root"), "{qs}");

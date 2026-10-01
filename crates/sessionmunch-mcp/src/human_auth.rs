@@ -10,10 +10,6 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use sessionmunch_core::{
-    ActorContext, AuthLevel, Capability, User, UserId, UserRole, validate_human_password,
-};
-use sessionmunch_store::{LiveWebSession, ReaderPool, WriterHandle, hash_session_secret, hash_token};
 use axum::Json;
 use axum::Router;
 use axum::extract::State;
@@ -22,6 +18,12 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use serde::{Deserialize, Serialize};
+use sessionmunch_core::{
+    ActorContext, AuthLevel, Capability, User, UserId, UserRole, validate_human_password,
+};
+use sessionmunch_store::{
+    LiveWebSession, ReaderPool, WriterHandle, hash_session_secret, hash_token,
+};
 use subtle::ConstantTimeEq;
 
 use crate::auth::AuthState;
@@ -1155,8 +1157,8 @@ pub fn password_is_reserved(state: &AuthState, password: &str) -> bool {
 mod tests {
     use super::*;
     use crate::auth::AuthState;
-    use sessionmunch_core::{ActorContext, AuthLevel};
     use axum::http::{StatusCode, header};
+    use sessionmunch_core::{ActorContext, AuthLevel};
     use tower::ServiceExt;
 
     #[test]
@@ -1822,10 +1824,12 @@ mod tests {
             .filter_map(|v| v.to_str().ok().map(str::to_string))
             .collect();
         assert!(
-            cookies.iter().any(|c| c.starts_with("sessionmunch_session=")
-                && c.contains("HttpOnly")
-                && c.contains("SameSite=Strict")
-                && c.contains("Path=/")),
+            cookies
+                .iter()
+                .any(|c| c.starts_with("sessionmunch_session=")
+                    && c.contains("HttpOnly")
+                    && c.contains("SameSite=Strict")
+                    && c.contains("Path=/")),
             "{cookies:?}"
         );
         assert!(

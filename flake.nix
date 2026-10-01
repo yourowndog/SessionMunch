@@ -113,7 +113,7 @@
 
           meta = {
             description = "Long-term memory for AI coding agents";
-            homepage = "https://github.com/akitaonrails/ai-memory";
+            url = "https://github.com/yourowndog/SessionMunch";
             license = pkgs.lib.licenses.mit;
             mainProgram = "sessionmunch";
           };

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Deprecated compatibility shim (namespace migration t_3f5184b0).
+# `ai-memory` is now `sessionmunch`. This shim execs the sibling
+# `sessionmunch` wrapper so pre-rename hook scripts, aliases, and docs
+# keep working until they are reinstalled. It is the ONLY `ai-memory`
+# executable a fresh install ships; new code must call `sessionmunch`.
+set -euo pipefail
+echo "ai-memory: renamed to sessionmunch; forwarding (reinstall wrappers to silence this)" >&2
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+exec "$script_dir/sessionmunch" "$@"

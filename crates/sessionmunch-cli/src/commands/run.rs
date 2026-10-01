@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
+use anyhow::{Context as _, Result, anyhow};
 use sessionmunch_core::{
     AgentKind, FinishManagedRunRequest, FinishManagedRunResponse, LinkManagedRunRequest,
     ManagedRunContextResponse, ManagedRunStatus, PrepareManagedRunRequest,
@@ -21,7 +22,6 @@ use sessionmunch_workstream::{
     kiro_selects_v3_engine, kiro_v3_resume_uses_default_store, list_native_sessions,
     native_session_exists, wait_for_transcript_flush,
 };
-use anyhow::{Context as _, Result, anyhow};
 use tokio::process::Command;
 
 use crate::cli::{RunArgs, RunHarnessChoice};
@@ -1385,12 +1385,12 @@ mod tests {
     use std::io::Cursor;
     use std::sync::atomic::AtomicUsize;
 
-    use sessionmunch_core::{ManagedRunId, WorkstreamId};
     use axum::Router;
     use axum::http::StatusCode;
     use axum::response::IntoResponse as _;
     use axum::routing::post;
     use clap::Parser as _;
+    use sessionmunch_core::{ManagedRunId, WorkstreamId};
 
     use super::*;
     use crate::cli::{Cli, Command as CliCommand};

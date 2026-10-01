@@ -128,8 +128,14 @@ mod tests {
 
     #[test]
     fn force_with_explicit_project_stays_scoped() {
-        let cli = Cli::try_parse_from(["sessionmunch", "embed", "--force", "--project", "consisanet"])
-            .unwrap();
+        let cli = Cli::try_parse_from([
+            "sessionmunch",
+            "embed",
+            "--force",
+            "--project",
+            "consisanet",
+        ])
+        .unwrap();
         let Command::Embed(args) = cli.command else {
             panic!("expected embed command");
         };

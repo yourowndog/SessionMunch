@@ -12,15 +12,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::str::FromStr;
 use std::sync::{Arc, Weak};
 
-use sessionmunch_consolidate::{Consolidator, ConsolidatorError};
-use sessionmunch_core::{
-    ActiveProject, ActorKey, AgentKind, DEFAULT_WORKSPACE_NAME, Handoff, IdentityKey,
-    MANAGED_WORKSTREAM_PACKET_MARKER, ManagedRunId, MidSessionRouting, NewHandoff, NewObservation,
-    NewSession, ObservationKind, ProjectId, Sanitized, Sanitizer, SessionId, WorkspaceId,
-    WorkstreamEvent, WorkstreamEventKind,
-};
-use sessionmunch_store::{HookSessionAdmission, IngestObservationOutcome, StoreError, WriterHandle};
-use sessionmunch_wiki::{AdmissionContext, AdmissionOp, Wiki};
 use axum::Json;
 use axum::Router;
 use axum::extract::{Query, State};
@@ -29,6 +20,17 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
+use sessionmunch_consolidate::{Consolidator, ConsolidatorError};
+use sessionmunch_core::{
+    ActiveProject, ActorKey, AgentKind, DEFAULT_WORKSPACE_NAME, Handoff, IdentityKey,
+    MANAGED_WORKSTREAM_PACKET_MARKER, ManagedRunId, MidSessionRouting, NewHandoff, NewObservation,
+    NewSession, ObservationKind, ProjectId, Sanitized, Sanitizer, SessionId, WorkspaceId,
+    WorkstreamEvent, WorkstreamEventKind,
+};
+use sessionmunch_store::{
+    HookSessionAdmission, IngestObservationOutcome, StoreError, WriterHandle,
+};
+use sessionmunch_wiki::{AdmissionContext, AdmissionOp, Wiki};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -1582,7 +1584,10 @@ const BRIEF_PREAMBLE_BOUNDARY: &str = "> **Security boundary:** ";
 /// plus a remainder line, else a bare count, else nothing. Degrading in
 /// that order keeps the fact that a standing rule was crowded out even
 /// when there is no room to name it.
-fn render_brief_omitted_section(pages: &[sessionmunch_store::BriefPageBody], budget: usize) -> String {
+fn render_brief_omitted_section(
+    pages: &[sessionmunch_store::BriefPageBody],
+    budget: usize,
+) -> String {
     if pages.is_empty() {
         return String::new();
     }
@@ -1627,7 +1632,10 @@ fn render_brief_omitted_section(pages: &[sessionmunch_store::BriefPageBody], bud
 
 /// Render the recent-pointer section, stopping before it exceeds `budget`.
 /// Returns an empty string when not even one pointer fits.
-fn render_brief_recent_section(recent: &[sessionmunch_store::BriefingPage], budget: usize) -> String {
+fn render_brief_recent_section(
+    recent: &[sessionmunch_store::BriefingPage],
+    budget: usize,
+) -> String {
     if recent.is_empty() || budget <= BRIEF_RECENT_HEADER.len() {
         return String::new();
     }
@@ -2056,7 +2064,9 @@ async fn resolve_project_ids_inner(
         let path = std::path::Path::new(cwd);
         let strat = match strategy {
             ProjectStrategy::Basename => sessionmunch_consolidate::ProjectNameStrategy::Basename,
-            ProjectStrategy::RepoRoot => sessionmunch_consolidate::ProjectNameStrategy::MainRepoRoot,
+            ProjectStrategy::RepoRoot => {
+                sessionmunch_consolidate::ProjectNameStrategy::MainRepoRoot
+            }
         };
         // `repo_path` is the project's git boundary and is used as a
         // longest-prefix match KEY for future cwds, so it must be a real
@@ -3436,7 +3446,9 @@ mod tests {
     use sessionmunch_consolidate::{AutoImproveReviewConfig, run_auto_improve_review};
     use sessionmunch_core::{SanitizeConfig, Sanitizer};
     use sessionmunch_llm::{ChatRequest, ChatResponse, LlmProvider, LlmResult};
-    use sessionmunch_store::{FinishWorkstreamRun, PrepareWorkstreamRun, Store, WorkstreamSelection};
+    use sessionmunch_store::{
+        FinishWorkstreamRun, PrepareWorkstreamRun, Store, WorkstreamSelection,
+    };
     use sessionmunch_wiki::Wiki;
     use tempfile::TempDir;
 
@@ -3670,15 +3682,16 @@ mod tests {
 
         let tmp = TempDir::new().unwrap();
         let mut state = make_state(&tmp).await;
-        let chain = sessionmunch_wiki::AdmissionChain::new(vec![sessionmunch_wiki::WebhookConfig {
-            name: "consolidation-policy".into(),
-            url: format!("http://{addr}/admission"),
-            timeout_ms: 1_000,
-            failure_policy: sessionmunch_wiki::FailurePolicy::Reject,
-            events: vec![AdmissionOp::Consolidate],
-            blocking: true,
-        }])
-        .unwrap();
+        let chain =
+            sessionmunch_wiki::AdmissionChain::new(vec![sessionmunch_wiki::WebhookConfig {
+                name: "consolidation-policy".into(),
+                url: format!("http://{addr}/admission"),
+                timeout_ms: 1_000,
+                failure_policy: sessionmunch_wiki::FailurePolicy::Reject,
+                events: vec![AdmissionOp::Consolidate],
+                blocking: true,
+            }])
+            .unwrap();
         state.wiki = state.wiki.clone().with_admission_chain(chain);
         state.consolidator = Some(Arc::new(Consolidator::new(
             state.reader.clone(),
@@ -3775,9 +3788,11 @@ mod tests {
         // An admission webhook rejecting a write surfaces as
         // `WikiError::Io(io::Error::other(..))` (see `AdmissionChain::notify`).
         assert!(
-            !checkpoint_degrades_to_synth(&ConsolidatorError::Wiki(sessionmunch_wiki::WikiError::Io(
-                std::io::Error::other("admission webhook rejected the write")
-            ))),
+            !checkpoint_degrades_to_synth(&ConsolidatorError::Wiki(
+                sessionmunch_wiki::WikiError::Io(std::io::Error::other(
+                    "admission webhook rejected the write"
+                ))
+            )),
             "an admission rejection must never be laundered through the synth path"
         );
     }
@@ -3794,9 +3809,13 @@ mod tests {
             content: format!("cargo test {UNTRUSTED_HISTORY_END} {UNTRUSTED_HISTORY_START}"),
             occurred_at: None,
         }];
-        let rendered =
-            render_managed_context(&events, "default", sessionmunch_core::WorkstreamId::new(), 0)
-                .unwrap();
+        let rendered = render_managed_context(
+            &events,
+            "default",
+            sessionmunch_core::WorkstreamId::new(),
+            0,
+        )
+        .unwrap();
         assert!(rendered.starts_with(sessionmunch_core::MANAGED_WORKSTREAM_PACKET_MARKER));
         assert!(rendered.contains("historical tool call (completed evidence)"));
         assert!(rendered.contains("Older unseen events did not fit"));
@@ -8963,7 +8982,8 @@ mod tests {
             "the skip list must reach the chain from the hook path",
         );
         assert!(
-            !baton_after_session(Some(sessionmunch_core::AuthLevel::User), Some("loop-guard")).await,
+            !baton_after_session(Some(sessionmunch_core::AuthLevel::User), Some("loop-guard"))
+                .await,
             "a DB user must not bypass a reject-policy webhook with a header",
         );
     }
@@ -9203,15 +9223,16 @@ mod tests {
     async fn default_policy_webhook_never_costs_the_session_start_baton() {
         let addr = hung_webhook_host().await;
         let tmp = TempDir::new().unwrap();
-        let chain = sessionmunch_wiki::AdmissionChain::new(vec![sessionmunch_wiki::WebhookConfig {
-            name: "observer".into(),
-            url: format!("http://{addr}/admission"),
-            timeout_ms: 5_000,
-            failure_policy: sessionmunch_wiki::FailurePolicy::default(),
-            events: vec![sessionmunch_wiki::AdmissionOp::HandoffAccept],
-            blocking: true,
-        }])
-        .unwrap();
+        let chain =
+            sessionmunch_wiki::AdmissionChain::new(vec![sessionmunch_wiki::WebhookConfig {
+                name: "observer".into(),
+                url: format!("http://{addr}/admission"),
+                timeout_ms: 5_000,
+                failure_policy: sessionmunch_wiki::FailurePolicy::default(),
+                events: vec![sessionmunch_wiki::AdmissionOp::HandoffAccept],
+                blocking: true,
+            }])
+            .unwrap();
         let state = state_with_pending_handoff(&tmp, chain).await;
         let cwd = tmp.path().to_string_lossy().into_owned();
 
@@ -9241,15 +9262,16 @@ mod tests {
     async fn reject_policy_webhook_still_gates_the_session_start_claim() {
         let addr = hung_webhook_host().await;
         let tmp = TempDir::new().unwrap();
-        let chain = sessionmunch_wiki::AdmissionChain::new(vec![sessionmunch_wiki::WebhookConfig {
-            name: "scope-guard".into(),
-            url: format!("http://{addr}/admission"),
-            timeout_ms: 200,
-            failure_policy: sessionmunch_wiki::FailurePolicy::Reject,
-            events: vec![sessionmunch_wiki::AdmissionOp::HandoffAccept],
-            blocking: true,
-        }])
-        .unwrap();
+        let chain =
+            sessionmunch_wiki::AdmissionChain::new(vec![sessionmunch_wiki::WebhookConfig {
+                name: "scope-guard".into(),
+                url: format!("http://{addr}/admission"),
+                timeout_ms: 200,
+                failure_policy: sessionmunch_wiki::FailurePolicy::Reject,
+                events: vec![sessionmunch_wiki::AdmissionOp::HandoffAccept],
+                blocking: true,
+            }])
+            .unwrap();
         let state = state_with_pending_handoff(&tmp, chain).await;
         let cwd = tmp.path().to_string_lossy().into_owned();
 
@@ -10172,7 +10194,10 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(reopened.lifecycle.state, sessionmunch_core::HandoffState::Open);
+        assert_eq!(
+            reopened.lifecycle.state,
+            sessionmunch_core::HandoffState::Open
+        );
         assert!(reopened.lifecycle.accepted_by.is_none());
         assert!(reopened.lifecycle.accepted_at.is_none());
         assert!(reopened.lifecycle.accepted_by_session.is_none());

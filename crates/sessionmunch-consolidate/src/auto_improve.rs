@@ -11,13 +11,13 @@ use std::pin::Pin;
 use std::process::Stdio;
 use std::time::Duration;
 
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize, de};
 use sessionmunch_core::{Observation, PagePath, ProjectId, SessionId, WorkspaceId};
 use sessionmunch_llm::{
     ChatMessage, ChatRequest, LlmError, LlmProvider, Role, complete_structured_with_operation_id,
 };
 use sessionmunch_store::{AutoImproveRejectionSummary, BriefingPage, ReaderPool, StoredPageBody};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize, de};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
@@ -1864,12 +1864,12 @@ Every proposal must include bounded evidence quotes, confidence, rationale, and 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jiff::Timestamp;
     use sessionmunch_core::{
         AgentKind, NewObservation, NewSession, ObservationId, ObservationKind, Sanitized, Sanitizer,
     };
     use sessionmunch_llm::{ChatResponse, LlmResult};
     use sessionmunch_store::Store;
-    use jiff::Timestamp;
     use tempfile::TempDir;
 
     struct FakeLlm;

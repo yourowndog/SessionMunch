@@ -158,8 +158,8 @@ new_text = unreleased_pattern.sub(lambda _: new_block + "\n## [", text, count=1)
 new_text = re.sub(
     r'^\[Unreleased\]:.*$',
     lambda _: (
-        "[Unreleased]: https://github.com/akitaonrails/ai-memory/compare/$TAG...HEAD\n"
-        "[$VERSION]: https://github.com/akitaonrails/ai-memory/releases/tag/$TAG"
+        "[Unreleased]: https://github.com/yourowndog/SessionMunch/compare/$TAG...HEAD\n"
+        "[$VERSION]: https://github.com/yourowndog/SessionMunch/releases/tag/$TAG"
     ),
     new_text,
     flags=re.MULTILINE,

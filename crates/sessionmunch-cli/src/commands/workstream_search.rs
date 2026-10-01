@@ -1,7 +1,7 @@
 //! Explicit retrieval for history older than a managed startup packet.
 
-use sessionmunch_core::WorkstreamEvent;
 use anyhow::Result;
+use sessionmunch_core::WorkstreamEvent;
 
 use crate::cli::WorkstreamSearchArgs;
 use crate::config::Config;

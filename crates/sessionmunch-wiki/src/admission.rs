@@ -30,9 +30,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use sessionmunch_core::PagePath;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use sessionmunch_core::PagePath;
 
 use crate::error::WikiError;
 use crate::{Markdown, WikiResult};

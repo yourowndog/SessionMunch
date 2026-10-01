@@ -83,7 +83,7 @@ if docker manifest inspect "$IMAGE" >/dev/null 2>&1 &&
     Deploy a private tag instead — set IMAGE in bin/deploy.env to
     something like:
 
-        IMAGE="akitaonrails/ai-memory:homelab"
+        IMAGE="yourowndog/sessionmunch:homelab"
 
     and point docker-compose.yml on the server at that tag. Release
     tags (:latest, :X.Y.Z) are published by CI only.

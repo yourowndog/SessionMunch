@@ -8,11 +8,11 @@
 
 use std::collections::BTreeMap;
 
+use jiff::tz::TimeZone;
 use sessionmunch_core::{
     AgentKind, NewPage, Observation, ObservationKind, PagePath, ProjectId, SessionId, Tier,
     WorkspaceId, looks_like_scaffolding,
 };
-use jiff::tz::TimeZone;
 
 use crate::payload::{is_safe_tool_title, truncate_for_title};
 
@@ -419,8 +419,8 @@ mod tests {
     fn test_session_id() -> SessionId {
         SessionId::new()
     }
-    use sessionmunch_core::{ObservationId, SessionId};
     use jiff::Timestamp;
+    use sessionmunch_core::{ObservationId, SessionId};
 
     fn obs(kind: ObservationKind, title: &str) -> Observation {
         Observation {

@@ -73,7 +73,7 @@ relevant block is:
 ```yaml
 services:
   sessionmunch:
-    image: akitaonrails/ai-memory:latest
+    image: yourowndog/sessionmunch:latest
     container_name: sessionmunch
     restart: unless-stopped
     expose:
@@ -279,7 +279,7 @@ Copy `docker/compose.tls.cloudflared.yml`. The relevant block:
 ```yaml
 services:
   sessionmunch:
-    image: akitaonrails/ai-memory:latest
+    image: yourowndog/sessionmunch:latest
     container_name: sessionmunch
     restart: unless-stopped
     expose:

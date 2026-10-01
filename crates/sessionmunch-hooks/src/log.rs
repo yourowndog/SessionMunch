@@ -20,9 +20,9 @@
 //! `forget-sweep --logs --older-than 12m` could delete cold files if
 //! it becomes worthwhile.
 
+use jiff::{Timestamp, tz::TimeZone};
 use sessionmunch_core::{ProjectId, WorkspaceId};
 use sessionmunch_wiki::Wiki;
-use jiff::{Timestamp, tz::TimeZone};
 use tracing::debug;
 
 use crate::payload::HookEvent;
@@ -93,9 +93,9 @@ fn format_line(when: Timestamp, event: HookEvent, title: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jiff::civil::DateTime;
     use sessionmunch_store::Store;
     use sessionmunch_wiki::Wiki;
-    use jiff::civil::DateTime;
     use tempfile::TempDir;
 
     #[test]

@@ -6,9 +6,9 @@
 //! replacing the scalar, so the retention formula, the hard-delete predicate
 //! and every existing query keep reading exactly what they read before.
 
+use rusqlite::{Connection, params};
 use sessionmunch_core::{IdentityKey, NewPage, PagePath, Tier};
 use sessionmunch_store::{DecayParams, Store, retention_score, retention_score_with_breadth};
-use rusqlite::{Connection, params};
 
 /// The qualified TEXT the read path records operators under — built through
 /// the contract (`IdentityKey::storage_key()`), never hand-written, so these

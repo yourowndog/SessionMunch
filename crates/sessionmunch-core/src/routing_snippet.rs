@@ -24,19 +24,21 @@ pub const MARKER_START: &str = "<!-- sessionmunch:start -->";
 /// HTML-comment marker that closes the managed section.
 pub const MARKER_END: &str = "<!-- sessionmunch:end -->";
 
-/// Pre-rename marker pair. Recognized read-only so reinstall replaces (never
-/// duplicates) and uninstall removes old-managed blocks; never written by
-/// SessionMunch (t_3f5184b0).
+/// Pre-rename start marker. Recognized read-only so reinstall replaces
+/// (never duplicates) and uninstall removes old-managed blocks.
 pub const LEGACY_MARKER_START: &str = "<!-- sessionmunch:start -->";
+/// Pre-rename end marker. Recognized read-only so reinstall replaces
+/// (never duplicates) and uninstall removes old-managed blocks.
 pub const LEGACY_MARKER_END: &str = "<!-- sessionmunch:end -->";
 
 /// Locate a managed instructions block of either generation: `(start_idx,
 /// end_idx)` with `end_idx` just past the end marker. New markers first.
 #[must_use]
 pub fn find_managed_block(existing: &str) -> Option<(usize, usize)> {
-    for (start_marker, end_marker) in
-        [(MARKER_START, MARKER_END), (LEGACY_MARKER_START, LEGACY_MARKER_END)]
-    {
+    for (start_marker, end_marker) in [
+        (MARKER_START, MARKER_END),
+        (LEGACY_MARKER_START, LEGACY_MARKER_END),
+    ] {
         if let Some(start_idx) = find_marker_line(existing, start_marker, 0)
             && let Some(end_pos) = find_marker_line(existing, end_marker, start_idx)
         {
@@ -51,7 +53,7 @@ pub fn find_managed_block(existing: &str) -> Option<(usize, usize)> {
 pub const SNIPPET_BODY: &str = r#"
 ## Long-term memory (sessionmunch)
 
-This project uses [sessionmunch](https://github.com/akitaonrails/ai-memory)
+This project uses [sessionmunch](https://github.com/yourowndog/SessionMunch)
 for cross-session continuity.
 
 **Choose project scope from the MCP client's identity support.**
@@ -170,7 +172,7 @@ start/end HTML-comment markers, without disturbing the rest of the file.
 pub const COMPACT_SNIPPET_BODY: &str = r#"
 ## Long-term memory (sessionmunch)
 
-This project uses [sessionmunch](https://github.com/akitaonrails/ai-memory) for cross-session and cross-harness continuity.
+This project uses [sessionmunch](https://github.com/yourowndog/SessionMunch) for cross-session and cross-harness continuity.
 
 ### Scope
 

@@ -24,9 +24,9 @@
 //! bypass a reject-policy admission webhook by setting a client-controlled
 //! header.
 
-use sessionmunch_core::{ActorContext, AuthLevel, UserId};
 use axum::http::HeaderMap;
 use axum::http::request::Parts;
+use sessionmunch_core::{ActorContext, AuthLevel, UserId};
 
 fn header_str(headers: &HeaderMap, name: &str) -> Option<String> {
     headers

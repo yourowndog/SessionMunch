@@ -410,7 +410,10 @@ mod tests {
     fn quote_emits_whole_and_subtoken_phrase() {
         // Legacy path-index compatibility: "sessionmunch" expands to also search
         // "ai memory" (the split form of old "ai-memory" paths).
-        assert_eq!(quote_fts5_token("sessionmunch"), r#"("sessionmunch" OR "ai memory")"#);
+        assert_eq!(
+            quote_fts5_token("sessionmunch"),
+            r#"("sessionmunch" OR "ai memory")"#
+        );
         // A literal-quote fragment keeps the simple escaped form (no expansion).
         assert_eq!(quote_fts5_token(r#"say "hello""#), r#""say ""hello""""#);
         // No punctuation → single phrase.

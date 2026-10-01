@@ -16,9 +16,9 @@
 //! tested alongside its definition; here we cover what `is_parse_shape_error`
 //! actually changes about end-to-end behaviour.
 
+use serde_json::json;
 use sessionmunch_llm::types::ChatRequest;
 use sessionmunch_llm::{LlmProvider, OpenAiCompatProvider};
-use serde_json::json;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use wiremock::matchers::{method, path};

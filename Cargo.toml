@@ -35,25 +35,25 @@ default-members = [
 ]
 
 [workspace.package]
-version = "2.2.1"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT"
-repository = "https://github.com/akitaonrails/ai-memory"
+repository = "https://github.com/yourowndog/SessionMunch"
 authors = ["Fabio Akita <boss@akitaonrails.com>"]
 
 [workspace.dependencies]
 # Inter-crate dependencies.
-sessionmunch-core = { path = "crates/sessionmunch-core", version = "2.2.1" }
-sessionmunch-store = { path = "crates/sessionmunch-store", version = "2.2.1" }
-sessionmunch-wiki = { path = "crates/sessionmunch-wiki", version = "2.2.1" }
-sessionmunch-mcp = { path = "crates/sessionmunch-mcp", version = "2.2.1" }
-sessionmunch-hooks = { path = "crates/sessionmunch-hooks", version = "2.2.1" }
-sessionmunch-llm = { path = "crates/sessionmunch-llm", version = "2.2.1" }
-sessionmunch-consolidate = { path = "crates/sessionmunch-consolidate", version = "2.2.1" }
-sessionmunch-web = { path = "crates/sessionmunch-web", version = "2.2.1" }
-sessionmunch-workstream = { path = "crates/sessionmunch-workstream", version = "2.2.1" }
-sessionmunch-test-support = { path = "crates/sessionmunch-test-support", version = "2.1.1" }
+sessionmunch-core = { path = "crates/sessionmunch-core", version = "0.1.0" }
+sessionmunch-store = { path = "crates/sessionmunch-store", version = "0.1.0" }
+sessionmunch-wiki = { path = "crates/sessionmunch-wiki", version = "0.1.0" }
+sessionmunch-mcp = { path = "crates/sessionmunch-mcp", version = "0.1.0" }
+sessionmunch-hooks = { path = "crates/sessionmunch-hooks", version = "0.1.0" }
+sessionmunch-llm = { path = "crates/sessionmunch-llm", version = "0.1.0" }
+sessionmunch-consolidate = { path = "crates/sessionmunch-consolidate", version = "0.1.0" }
+sessionmunch-web = { path = "crates/sessionmunch-web", version = "0.1.0" }
+sessionmunch-workstream = { path = "crates/sessionmunch-workstream", version = "0.1.0" }
+sessionmunch-test-support = { path = "crates/sessionmunch-test-support", version = "0.1.0" }
 
 # (Workspace shared deps follow below)
 

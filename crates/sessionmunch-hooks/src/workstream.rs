@@ -6,6 +6,13 @@ use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
 use std::path::{Path, PathBuf};
 use std::str::FromStr as _;
 
+use axum::extract::{Path as AxumPath, Query, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Extension, Json, Router};
+use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
 use sessionmunch_core::{
     AgentKind, AuthLevel, Capability, FinishManagedRunRequest, FinishManagedRunResponse,
     LinkManagedRunRequest, ListManagedWorkstreamsRequest, ManagedRunContextResponse, ManagedRunId,
@@ -18,13 +25,6 @@ use sessionmunch_store::{
     StoreError, WorkstreamSelection, WorkstreamSelector, WriterHandle, create_explicit_scope,
     lookup_existing_scope,
 };
-use axum::extract::{Path as AxumPath, Query, State};
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
-use axum::{Extension, Json, Router};
-use jiff::Timestamp;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use tracing::warn;
 
@@ -924,8 +924,8 @@ fn truncate_owned(value: &mut String, max: usize) {
 
 #[cfg(test)]
 mod tests {
-    use sessionmunch_store::Store;
     use axum::body::to_bytes;
+    use sessionmunch_store::Store;
     use tempfile::TempDir;
 
     use super::*;
@@ -959,7 +959,9 @@ mod tests {
         }
     }
 
-    async fn seed_scope(store: &Store) -> (sessionmunch_core::WorkspaceId, sessionmunch_core::ProjectId) {
+    async fn seed_scope(
+        store: &Store,
+    ) -> (sessionmunch_core::WorkspaceId, sessionmunch_core::ProjectId) {
         let workspace_id = store
             .writer
             .get_or_create_workspace("default")

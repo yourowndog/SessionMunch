@@ -25,10 +25,10 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use rusqlite::Connection;
 use sessionmunch_core::{NewPage, PagePath, Tier};
 use sessionmunch_store::Store;
 use sessionmunch_store::create_explicit_scope;
-use rusqlite::Connection;
 use tempfile::TempDir;
 
 const BIN: &str = env!("CARGO_BIN_EXE_sessionmunch");

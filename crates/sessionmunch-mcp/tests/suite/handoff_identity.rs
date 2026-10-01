@@ -20,17 +20,17 @@
 //! the production `require_bearer` middleware in front, so the rungs under test
 //! are the ones an operator actually configures.
 
-use sessionmunch_core::ActorContext;
-use sessionmunch_mcp::SessionMunchServer;
-use sessionmunch_mcp::auth::{AuthState, require_bearer};
-use sessionmunch_store::Store;
-use sessionmunch_wiki::Wiki;
 use axum::Router;
 use axum::body::Body;
 use axum::http::Request;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use serde_json::{Value, json};
+use sessionmunch_core::ActorContext;
+use sessionmunch_mcp::SessionMunchServer;
+use sessionmunch_mcp::auth::{AuthState, require_bearer};
+use sessionmunch_store::Store;
+use sessionmunch_wiki::Wiki;
 use std::sync::Arc;
 use tempfile::TempDir;
 use tower::ServiceExt;

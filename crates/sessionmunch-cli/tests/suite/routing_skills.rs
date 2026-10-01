@@ -19,7 +19,10 @@ fn install_skills_print_outputs_plan_without_mutating_target_dir() {
             "--print",
         ])
         .env("HOME", home.path())
-        .env("SESSIONMUNCH_DATA_DIR", home.path().join(".sessionmunch-data"))
+        .env(
+            "SESSIONMUNCH_DATA_DIR",
+            home.path().join(".sessionmunch-data"),
+        )
         .output()
         .unwrap();
 

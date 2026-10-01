@@ -27,7 +27,7 @@ docker run -d --name sessionmunch \
     -v sessionmunch-data:/data \
     -e SESSIONMUNCH_AUTH_TOKEN="$TOKEN" \
     -e SESSIONMUNCH_ALLOWED_HOSTS="<server-ip>,localhost,127.0.0.1" \
-    akitaonrails/ai-memory:latest
+    yourowndog/sessionmunch:latest
 
 sessionmunch install-mcp   --client claude-code --apply \
     --server-url "http://<server-ip>:49374/mcp" --auth-token "$TOKEN"

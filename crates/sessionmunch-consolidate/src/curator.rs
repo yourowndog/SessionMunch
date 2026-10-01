@@ -2,10 +2,10 @@
 
 use std::collections::HashMap;
 
-use sessionmunch_core::{ProjectId, Tier, WorkspaceId};
-use sessionmunch_store::{DecayParams, ReaderPool, retention_score_with_breadth};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
+use sessionmunch_core::{ProjectId, Tier, WorkspaceId};
+use sessionmunch_store::{DecayParams, ReaderPool, retention_score_with_breadth};
 
 use crate::sweep::access_breadth_for_scoring;
 
@@ -324,10 +324,10 @@ fn age_days(now_us: i64, then_us: i64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::params;
     use sessionmunch_core::{ActorContext, NewPage, PageId, PagePath};
     use sessionmunch_store::Store;
     use sessionmunch_wiki::{Wiki, WritePageRequest};
-    use rusqlite::params;
     use std::path::{Path, PathBuf};
     use tempfile::TempDir;
 

@@ -17,6 +17,12 @@
 //! `user.username` into the actor key would split the per-actor map
 //! across rungs, which is exactly what this test pins.
 
+use axum::Router;
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
+use serde_json::json;
 use sessionmunch_core::{
     ActiveProject, ActiveProjectMode, ActorContext, ApiCredentialId, NewUser, SessionId, Tier,
     UserRole,
@@ -25,12 +31,6 @@ use sessionmunch_hooks::{HookState, ProjectCacheStore, SubagentSessionSet, hook_
 use sessionmunch_mcp::SessionMunchServer;
 use sessionmunch_store::{Store, TokenPepper, generate_api_key, hash_token};
 use sessionmunch_wiki::Wiki;
-use axum::Router;
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
-use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
-use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
-use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;

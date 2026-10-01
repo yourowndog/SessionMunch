@@ -1,7 +1,7 @@
 //! `sessionmunch llm-test` — smoke test an LLM provider end-to-end.
 
-use sessionmunch_llm::{ChatRequest, ProviderChoice, ProviderConfig, build_provider};
 use anyhow::{Context, Result};
+use sessionmunch_llm::{ChatRequest, ProviderChoice, ProviderConfig, build_provider};
 use tracing::info;
 
 use crate::cli::{LlmProviderChoice, LlmTestArgs};

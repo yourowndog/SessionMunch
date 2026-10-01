@@ -321,7 +321,9 @@ pub async fn run_drain(data_dir: Option<PathBuf>) -> anyhow::Result<()> {
         Ok(outcome) => {
             let _ = write_drain_report(&mut std::io::stderr(), &outcome);
         }
-        Err(err) => eprintln!("sessionmunch hook-drain warning: failed to acquire drain lock: {err}"),
+        Err(err) => {
+            eprintln!("sessionmunch hook-drain warning: failed to acquire drain lock: {err}")
+        }
     }
     Ok(())
 }
@@ -1009,8 +1011,9 @@ mod tests {
     #[test]
     fn resolve_data_dir_strips_verbatim_prefix_from_baked_arg() {
         // Recover safe verbatim data dirs baked by older installs (#116).
-        let resolved =
-            resolve_data_dir(Some(Path::new(r"\\?\C:\Users\me\AppData\Local\sessionmunch")));
+        let resolved = resolve_data_dir(Some(Path::new(
+            r"\\?\C:\Users\me\AppData\Local\sessionmunch",
+        )));
         assert_eq!(
             resolved,
             PathBuf::from(r"C:\Users\me\AppData\Local\sessionmunch")
@@ -1987,7 +1990,10 @@ mod tests {
                     let body: serde_json::Value = serde_json::from_str(&entry.body).unwrap();
                     assert_eq!(body["session_id"], "native-codex");
                     assert_eq!(body["tool_call_id"], "call-native-1");
-                    assert_eq!(body["_sessionmunch_capture"]["disposition"], "metadata-only");
+                    assert_eq!(
+                        body["_sessionmunch_capture"]["disposition"],
+                        "metadata-only"
+                    );
                     assert_eq!(
                         body["_sessionmunch_capture"]["extraction_state"],
                         "missing-or-malformed"

@@ -377,7 +377,9 @@ pub(crate) fn resolve_project_name(config: &Config, explicit: Option<&str>) -> R
 /// indistinguishable from one the reviewer never produced — the run reports
 /// success either way, only with one proposal fewer — and the operator has no
 /// way to learn that a paid review result was dropped.
-pub(crate) fn skipped_proposal_lines(skipped: &[sessionmunch_store::SkippedProposal]) -> Vec<String> {
+pub(crate) fn skipped_proposal_lines(
+    skipped: &[sessionmunch_store::SkippedProposal],
+) -> Vec<String> {
     if skipped.is_empty() {
         return Vec::new();
     }
@@ -474,7 +476,11 @@ mod tests {
     #[test]
     fn workspace_only_marker_uses_hook_basename_from_a_subdirectory() {
         let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::write(tmp.path().join(".sessionmunch.toml"), "workspace = \"acme\"\n").unwrap();
+        std::fs::write(
+            tmp.path().join(".sessionmunch.toml"),
+            "workspace = \"acme\"\n",
+        )
+        .unwrap();
         let subdir = tmp.path().join("crates").join("cli");
         std::fs::create_dir_all(&subdir).unwrap();
         let config = Config {
@@ -547,7 +553,11 @@ mod tests {
             "gitdir: /repo/.git/worktrees/feature\n",
         )
         .unwrap();
-        std::fs::write(worktree.join(".sessionmunch.toml"), "workspace = \"acme\"\n").unwrap();
+        std::fs::write(
+            worktree.join(".sessionmunch.toml"),
+            "workspace = \"acme\"\n",
+        )
+        .unwrap();
         let config = Config {
             runtime_env: RuntimeEnv::with_host_cwd_for_tests(worktree.to_str().unwrap()),
             ..Config::default()

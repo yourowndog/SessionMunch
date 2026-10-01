@@ -3,13 +3,13 @@
 //! Spins up a `Store` + `Wiki` in a tempdir, seeds two pages, builds
 //! the router, and exercises each route via `tower::ServiceExt::oneshot`.
 
+use axum::body::Body;
+use axum::http::{Method, Request, StatusCode, header};
+use serde_json::Value;
 use sessionmunch_core::{AgentKind, NewHandoff, NewPage, PagePath, Tier};
 use sessionmunch_store::Store;
 use sessionmunch_web::{api_router, router};
 use sessionmunch_wiki::{Wiki, WritePageRequest};
-use axum::body::Body;
-use axum::http::{Method, Request, StatusCode, header};
-use serde_json::Value;
 use tempfile::TempDir;
 use tower::ServiceExt;
 

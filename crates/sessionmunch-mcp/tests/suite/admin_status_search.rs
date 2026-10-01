@@ -4,12 +4,12 @@
 //! router: build an `AdminState` over a real on-disk store + wiki,
 //! seed a couple of pages, and hit each route.
 
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
 use sessionmunch_core::{NewPage, PagePath, Tier};
 use sessionmunch_mcp::{AdminState, admin_router};
 use sessionmunch_store::{DecayParams, Store};
 use sessionmunch_wiki::Wiki;
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
 use tempfile::TempDir;
 use tower::ServiceExt;
 

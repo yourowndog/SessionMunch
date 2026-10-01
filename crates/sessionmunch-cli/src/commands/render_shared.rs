@@ -1454,7 +1454,10 @@ fn hook_command(
                 prefix.push_str(&format!("SESSIONMUNCH_AUTH_TOKEN={} ", shell_quote(t)));
             }
             if let Some(s) = context.project_strategy {
-                prefix.push_str(&format!("SESSIONMUNCH_PROJECT_STRATEGY={} ", shell_quote(s)));
+                prefix.push_str(&format!(
+                    "SESSIONMUNCH_PROJECT_STRATEGY={} ",
+                    shell_quote(s)
+                ));
             }
             format!("{prefix}{}", shell_quote(&script.to_string_lossy()))
         }
@@ -1492,7 +1495,10 @@ fn hook_command(
                 inner.push_str(&format!("SESSIONMUNCH_AUTH_TOKEN={} ", shell_quote(t)));
             }
             if let Some(s) = context.project_strategy {
-                inner.push_str(&format!("SESSIONMUNCH_PROJECT_STRATEGY={} ", shell_quote(s)));
+                inner.push_str(&format!(
+                    "SESSIONMUNCH_PROJECT_STRATEGY={} ",
+                    shell_quote(s)
+                ));
             }
             inner.push_str(&shell_quote(&bash_path));
             format!("bash -c {}", shell_quote(&inner))
@@ -1597,7 +1603,8 @@ fn windows_native_exec_spec(
     auth_token: Option<&str>,
     context: HookCommandContext<'_>,
 ) -> HookHandlerSpec {
-    let exe = std::env::current_exe().unwrap_or_else(|_| Path::new("sessionmunch.exe").to_path_buf());
+    let exe =
+        std::env::current_exe().unwrap_or_else(|_| Path::new("sessionmunch.exe").to_path_buf());
     windows_native_exec_spec_with_exe(&exe, script, server_url, auth_token, context)
 }
 
@@ -2050,7 +2057,8 @@ mod tests {
 
         let temp = tempfile::tempdir().unwrap();
         let module = temp.path().join("capture-policy-runtime-evidence.ts");
-        let fixture = include_str!("../../../sessionmunch-hooks/tests/fixtures/capture-policy.json");
+        let fixture =
+            include_str!("../../../sessionmunch-hooks/tests/fixtures/capture-policy.json");
         let fixture = serde_json::to_string(fixture).unwrap();
         let source = format!(
             r#"import {{ closeSync, mkdirSync, openSync, readFileSync as readMarkerText, readSync, writeFileSync }} from "node:fs";
@@ -3407,7 +3415,9 @@ $payload = [Console]::In.ReadToEnd()
     #[test]
     fn posix_native_hook_command_invokes_binary_directly() {
         let cmd = hook_command(
-            &PathBuf::from("/home/alice/.local/share/sessionmunch/hooks/claude-code/session-start.sh"),
+            &PathBuf::from(
+                "/home/alice/.local/share/sessionmunch/hooks/claude-code/session-start.sh",
+            ),
             "https://my-server.example.com",
             Some("tok123"),
             HookCommandContext::new(HookCommandPlatform::PosixNative, "claude-code", None, None),

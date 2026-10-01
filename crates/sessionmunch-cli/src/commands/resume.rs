@@ -8,8 +8,8 @@
 use std::io::IsTerminal as _;
 use std::path::PathBuf;
 
-use sessionmunch_core::ManagedWorkstreamSummary;
 use anyhow::{Context as _, Result, bail};
+use sessionmunch_core::ManagedWorkstreamSummary;
 
 use crate::cli::{ResumeArgs, RunArgs, RunHarnessChoice};
 use crate::commands::project_registry::{self, ProjectLink};

@@ -18,12 +18,12 @@
 
 use std::sync::Arc;
 
-use sessionmunch_core::{ActorContext, AuthLevel, IdentityKey};
-use sessionmunch_store::{ReaderPool, TokenPepper, WriterHandle, hash_token};
 use axum::extract::State;
 use axum::http::{HeaderMap, Request, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use sessionmunch_core::{ActorContext, AuthLevel, IdentityKey};
+use sessionmunch_store::{ReaderPool, TokenPepper, WriterHandle, hash_token};
 use subtle::ConstantTimeEq;
 use tracing::debug;
 
@@ -787,9 +787,9 @@ mod tests {
 
     // ── Extension<ActorContext> injection (P1.3 multi-rung resolution) ──
 
+    use axum::Extension;
     use sessionmunch_core::NewUser;
     use sessionmunch_store::Store;
-    use axum::Extension;
     use tempfile::TempDir;
 
     /// Route handler that echoes the injected `ActorContext` as JSON

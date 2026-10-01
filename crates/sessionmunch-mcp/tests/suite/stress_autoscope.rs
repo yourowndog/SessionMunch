@@ -17,6 +17,12 @@
 //! header on /mcp so the "header is cache key, not credential" scenario can
 //! exercise the same fallback the real server walks.
 
+use axum::Router;
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
+use serde_json::json;
 use sessionmunch_core::{ActiveProject, ActiveProjectMode, ActorContext};
 use sessionmunch_hooks::{
     DEFAULT_HOOK_INGEST_MAX_IN_FLIGHT, HookState, ProjectCacheStore, SubagentSessionSet,
@@ -25,12 +31,6 @@ use sessionmunch_hooks::{
 use sessionmunch_mcp::SessionMunchServer;
 use sessionmunch_store::Store;
 use sessionmunch_wiki::Wiki;
-use axum::Router;
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
-use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
-use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
-use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;

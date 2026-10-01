@@ -1,10 +1,10 @@
 //! Helpers shared by the admin route tests in this suite.
 
-use sessionmunch_mcp::{AdminState, admin_router};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::routing::post as route_post;
 use axum::{Json, Router};
+use sessionmunch_mcp::{AdminState, admin_router};
 use std::sync::{Arc, Mutex};
 use tower::ServiceExt;
 

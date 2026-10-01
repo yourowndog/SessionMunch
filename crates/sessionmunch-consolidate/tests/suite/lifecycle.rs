@@ -13,11 +13,11 @@
 
 use std::collections::HashSet;
 
+use rusqlite::params;
 use sessionmunch_consolidate::{run_lint, run_sweep};
 use sessionmunch_core::{PageId, PagePath, ProjectId, Tier, WorkspaceId};
 use sessionmunch_store::{DecayParams, Store};
 use sessionmunch_wiki::{Wiki, WritePageRequest};
-use rusqlite::params;
 use tempfile::TempDir;
 
 const US_PER_DAY: i64 = 86_400_000_000;

@@ -1,10 +1,10 @@
 //! Native `aim_` API credentials. Auth lookup never reads `users.token_hash`.
 
-use sessionmunch_core::{ApiCredential, ApiCredentialId, NATIVE_API_KEY_PREFIX, User, UserId};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use jiff::Timestamp;
 use rusqlite::{Connection, OptionalExtension, params};
+use sessionmunch_core::{ApiCredential, ApiCredentialId, NATIVE_API_KEY_PREFIX, User, UserId};
 
 use crate::error::{StoreError, StoreResult};
 use crate::users::{TOKEN_HASH_LEN, TOKEN_RAW_LEN, map_unique_violation, row_to_user};
@@ -273,8 +273,8 @@ fn row_to_credential(row: &rusqlite::Row<'_>) -> rusqlite::Result<ApiCredential>
 mod tests {
     use super::*;
     use crate::users::{self, TokenPepper, hash_token};
-    use sessionmunch_core::{NewUser, UserId, UserRole};
     use rusqlite::{Connection, params};
+    use sessionmunch_core::{NewUser, UserId, UserRole};
 
     fn open_to(version: u32) -> Connection {
         let mut conn = Connection::open_in_memory().unwrap();

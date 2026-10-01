@@ -6,6 +6,18 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::{Context, Result};
+use axum::body::Body;
+use axum::extract::{DefaultBodyLimit, State};
+use axum::http::{Request, StatusCode, header};
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
+use rmcp::ServiceExt;
+use rmcp::transport::stdio;
+use rmcp::transport::streamable_http_server::{
+    StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+};
+use secrecy::ExposeSecret;
 use sessionmunch_consolidate::{
     AutoImproveReviewConfig, Consolidator, EmbedBackfillOptions, ObservationRetention,
     ScheduledAutoImproveSettings, run_auto_improve_scheduler_tick, run_embedding_backfill,
@@ -19,7 +31,7 @@ use sessionmunch_hooks::{
 use sessionmunch_llm::{Embedder, LlmProvider, ProviderHealth, build_embedder};
 use sessionmunch_mcp::human_auth::{Cidr, HumanAuthRuntime, LoginLimiter};
 use sessionmunch_mcp::{
-    AdminState, SessionMunchServer, ScopeInvalidation, admin_router_with_sweep_tuning,
+    AdminState, ScopeInvalidation, SessionMunchServer, admin_router_with_sweep_tuning,
     expire_legacy_cookie_mw, internal_auth_router, public_auth_router, require_dual_auth,
     session_auth_router,
 };
@@ -28,18 +40,6 @@ use sessionmunch_store::{
 };
 use sessionmunch_web::{WebMountSpec, normalize_prefix, split_web_routers, web_base_href};
 use sessionmunch_wiki::{WatcherHandle, Wiki, migrations, run_wiki_migrations};
-use anyhow::{Context, Result};
-use axum::body::Body;
-use axum::extract::{DefaultBodyLimit, State};
-use axum::http::{Request, StatusCode, header};
-use axum::middleware::Next;
-use axum::response::{IntoResponse, Response};
-use rmcp::ServiceExt;
-use rmcp::transport::stdio;
-use rmcp::transport::streamable_http_server::{
-    StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
-};
-use secrecy::ExposeSecret;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -749,7 +749,8 @@ async fn run_session_consolidation_worker(
                 ),
             },
             Err(error) => {
-                let retry_at = if attempts < sessionmunch_store::SESSION_CONSOLIDATION_MAX_ATTEMPTS {
+                let retry_at = if attempts < sessionmunch_store::SESSION_CONSOLIDATION_MAX_ATTEMPTS
+                {
                     let delay = session_consolidation_retry_delay(attempts);
                     let delay_micros = i64::try_from(delay.as_micros()).unwrap_or(i64::MAX);
                     Some(
@@ -2415,14 +2416,14 @@ fn host_without_port(host: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::Request;
+    use secrecy::SecretString;
     use sessionmunch_core::{
         AgentKind, ApiCredentialId, NewObservation, NewSession, NewUser, ObservationKind, PagePath,
         Sanitized, Sanitizer, SessionId, Tier,
     };
     use sessionmunch_llm::{ChatRequest, ChatResponse, LlmResult, SyntheticEmbedder};
     use sessionmunch_wiki::WritePageRequest;
-    use axum::http::Request;
-    use secrecy::SecretString;
     use std::future::Future;
     use std::pin::Pin;
     use tempfile::TempDir;
@@ -2725,7 +2726,9 @@ mod tests {
                 let reader = reader_for_state.clone();
                 async move {
                     Ok(reader
-                        .maintenance_job_last_success(sessionmunch_store::MaintenanceJob::ForgetSweep)
+                        .maintenance_job_last_success(
+                            sessionmunch_store::MaintenanceJob::ForgetSweep,
+                        )
                         .await?)
                 }
             },
@@ -3015,7 +3018,9 @@ mod tests {
                 let state_loaded = state_loaded.clone();
                 async move {
                     let state = reader
-                        .maintenance_job_last_success(sessionmunch_store::MaintenanceJob::ForgetSweep)
+                        .maintenance_job_last_success(
+                            sessionmunch_store::MaintenanceJob::ForgetSweep,
+                        )
                         .await?;
                     state_loaded.send(()).unwrap();
                     Ok(state)

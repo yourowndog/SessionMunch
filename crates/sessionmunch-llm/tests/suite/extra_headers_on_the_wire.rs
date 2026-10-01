@@ -9,13 +9,13 @@
 //! *replaces*, so "the value is on the struct" and "the right single value
 //! is on the wire" are genuinely different claims.
 
+use secrecy::SecretString;
+use serde_json::json;
 use sessionmunch_llm::types::ChatRequest;
 use sessionmunch_llm::{
     DEFAULT_USER_AGENT, ExtraHeaders, OPENROUTER_HTTP_REFERER, OPENROUTER_X_TITLE, ProviderAuth,
     ProviderChoice, ProviderConfig, build_provider,
 };
-use secrecy::SecretString;
-use serde_json::json;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 

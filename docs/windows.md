@@ -38,7 +38,7 @@ installed and launched inside a WSL2 distro.
 ```bash
 # Inside WSL2.
 mkdir -p ~/.local/bin
-wrapper_base=https://github.com/akitaonrails/ai-memory/releases/latest/download/sessionmunch-wrapper
+wrapper_base=https://github.com/yourowndog/SessionMunch/releases/latest/download/sessionmunch-wrapper
 wrapper_tmp="$(mktemp -d)"
 trap 'rm -rf "$wrapper_tmp"' EXIT
 curl -fsSL "$wrapper_base" -o "$wrapper_tmp/sessionmunch-wrapper"
@@ -53,7 +53,7 @@ docker run -d --name sessionmunch \
     --restart unless-stopped \
     -p 127.0.0.1:49374:49374 \
     -v sessionmunch-data:/data \
-    akitaonrails/ai-memory:latest
+    yourowndog/sessionmunch:latest
 
 sessionmunch install-mcp --client claude-code --apply
 sessionmunch install-hooks --agent claude-code --apply
@@ -86,7 +86,7 @@ skips the alias.
 # Install the Windows Docker wrapper.
 $UserBin = "$HOME\bin"
 New-Item -ItemType Directory -Force $UserBin | Out-Null
-$ReleaseBase = "https://github.com/akitaonrails/ai-memory/releases/latest/download"
+$ReleaseBase = "https://github.com/yourowndog/SessionMunch/releases/latest/download"
 $WrapperAssets = @{
     "sessionmunch.ps1" = "sessionmunch-wrapper.ps1"
     "sessionmunch.cmd" = "sessionmunch-wrapper.cmd"
@@ -124,7 +124,7 @@ docker run -d --name sessionmunch `
     --restart unless-stopped `
     -p 127.0.0.1:49374:49374 `
     -v sessionmunch-data:/data `
-    akitaonrails/ai-memory:latest
+    yourowndog/sessionmunch:latest
 
 # Do not also run `sessionmunch serve`; the long-lived container above is the server.
 
@@ -186,7 +186,7 @@ Docker. Each tagged release publishes
 $Dest = "$env:LOCALAPPDATA\sessionmunch"
 New-Item -ItemType Directory -Force $Dest | Out-Null
 Invoke-WebRequest `
-    -Uri "https://github.com/akitaonrails/ai-memory/releases/latest/download/sessionmunch-windows-x86_64.zip" `
+    -Uri "https://github.com/yourowndog/SessionMunch/releases/latest/download/sessionmunch-windows-x86_64.zip" `
     -OutFile "$env:TEMP\sessionmunch.zip"
 Expand-Archive "$env:TEMP\sessionmunch.zip" -DestinationPath $Dest -Force
 Get-ChildItem "$Dest\sessionmunch.exe" | Unblock-File

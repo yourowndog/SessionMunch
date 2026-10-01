@@ -11,13 +11,13 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use serde::Serialize;
 use sessionmunch_core::{ProjectId, WorkspaceId};
 use sessionmunch_llm::Embedder;
 use sessionmunch_store::{
     EmbeddingWrite, PassageEmbeddingWrite, ReaderPool, WriterHandle, f32_vec_to_bytes,
 };
 use sessionmunch_wiki::Wiki;
-use serde::Serialize;
 use thiserror::Error;
 use tracing::warn;
 

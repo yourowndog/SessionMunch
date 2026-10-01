@@ -1,8 +1,8 @@
 //! `sessionmunch auto-improve` — review one session and apply durable wiki edits through the auto-improvement approval path.
 
-use sessionmunch_store::SkippedProposal;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use sessionmunch_store::SkippedProposal;
 
 use crate::cli::AutoImproveArgs;
 use crate::config::Config;

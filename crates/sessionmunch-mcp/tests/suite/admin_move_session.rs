@@ -7,6 +7,9 @@
 //! consolidation job) and a `sessions/<id>.md` page written through the wiki
 //! so a real file sits on disk.
 
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use serde_json::json;
 use sessionmunch_core::{
     AgentKind, NewHandoff, NewObservation, NewSession, ObservationKind, PagePath, ProjectId,
     Sanitized, Sanitizer, SessionId, Tier, WorkspaceId,
@@ -14,9 +17,6 @@ use sessionmunch_core::{
 use sessionmunch_mcp::{AdminState, admin_router};
 use sessionmunch_store::{DecayParams, Store};
 use sessionmunch_wiki::{Wiki, WritePageRequest};
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
-use serde_json::json;
 use tempfile::TempDir;
 use tower::ServiceExt;
 

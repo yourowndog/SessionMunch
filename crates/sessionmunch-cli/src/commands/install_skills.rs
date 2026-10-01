@@ -3,11 +3,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use anyhow::{Context, Result, bail};
 use sessionmunch_core::routing_skills::{
     AGENTS_SKILL_DIR, CLAUDE_SKILL_DIR, DEVIN_SKILL_DIR, GROK_SKILL_DIR, MANAGED_SKILLS,
     ManagedSkill, SKILLS_DIR,
 };
-use anyhow::{Context, Result, bail};
 
 use crate::cli::{InstallSkillsAgent, InstallSkillsArgs, InstallSkillsScope};
 use crate::commands::apply_shared::{ApplyOutcome, apply_atomic};

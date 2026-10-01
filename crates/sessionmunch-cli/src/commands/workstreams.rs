@@ -3,9 +3,9 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
+use anyhow::{Context as _, Result};
 use sessionmunch_core::{ListManagedWorkstreamsRequest, ManagedWorkstreamSummary};
 use sessionmunch_workstream::inspect_repository;
-use anyhow::{Context as _, Result};
 
 use crate::cli::WorkstreamsArgs;
 use crate::config::Config;

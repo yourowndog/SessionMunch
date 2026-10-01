@@ -14,13 +14,13 @@
 //! `serve.rs` through an axum router, so they catch a regression in either
 //! direction.
 
-use sessionmunch_mcp::SessionMunchServer;
-use sessionmunch_store::Store;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
+use sessionmunch_mcp::SessionMunchServer;
+use sessionmunch_store::Store;
 use tempfile::TempDir;
 use tower::ServiceExt;
 
