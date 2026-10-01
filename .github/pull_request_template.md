@@ -18,7 +18,7 @@
 
 - [ ] I verified the name and email on every commit in this PR and corrected
       any unintended identity before requesting merge. See
-      [commit attribution guidance](https://github.com/akitaonrails/ai-memory/blob/main/CONTRIBUTING.md#commit-attribution).
+      [commit attribution guidance](https://github.com/yourowndog/SessionMunch/blob/main/CONTRIBUTING.md#commit-attribution).
 
 ## Release impact
 

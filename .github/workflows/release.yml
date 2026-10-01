@@ -534,7 +534,7 @@ jobs:
           echo "yay -S sessionmunch          # builds from source" >> body.md
           echo "" >> body.md
           echo "# Docker" >> body.md
-          echo "docker pull akitaonrails/ai-memory:${{ needs.validate-version.outputs.version }}" >> body.md
+          echo "docker pull yourowndog/sessionmunch:${{ needs.validate-version.outputs.version }}" >> body.md
           echo "" >> body.md
           echo "# macOS aarch64/x86_64 (no toolchain): download the matching sessionmunch-macos-<arch>.tar.gz below," >> body.md
           echo "# extract it, and follow the bundled docs/macos.md." >> body.md
@@ -543,7 +543,7 @@ jobs:
           echo "# extract it, and follow the bundled docs/windows.md." >> body.md
           echo "" >> body.md
           echo "# From source" >> body.md
-          echo "cargo install --locked --git https://github.com/akitaonrails/ai-memory --tag ${GITHUB_REF_NAME}" >> body.md
+          echo "cargo install --locked --git https://github.com/yourowndog/SessionMunch --tag ${GITHUB_REF_NAME}" >> body.md
           echo '```' >> body.md
 
       - name: Create GitHub Release
@@ -582,7 +582,7 @@ jobs:
           set -euo pipefail
 
           version="$VERSION"
-          source_sha="$(curl -fsSL "https://github.com/akitaonrails/ai-memory/archive/refs/tags/v${version}.tar.gz" | sha256sum | awk '{print $1}')"
+          source_sha="$(curl -fsSL "https://github.com/yourowndog/SessionMunch/archive/refs/tags/v${version}.tar.gz" | sha256sum | awk '{print $1}')"
           bin_x86_sha="$(sha256sum artifacts/sessionmunch-linux-x86_64.tar.gz | awk '{print $1}')"
           bin_arm_sha="$(sha256sum artifacts/sessionmunch-linux-aarch64.tar.gz | awk '{print $1}')"
 
