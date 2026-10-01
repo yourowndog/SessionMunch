@@ -28,7 +28,7 @@ The **only** outbound connections initiated by SessionMunch occur when you expli
 - Remote embedding calls (`embedding_provider = "openai" | "voyage" | "google" | "openai-compat"`)
 - Remote summarization calls (`summarizer_provider = "anthropic" | "openai" | "google" | "openai-compat"`)
 - Remote LLM reranking (`SESSIONMUNCH_RERANKER=llm`)
-- JEV (Justification/Evaluation/Verification) webhook calls
+- Future JEV reranking calls, if that optional integration is enabled in a later release
 - API integrations (e.g. Jira/GitHub issue sync hooks)
 
 When a remote provider is configured, payloads travel directly and exclusively over encrypted HTTPS to that provider's configured endpoint. No secondary telemetry or payload mirror exists.

@@ -1,13 +1,10 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.png">
-    <img alt="SessionMunch" src="docs/logo-light.png" width="460">
-  </picture>
+  <img alt="SessionMunch — Stop pasting handoff prompts" src="docs/sessionmunch-hero.webp" width="1000">
 </p>
 
 <p align="center">
-  <strong>Persistent memory for coding agents that survives the session, the model, and the machine.</strong><br>
-  Local-first • Plain Markdown source of truth • Hybrid retrieval • MCP + HTTP • Single Rust binary
+  <strong>Your model is allowed to forget. Your project isn't.</strong><br>
+  One shared memory across sessions, agents, and machines • Local-first • MCP + HTTP • Plain Markdown source of truth
 </p>
 
 <p align="center">
@@ -25,19 +22,32 @@
 
 ## What is SessionMunch?
 
-Coding agents are very good at working memory and surprisingly bad at filing cabinets.
+Coding agents are excellent at working memory and strangely committed to waking up with amnesia.
 
-A useful session accumulates things worth keeping: architectural decisions, failed approaches, project conventions, debugging discoveries, handoffs, and the exact incantation that fixed the weird thing. Then the context window fills, the session ends, or you switch from Claude Code to Codex to Hermes and suddenly everyone is meeting the codebase for the first time again.
+A useful session accumulates things worth keeping: architectural decisions, failed approaches, project conventions, debugging discoveries, handoffs, and the one command that fixed the cursed thing at 2:13 AM. Then the context window fills, the session ends, or you switch tools — and the next agent politely asks you to explain the project again.
 
-**SessionMunch is a local-first persistent memory runtime for AI coding agents.** It turns transient agent sessions into a durable, searchable project knowledge base that later sessions can query without hauling the entire transcript back into context.
+**SessionMunch is a local-first persistent memory runtime for AI coding agents.** It captures the work around your code, turns it into durable project knowledge, indexes it several different ways, and makes the same memory available to the next session or a completely different agent.
 
-- **Plain Markdown source of truth:** Durable knowledge lives in ordinary `.md` files. Inspect it, grep it, edit it, back it up, or put it under Git.
-- **Rebuildable SQLite acceleration:** FTS5, passages, entities, graph relationships, and vector indexes make retrieval fast. If the derived database disappears, `sessionmunch reindex` rebuilds it from Markdown.
-- **Hybrid retrieval:** Lexical search, local vectors, graph/entity signals, passages, and Reciprocal Rank Fusion can cooperate instead of asking one embedding model to become a religion.
-- **Local embeddings by default:** Nomic Embed Text v1.5 runs in-process with no API key required. Vector search can also be disabled entirely.
-- **Optional LLM consolidation:** Use no summarizer, a local OpenAI-compatible model, or a hosted provider to distill raw session evidence into cleaner concepts, gotchas, rules, and summaries.
-- **Agent-neutral interfaces:** MCP, HTTP, lifecycle hooks, managed workstreams, and a native Hermes MemoryProvider let one memory service outlive whichever agent is fashionable this quarter.
-- **Privacy-conscious defaults:** Loopback-only networking, secret sanitization, zero product telemetry, and no summarizer enabled unless you choose one.
+> **Stop pasting handoff prompts.** The last handoff you should need to copy is the command that installs the thing that makes handoff prompts unnecessary.
+
+If jCodeMunch makes **code** searchable and jDocMunch makes **documentation** searchable, SessionMunch applies the same instinct to the work history surrounding both: decisions, attempts, gotchas, fixes, conventions, open threads, and what the last agent learned the hard way.
+
+### What you actually get
+
+| Piece | In plain English | What it gets you |
+| :--- | :--- | :--- |
+| **Shared project memory** | One SessionMunch service holds the durable state for all connected agents. | Claude Code can learn something and Codex, Hermes, OpenCode, or another MCP client can find it later. |
+| **Markdown source of truth** | The important knowledge is ordinary human-readable files, not a mystery blob. | You can inspect it, grep it, edit it, version it, back it up, and leave whenever you want. |
+| **Derived SQLite index** | SQLite is the fast card catalog over those files, not the owner of them. | Fast search without sacrificing recoverability; `sessionmunch reindex` can rebuild it. |
+| **Full-text search (FTS5)** | Looks for the actual words and phrases you used. | Excellent for error strings, filenames, commands, symbols, and exact terminology. |
+| **Embeddings** | Text is converted into coordinates where ideas with similar meaning sit near each other. | “Login token bug” can still find a note written as “authentication credential failure” even when the words do not match. |
+| **Entities + graph links** | Projects, concepts, components, causes, fixes, and contradictions can be connected. | Memory can follow relationships instead of treating every note as an isolated paragraph. |
+| **Passage indexing** | Long pages are searchable as smaller meaningful chunks. | The agent gets the useful paragraph, not twelve screens of surrounding archaeology. |
+| **Reciprocal Rank Fusion (RRF)** | Multiple search methods vote on the answer. | Exact words, semantic similarity, and relationships can reinforce each other instead of one ranking method becoming pope. |
+| **Briefs + handoffs** | Session startup can receive a small, relevant state packet automatically. | New session, less ceremony. The clipboard may finally know peace. |
+| **MCP + HTTP + hooks** | Standard interfaces connect the memory service to agent harnesses. | The memory survives whichever model or coding tool you are using this week. |
+
+**Chat history is evidence. Durable project knowledge is the product.**
 
 The durable knowledge is yours. The database is an acceleration layer, not a hostage situation.
 
@@ -47,52 +57,70 @@ The durable knowledge is yours. The database is an acceleration layer, not a hos
 
 SessionMunch is currently a **v0.1.0 release candidate**.
 
-The release candidate has passed the project ship audit, including a clean-machine build, workspace tests, packaging checks, live MCP/HTTP calls, legacy-import verification, privacy checks, and documentation review.
+The release candidate passed its independent clean-machine ship audit. Promoting it to a public repo then did exactly what public CI is supposed to do and exposed a few final release-gate issues: a dependency security update, one isolation test that needs root-cause verification, and some CI/lint housekeeping. Linux release builds, Docker smoke tests, Nix, packaging checks, and fresh source installation are passing.
 
-The source tree is usable now. The tagged GitHub Release and its prebuilt artifacts are the next release step, so this README deliberately does **not** claim a package exists before it has actually been published. Revolutionary stuff.
-
----
-
-## Why SessionMunch?
-
-Most useful agent state is neither source code nor chat history. It is the layer in between: *why we did this, what failed, what must stay true, what to try next*.
-
-SessionMunch treats raw chat and tool events as evidence, then keeps durable project knowledge separately:
-
-> **Chat history is evidence. Durable project knowledge is the product.**
-
-That leads to a deliberately Unix-ish design: ordinary files own the truth; databases and models are replaceable machinery; agents get the smallest useful context instead of a transcript landfill.
-
-| Feature | SessionMunch | Vendor Memory APIs | Raw Chat History Files |
-| :--- | :--- | :--- | :--- |
-| **Storage Format** | Plain Git-versioned Markdown | Proprietary Cloud DB | Massive unstructured JSON |
-| **Tool Freedom** | Any MCP-compatible agent | Vendor-locked | CLI-specific |
-| **Egress & Telemetry** | Zero egress in default mode | Full conversation egress | Local, but unindexed |
-| **Search Model** | Hybrid RRF (FTS5 + Graph + Vector) | Pure dense vector | Grep or unindexed |
-| **Cross-Agent Handoff** | Atomic baton passes | None | Manual copy-pasting |
+So the source is here and usable; the `v0.1.0` tag waits until those last gates are green. We are resisting the ancient software tradition of declaring victory while the dashboard is visibly red.
 
 ---
 
 ## How It Works
 
+Think of a context window as RAM. Useful, fast, temporary. SessionMunch is the part where somebody finally remembered to add a disk.
+
 ```text
-[Agent Session] ──▶ [Lifecycle Hooks] ──▶ [Sanitization] ──▶ [Raw Spool]
-       │                                                         │
-       │                                                         ▼
-       ▼                                                 [Consolidation]
-[Agent Resume]  ◀── [Context Brief] ◀── [Derived SQLite] ◀── [Markdown Wiki]
+agent work
+   │
+   ▼
+capture hooks ──▶ sanitize ──▶ session evidence
+                               │
+                               ▼
+                         Markdown knowledge
+                               │
+                               ▼
+                    rebuildable SQLite index
+                               │
+                 ┌─────────────┼─────────────┐
+                 ▼             ▼             ▼
+               FTS5       embeddings     graph/entities
+                 └─────────────┼─────────────┘
+                               ▼
+                         RRF fusion
+                               │
+                               ▼
+                    relevant passages/brief
+                               │
+                    ┌──────────┴──────────┐
+                    ▼                     ▼
+                 MCP/HTTP            startup handoff
+                    │                     │
+                    └──────────┬──────────┘
+                               ▼
+                         next agent/session
 ```
 
-1. **Capture:** Shell and agent hooks passively record prompt and tool interactions without latency.
-2. **Sanitize:** Sensitive credentials, private keys, and environment tokens are automatically redacted.
-3. **Consolidate:** At session exit, observations are distilled into concise markdown pages (architectural decisions, gotchas, concepts).
-4. **Retrieve:** Agents query memory through standard MCP tools or REST endpoints using hybrid Reciprocal Rank Fusion.
+### How does another agent know any of this?
+
+There is no telepathy involved, disappointingly.
+
+**Lifecycle hooks** tell SessionMunch which project/session is active and feed it the bounded events worth remembering. **MCP tools** let an agent explicitly search, read, write, explore, and hand off memory. **Startup hooks** can inject a small relevant brief automatically. **HTTP** exposes the same service to clients that prefer an API. **Hermes** can use the native MemoryProvider integration instead of pretending the memory layer is just another random tool.
+
+The important part is that these are all doors into the **same memory service**. You do not need a Claude memory, a Codex memory, a Hermes memory, and a mysterious folder named `final-final-memory-2`.
+
+### Find broadly, then judge narrowly
+
+The core search path deliberately uses several independent signals and fuses them. Exact text is good at exact things. Embeddings are good at meaning. Graph links are good at relationships. RRF lets them vote.
+
+**v0.1 also supports optional LLM reranking** for project/scoped searches: after the normal search has already found a bounded shortlist, an LLM can make one final relevance pass. If it fails, times out, returns nonsense, or is unavailable, SessionMunch keeps the normal ranking.
+
+**JEV reranking is the next step, not a hidden v0.1 switch.** The reranker abstraction and fail-open benchmark scaffolding already exist, but the current runtime accepts `llm` as the live reranker option — not `jev`. The planned JEV path will sit in the same post-retrieval slot: storage and recall remain SessionMunch's job; JEV gets a small candidate set and helps decide what deserves to reach the model.
+
+That separation matters. Memory should not stop working because the clever optional judge called in sick.
 
 ---
 
 ## Quick Start
 
-Get running on loopback in under two minutes.
+The current release candidate installs from source. Once v0.1.0 is tagged, the release workflow is set up to produce the less-character-building options.
 
 ### 1. Installation
 
@@ -148,40 +176,29 @@ For Hermes Agent, configure the native MemoryProvider plugin in your profile (se
 
 ## Model Guide
 
-SessionMunch uses models for **two separate jobs**:
+### No LLM required. Really.
 
-1. **Embeddings** help retrieval find semantically related material.
-2. **Summarization** turns session evidence into cleaner durable knowledge.
+SessionMunch separates **remembering** from **generating**.
 
-Keeping those jobs separate keeps the system cheaper, easier to reason about, and less dependent on one vendor.
+A generative LLM is **not required** for the memory system to work. With no summarizer configured, SessionMunch can still capture sessions, preserve Markdown, perform FTS5 search, use entity/graph signals, build passage indexes, generate handoffs, and serve the same memory over MCP/HTTP.
 
-### The default
+By default it can also run **Nomic Embed Text v1.5 locally in-process** for semantic search. An embedding model is not a chat model: it does not write your summaries or phone a frontier model for advice. It turns text into vectors so similar ideas can be found even when the wording changes. If you want **no model inference at all**, disable embeddings too and SessionMunch falls back to lexical/entity/graph retrieval.
 
-For retrieval, SessionMunch defaults to **Nomic Embed Text v1.5 (768d)** running locally in-process. No API key is required.
+Adding an LLM is an upgrade path, not an entrance fee. A summarizer can distill noisy session evidence into cleaner concepts, rules, gotchas, and architecture pages. That summarizer can be local through an OpenAI-compatible server, or remote through a supported provider. Swap models, turn them off, move from cloud to local — the memory format does not care.
 
-For summarization, the default is **none**. The memory service still works: lexical search, graph/entity signals, passages, local embeddings, handoffs, and persistent Markdown do not require a remote LLM.
+In other words: **bring your own intelligence; keep your memory.**
 
-### Opinionated starting points
-
-| Goal | Embeddings | Summarizer |
-| :--- | :--- | :--- |
-| **Start here / private** | Local Nomic v1.5 | None |
-| **Best practical local setup** | Local Nomic v1.5 | Local OpenAI-compatible instruct model |
-| **Low-hassle hosted setup** | Local Nomic v1.5 | Small/fast hosted model |
-| **Minimum footprint** | None | None |
-| **Cloud-managed** | OpenAI / Google / Voyage-compatible | Supported hosted provider |
-
-The useful rule of thumb is: **keep retrieval local unless you have a reason not to; spend the expensive model on synthesis, not on remembering where the wrench is.**
-
-For local summarization, use the smallest instruct model that reliably follows the consolidation format on your hardware. The full guide includes copy-paste profiles from CPU-only machines through 24 GB+ GPUs: [`docs/models.md`](docs/models.md).
-
-Provider paths include local embeddings, OpenAI, Google/Gemini, Voyage embeddings, OpenAI-compatible endpoints, and supported OAuth/provider integrations for LLM work. See [`docs/models-summary.md`](docs/models-summary.md) and [`docs/configuration.md`](docs/configuration.md).
+The detailed model/hardware guide is available in [`docs/models.md`](docs/models.md), with provider mechanics in [`docs/models-summary.md`](docs/models-summary.md) and [`docs/configuration.md`](docs/configuration.md).
 
 ---
 
 ## Supported Agent Harnesses
 
-SessionMunch supports any client speaking the **Model Context Protocol (MCP)** or running lifecycle hooks:
+The short version: if an agent speaks **MCP**, SessionMunch already has a door it can walk through. If the harness also exposes lifecycle hooks, SessionMunch can do the nicer automatic stuff — session capture, scope tracking, startup briefs, and handoffs — without you asking the model to remember to remember.
+
+That is the whole point of a shared memory service: **change agents without changing brains.**
+
+SessionMunch currently supports:
 
 | Harness | MCP Tools | Session Hooks | Status |
 | :--- | :---: | :---: | :--- |
