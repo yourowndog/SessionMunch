@@ -1,18 +1,18 @@
 //! Gate-8 production benchmark (card t_30a08e43).
 //!
 //! Runs the frozen H1 corpus + probes against the PRODUCTION embedder
-//! (`all-MiniLM-L6-v2` via `LocalEmbedder`, 384-dim, provider "local")
+//! (`nomic-embed-text-v1.5` via `LocalEmbedder`, 768-dim, provider "local")
 //! instead of the hermetic word-hash test embedder, and reports the
 //! deployment-gate numbers: indexing time, dense-index time, peak RSS,
 //! disk footprint, per-mode p50/p95 query latency, and recall@k / MRR /
 //! nDCG@5 for page-mode, passage lexical-only, and passage dense-fused.
 //!
-//! `#[ignore]`d: needs the ~87 MB model files (not in CI). Run on a
+//! `#[ignore]`d: needs the ~522 MB model files (not in CI). Run on a
 //! Weakling-class CPU-only host (or under `taskset -c 0-5` to simulate
 //! Weakling's 6 cores) with:
 //!
 //! ```bash
-//! SESSIONMUNCH_TEST_MODELS_DIR=<dir containing all-MiniLM-L6-v2> \
+//! SESSIONMUNCH_TEST_MODELS_DIR=<dir containing nomic-embed-text-v1.5> \
 //!   cargo test -p sessionmunch-consolidate --lib \
 //!   integration::gate8_production_benchmark -- --ignored --nocapture
 //! ```
@@ -198,15 +198,15 @@ fn report(ranks: &[Option<usize>], total: usize) -> (Vec<(usize, f64)>, f64, f64
 }
 
 #[tokio::test]
-#[ignore = "needs the fetched all-MiniLM-L6-v2 model files (SESSIONMUNCH_TEST_MODELS_DIR)"]
+#[ignore = "needs the fetched nomic-embed-text-v1.5 model files (SESSIONMUNCH_TEST_MODELS_DIR)"]
 async fn gate8_production_embedder_benchmark() {
     let models_root = std::env::var("SESSIONMUNCH_TEST_MODELS_DIR")
-        .expect("set SESSIONMUNCH_TEST_MODELS_DIR to a dir containing all-MiniLM-L6-v2");
+        .expect("set SESSIONMUNCH_TEST_MODELS_DIR to a dir containing nomic-embed-text-v1.5");
 
     let load_start = Instant::now();
     let embedder = LocalEmbedder::load(Path::new(&models_root)).expect("load production embedder");
     let model_load_time = load_start.elapsed();
-    assert_eq!(embedder.dim(), 384);
+    assert_eq!(embedder.dim(), 768);
     let provider = embedder.provider().to_string();
     let model = embedder.model().to_string();
     let dim = embedder.dim();
@@ -363,7 +363,7 @@ async fn gate8_production_embedder_benchmark() {
     let (lex_recall, lex_mrr, lex_ndcg) = report(&lex_ranks, total);
     let (dense_recall, dense_mrr, dense_ndcg) = report(&dense_ranks, total);
 
-    println!("=== GATE-8 PRODUCTION BENCHMARK (all-MiniLM-L6-v2, 384-dim) ===");
+    println!("=== GATE-8 PRODUCTION BENCHMARK (nomic-embed-text-v1.5, 768-dim) ===");
     println!("Embedder: provider={provider} model={model} dim={dim}");
     println!(
         "Corpus: {} pages, {} passages embedded",

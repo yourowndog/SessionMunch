@@ -2062,7 +2062,7 @@ async fn configure_embedder(
     {
         if defaulted {
             // Best-effort default (docs/local-embeddings.md): never
-            // block startup on an ~87 MB download. Fetch in the
+            // block startup on a ~522 MB download. Fetch in the
             // background; THIS boot runs without an embedder (the
             // pre-2.0 behaviour), the next start finds the files and
             // enables hybrid search. Offline hosts just log the warn.
@@ -2071,7 +2071,7 @@ async fn configure_embedder(
                 tracing::info!(
                     dir = %models_dir.display(),
                     "fetching the default local embedding model in the \
-                     background (~87 MB, one time); hybrid search enables \
+                     background (~522 MB, one time); hybrid search enables \
                      on the next start"
                 );
                 if let Err(e) = sessionmunch_llm::fetch_model(&models_dir).await {
@@ -2088,7 +2088,7 @@ async fn configure_embedder(
         }
         tracing::info!(
             dir = %models_dir.display(),
-            "local embedding model not present; fetching (~87 MB, one time)"
+            "local embedding model not present; fetching (~522 MB, one time)"
         );
         sessionmunch_llm::fetch_model(models_dir).await.context(
             "fetching the local embedding model (set up offline per \

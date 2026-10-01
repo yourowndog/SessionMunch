@@ -10,7 +10,7 @@
 //!   retrieval without an API key.
 //!
 //! * [`LocalEmbedder`](crate::local::LocalEmbedder) — in-process
-//!   pure-Rust BERT (`all-MiniLM-L6-v2`), no key and no server; see
+//!   pure-Rust NomicBert (`nomic-embed-text-v1.5`), no key and no server; see
 //!   `docs/local-embeddings.md`.
 
 use std::time::Duration;
