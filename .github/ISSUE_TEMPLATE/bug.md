@@ -5,7 +5,7 @@ labels: bug
 ---
 
 **Version**
-Output of `ai-memory --version`:
+Output of `sessionmunch --version`:
 
 **What happened**
 <!-- A clear description of the unexpected behaviour. -->
@@ -25,4 +25,4 @@ Output of `ai-memory --version`:
 - Transport (stdio / http):
 
 **Relevant logs**
-<!-- Paste the relevant portion of `ai-memory serve` output here. -->
+<!-- Paste the relevant portion of `sessionmunch serve` output here. -->

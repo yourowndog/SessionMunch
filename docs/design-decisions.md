@@ -1,4 +1,4 @@
-# ai-memory - Design Decisions (Synthesis)
+# sessionmunch - Design Decisions (Synthesis)
 
 > Historical rationale distilled from the original research and issue-tracker
 > reports. For the current operational map, read
@@ -11,10 +11,10 @@
 A self-contained Rust binary that:
 
 1. Runs as an **MCP server** (stdio + HTTP/SSE) for coding-agent CLIs (Claude Code, OpenAI Codex, Cursor, Gemini CLI, Antigravity CLI, OpenClaw, OpenCode, OMP, and MCP-capable clients).
-2. Captures sanitized, bounded lifecycle observations **automatically** - no `write_note` ceremony - via hook scripts or generated extensions that agent CLIs invoke. User prompts and post-compaction summaries retain at most 16 KiB; notifications and tool excerpts retain at most 2 KB; every sanitized durable body has a 16 KiB backstop. Optional `ai-memory run` workstreams additionally read visible native transcript tails through host-side, read-only adapters.
+2. Captures sanitized, bounded lifecycle observations **automatically** - no `write_note` ceremony - via hook scripts or generated extensions that agent CLIs invoke. User prompts and post-compaction summaries retain at most 16 KiB; notifications and tool excerpts retain at most 2 KB; every sanitized durable body has a 16 KiB backstop. Optional `sessionmunch run` workstreams additionally read visible native transcript tails through host-side, read-only adapters.
 3. Maintains a **Karpathy-style wiki**: incrementally-compiled markdown pages with cross-links, supersession, an `index.md` and a `log.md`.
 4. Serves retrieval via the MCP `tools/list` to coding agents: a handful of *narrow* tools, not 50.
-5. Ships a **Docker image** (`docker run -v ai-memory-data:/data -p 49374:49374 ai-memory`) so it can move between desktop and homelab.
+5. Ships a **Docker image** (`docker run -v sessionmunch-data:/data -p 49374:49374 sessionmunch`) so it can move between desktop and homelab.
 6. Is *self-healing*: schema migrations on startup, vector-index dim/provider check, write-ahead durability, periodic integrity audit, single-writer queue to avoid `database is locked`.
 
 ## 2. Hard requirements (extracted from the prompt)
@@ -45,7 +45,7 @@ Three options surveyed:
 - Backup/move story is trivial - `git clone` or `rsync` a directory. The user explicitly asked for this.
 - Karpathy's pattern *is* the wiki on disk. Faking it with an export step loses the inspect-in-Obsidian property.
 - DB is rebuildable from files - corruption is recoverable.
-- Cross-tool compatibility for free: any agent that reads `~/.ai-memory/wiki/*.md` works without an MCP integration.
+- Cross-tool compatibility for free: any agent that reads `~/.sessionmunch/wiki/*.md` works without an MCP integration.
 
 **How we avoid basic-memory's watcher pain:**
 - Watcher has a heartbeat + reconciliation pass (full diff every 30s to catch missed events).
@@ -90,13 +90,13 @@ Why not LanceDB/Qdrant/Kuzu/CozoDB/SurrealDB?
 
 **Embeddings:**
 - The original prototype proposed a default local `ort` / `fastembed-rs` model. The shipped v1 posture is instead **off by default**, with opt-in OpenAI, Voyage, Google Gemini, or keyless OpenAI-compatible embeddings. The compatible path requires an explicit base URL, model, and dimension because self-hosted engines have no safe common defaults, and it uses a distinct provider identity to prevent vector-family mixing. Local ONNX embeddings remain future work; the current provider and model reference lives in [`ARCHITECTURE.md`](ARCHITECTURE.md).
-- Persist `{provider, model, dim}` next to every vector. On mismatch, warn and ignore stale vectors until `ai-memory embed --force` or scheduled backfill re-embeds them (agentmemory #469 lesson, without blocking startup).
+- Persist `{provider, model, dim}` next to every vector. On mismatch, warn and ignore stale vectors until `sessionmunch embed --force` or scheduled backfill re-embeds them (agentmemory #469 lesson, without blocking startup).
 - Any future local model cache belongs under `<data_dir>/models/`, never `/tmp` (basic-memory #741).
 - The shipped provider implementations share the `Embedder` trait and are selected through typed configuration.
 
 **LLM for consolidation passes:**
 - **Off by default**, behaves like agentmemory after #138's fix. Without a provider, the system still works: synthetic compression (rule-based), no LLM-generated summaries, no `memory_consolidate` page-rewrite.
-- With a provider, LLM consolidation runs on PreCompact, on demand via `memory_consolidate`, and at session end only when `AI_MEMORY_CONSOLIDATE_ON_SESSION_END=true` (off by default). A substantive session end always writes a rule-based summary page + handoff regardless; a session containing only `SessionStart` / `SessionEnd` boundaries closes without either artifact or provider work and releases any startup handoff bound to that receiver. SessionEnd provider work is persisted by observation generation and consumed outside the hook request by one bounded retrying worker, so client drain cancellation cannot lose it. The automatic handoff and completed-end watermark commit in one SQLite transaction; an already-ended keyed replay converges the remaining wiki commit, provider enqueue, and ingest-key completion. The completed end also stores the observation count it covered; a resumed session re-enters the end path only after that count advances, avoiding non-convergent wall-clock comparisons. Optional 6h maintenance timer.
+- With a provider, LLM consolidation runs on PreCompact, on demand via `memory_consolidate`, and at session end only when `SESSIONMUNCH_CONSOLIDATE_ON_SESSION_END=true` (off by default). A substantive session end always writes a rule-based summary page + handoff regardless; a session containing only `SessionStart` / `SessionEnd` boundaries closes without either artifact or provider work and releases any startup handoff bound to that receiver. SessionEnd provider work is persisted by observation generation and consumed outside the hook request by one bounded retrying worker, so client drain cancellation cannot lose it. The automatic handoff and completed-end watermark commit in one SQLite transaction; an already-ended keyed replay converges the remaining wiki commit, provider enqueue, and ingest-key completion. The completed end also stores the observation count it covered; a resumed session re-enters the end path only after that count advances, avoiding non-convergent wall-clock comparisons. Optional 6h maintenance timer.
 - Providers implement `LlmProvider { complete(...); complete_structured(...) }`. The current provider and authentication matrix lives in [`ARCHITECTURE.md`](ARCHITECTURE.md); this design boundary also covers OpenAI-compatible endpoints such as Ollama, vLLM, and LM Studio.
 - **Native HTTP per provider** - no LiteLLM-equivalent. The cognee tracker (#2412/#2430/#2537/#2608/#2749/#2782/#2840/#2842) showed silent-kwarg-drop in a generic gateway is the #1 source of provider bugs. Each provider's typed JSON, errors on unknown fields. Hand-coded but correct.
 - **Structured output via JSON schema, not XML, not Instructor-style wrapping.** Use each provider's native JSON-mode where available; for Anthropic, request a tool-use response with a typed schema. Validate with `serde_json` + `schemars`-derived schemas.
@@ -112,13 +112,13 @@ Three capture surfaces, in priority order:
     immediately, or 429 when saturated.
   - Privacy strip at the hook boundary, not later (agentmemory `stripPrivateData`).
 
-2. **Managed-workstream transcript import** (opt-in through `ai-memory run`). Each supported adapter reads its linked native session after a managed launch and appends portable visible events to the shared ledger. ai-memory does not ship a universal background watcher over private harness stores.
+2. **Managed-workstream transcript import** (opt-in through `sessionmunch run`). Each supported adapter reads its linked native session after a managed launch and appends portable visible events to the shared ledger. sessionmunch does not ship a universal background watcher over private harness stores.
 
 3. **Manual MCP tool** (`memory_write_page`) - only for explicit durable project knowledge from the user ("remember this"). Routine session capture remains automatic.
 
 ### Capture-policy boundary (#194)
 
-The nearest `.ai-memory.toml` may use `[capture] ignore_paths` to exclude
+The nearest `.sessionmunch.toml` may use `[capture] ignore_paths` to exclude
 recognized file-tool events before client spool or transport. This is a strict,
 schema-specific lexical boundary, not a general content or DLP filter: private
 patterns and candidates never leave the client, but shell/patch text, aliases,
@@ -135,7 +135,7 @@ Adopt agentmemory's tier model **but** keep the surface narrow:
 | Tier | What it is | Lifetime | Decay |
 |---|---|---|---|
 | **Working** | Current session: last N observations, last user prompt, current files | Until session end | Drop on session end (kept in DB for forensics, but excluded from default recall) |
-| **Episodic** | Per-session summaries with concept tags, files-touched, decisions made | 30 days hot, 180 days cold, then evict if cold-score < threshold | `salience · exp(-λ · age_days) + σ · log(1 + access_count) · exp(-μ · days_since_access)`. Code of record: [`crates/ai-memory-store/src/decay.rs`](../crates/ai-memory-store/src/decay.rs). |
+| **Episodic** | Per-session summaries with concept tags, files-touched, decisions made | 30 days hot, 180 days cold, then evict if cold-score < threshold | `salience · exp(-λ · age_days) + σ · log(1 + access_count) · exp(-μ · days_since_access)`. Code of record: [`crates/sessionmunch-store/src/decay.rs`](../crates/sessionmunch-store/src/decay.rs). |
 | **Semantic** | Distilled facts/preferences/architecture notes - the wiki pages themselves | Indefinite, supersedeable | Versioned in place: old `is_latest=false`, new `supersedes=old_id` |
 | **Procedural** | Repeated patterns extracted from episodic clusters (`pattern` type with frequency ≥ 2) | Indefinite | Frequency-decay if not re-observed in N days |
 
@@ -230,9 +230,9 @@ Tool param aliases stay narrow: shipped aliases cover `query|q|search` and
 `limit|n|top_k`; project and cwd parameters use canonical names unless the
 code adds a concrete alias.
 
-Managed ai-memory Agent Skills are prompt packaging for this tool-routing
+Managed sessionmunch Agent Skills are prompt packaging for this tool-routing
 guidance only. They are installed as ordinary `SKILL.md` files so agents can
-progressively load detailed instructions, but ai-memory does not store durable
+progressively load detailed instructions, but sessionmunch does not store durable
 memory in them and does not include a runtime skill router.
 
 ## 11. Identity & project scoping (3-tuple from day one)
@@ -241,11 +241,11 @@ Lesson from basic-memory's v0.20 trauma: `(workspace, project, page_path)`. Even
 
 Project resolution chain: explicit param → server's default → cwd-based heuristic (match repo root) → error.
 
-**Install-time `project_strategy` default (#128).** `basename(cwd)` stays the v1 default, but an agent shell that `cd`s into a subdirectory and stays there silently forks the rest of the session into a phantom project named after the subdir. A `.ai-memory.toml` marker with `project_strategy = "repo-root"` fixes this (#16, #23, #111) but needs a marker in (or above) every repo; a runtime env-var fallback that the *user* sets was deliberately rejected in #16. `install-hooks --project-strategy repo-root` instead **bakes** the strategy into the generated hook command (and the OpenCode / OMP / OpenClaw plugins) at install time — the same status as the already-baked `AI_MEMORY_AUTH_TOKEN` / `AI_MEMORY_HOOK_URL` / `--data-dir`, not a user runtime override. This is a client/install-time-only change: the server already parses `project_strategy=repo-root`. A marker's own `project_strategy` / `project` still win, and the default stays `basename` (baking nothing) so existing installs are byte-identical.
+**Install-time `project_strategy` default (#128).** `basename(cwd)` stays the v1 default, but an agent shell that `cd`s into a subdirectory and stays there silently forks the rest of the session into a phantom project named after the subdir. A `.sessionmunch.toml` marker with `project_strategy = "repo-root"` fixes this (#16, #23, #111) but needs a marker in (or above) every repo; a runtime env-var fallback that the *user* sets was deliberately rejected in #16. `install-hooks --project-strategy repo-root` instead **bakes** the strategy into the generated hook command (and the OpenCode / OMP / OpenClaw plugins) at install time — the same status as the already-baked `SESSIONMUNCH_AUTH_TOKEN` / `SESSIONMUNCH_HOOK_URL` / `--data-dir`, not a user runtime override. This is a client/install-time-only change: the server already parses `project_strategy=repo-root`. A marker's own `project_strategy` / `project` still win, and the default stays `basename` (baking nothing) so existing installs are byte-identical.
 
 ## 12. Operability
 
-- **Single binary**, statically-linked where possible. Distroless Docker image. **Absolute data path** by default (`dirs::data_local_dir().join("ai-memory")`); log it loudly on startup (agentmemory #303 lesson).
+- **Single binary**, statically-linked where possible. Distroless Docker image. **Absolute data path** by default (`dirs::data_local_dir().join("sessionmunch")`); log it loudly on startup (agentmemory #303 lesson).
 - **Atomic config**: one `Config::load()` → typed struct, every reader takes `&Config`. No `process.env` double-read paths (agentmemory #456/#469).
 - **Write durability**: accepted hook work awaits the SQLite write and appends a
   `log.md` line before that background task finishes. Indexes still commit in
@@ -253,7 +253,7 @@ Project resolution chain: explicit param → server's default → cwd-based heur
   write ack (basic-memory #763/#578/#839).
 - **Migrations**: `sqlx::migrate!` runs on startup; never inline DDL (basic-memory #727).
 - **Schema versioning**: one source of truth for the schema; derived clients/docs. No "update 7 files" checklists (agentmemory AGENTS.md smell).
-- **Backup/move**: `ai-memory export <dir>` dumps wiki/ + sqlite snapshot. `ai-memory import <dir>` consumes. Default data dir is portable. Optional: `auto_git_commit = true` config flag → commits the wiki directory on every `memory_lint` run.
+- **Backup/move**: `sessionmunch export <dir>` dumps wiki/ + sqlite snapshot. `sessionmunch import <dir>` consumes. Default data dir is portable. Optional: `auto_git_commit = true` config flag → commits the wiki directory on every `memory_lint` run.
 - **Self-healing**: startup checks (`memory_diagnose`): vector dim/provider drift, FTS index corruption, orphan pages, broken links, zombie sessions. `memory_heal` auto-fixes the safe subset.
 - **Logging**: structured `tracing` with rotating files, capped at N MB. No feedback loops (agentmemory #519).
 
@@ -270,7 +270,7 @@ historical decision boundary rather than a current support matrix.
 - No alternative embedded vector backends (sqlite-vec only).
 - No alternative graph DB (SQL recursive CTEs only).
 - No multimodal (text only).
-- No general "skills" / slash-command bundle in v1 (agentmemory plugin format). The narrow exception is the managed ai-memory Agent Skills that package routing guidance for agents; hooks + MCP remain the product surface.
+- No general "skills" / slash-command bundle in v1 (agentmemory plugin format). The narrow exception is the managed sessionmunch Agent Skills that package routing guidance for agents; hooks + MCP remain the product surface.
 - No LongMemEval-style benchmark harness in v1 - add in v0.4.
 
 ## 14. Mistakes-to-avoid checklist (from issue research)
@@ -300,7 +300,7 @@ Top-line rules carved into the codebase:
 
 ## 15. Managed workstreams use a portable ledger, not native format conversion
 
-Managed cross-harness continuity is explicitly opt-in through `ai-memory run`.
+Managed cross-harness continuity is explicitly opt-in through `sessionmunch run`.
 Direct Claude Code, Codex, OpenCode, Pi, Crush, Kimi Code, Command Code, Kiro
 CLI, OMP, Grok Build CLI, and Antigravity CLI launches retain the existing hook
 and single-use handoff behavior. There is
@@ -311,7 +311,7 @@ native create/resume syntax.
 One logical workstream owns one native session per harness plus an append-only
 portable event ledger. We rejected converting a Claude transcript into a fake
 Codex rollout (and the inverse): native stores include private, versioned state,
-provider-specific records, and integrity assumptions that ai-memory does not
+provider-specific records, and integrity assumptions that sessionmunch does not
 own. Adapters therefore read native stores without modifying them, normalize
 only visible messages/completed tools/compaction boundaries, and keep source
 and delivery cursors separately. Hidden reasoning and provider-private records
@@ -336,7 +336,7 @@ prevents a first Codex launch after Claude work from attaching an unrelated old
 Codex transcript; it creates a clean Codex session, injects the established
 ledger, and resumes that linked Codex session on later returns.
 
-Bare `ai-memory run` treats local timestamps as a bootstrap hint, not global
+Bare `sessionmunch run` treats local timestamps as a bootstrap hint, not global
 precedence. Once a workstream is established, the server selects the most
 recently linked harness among the locally available candidates. This prevents a
 newer obsolete transcript file from overriding the logical workstream. When no

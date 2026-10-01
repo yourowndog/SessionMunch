@@ -1,3 +1,3 @@
-. "$PSScriptRoot\..\lib\ai-memory-hook.ps1"
-Invoke-AiMemoryHook -Event "session-end" -Agent "gemini-cli"
+. "$PSScriptRoot\..\lib\sessionmunch-hook.ps1"
+Invoke-SessionMunchHook -Event "session-end" -Agent "gemini-cli"
 exit 0

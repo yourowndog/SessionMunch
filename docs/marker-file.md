@@ -1,11 +1,11 @@
-# Marker file: `.ai-memory.toml`
+# Marker file: `.sessionmunch.toml`
 
 Declare which workspace (and optionally which project) an agent's
 `cwd` belongs to, without depending on the directory's basename.
 
 ## Why
 
-ai-memory namespaces every wiki page by `(workspace, project)`. By
+sessionmunch namespaces every wiki page by `(workspace, project)`. By
 default, `workspace = "default"` and `project = basename($cwd)`. That
 works for a solo developer in `~/projects/<repo>` but breaks down
 for the cases this marker file is built for:
@@ -19,7 +19,7 @@ for the cases this marker file is built for:
   under its own project, your call.
 
 The marker file lets you declare these mappings without forking
-ai-memory or running CLI commands per directory.
+sessionmunch or running CLI commands per directory.
 
 Static MCP clients also use the marker as the repository-owned source for
 explicit scope arguments. For safe concurrent use, declare both `workspace` and
@@ -31,7 +31,7 @@ Session-aware bridges keep automatic current-project routing.
 
 ## Where to put it
 
-`.ai-memory.toml` in **any allowed ancestor** of your `cwd`. Lifecycle hooks
+`.sessionmunch.toml` in **any allowed ancestor** of your `cwd`. Lifecycle hooks
 walk up from `cwd` toward `$HOME` (or `/` if `$HOME` is unset) and use the
 **first** marker found. When cwd is outside `$HOME`, the walk stops at the
 nearest checkout root (`.git` file or directory); outside a checkout, only cwd
@@ -166,10 +166,10 @@ By default this file is optional — a repository without one is still captured,
 and the marker only *narrows* what is taken. An install can invert that:
 
 ```bash
-ai-memory install-hooks --apply --capture-mode allowlist
+sessionmunch install-hooks --apply --capture-mode allowlist
 ```
 
-Under allowlist mode the presence of a `.ai-memory.toml` **is** the opt-in. A
+Under allowlist mode the presence of a `.sessionmunch.toml` **is** the opt-in. A
 repository without one emits no lifecycle event at all — prompts, tool calls
 and session boundaries alike — dropped in the hook process before anything
 reaches the local spool or the wire. No extra key is needed: an existing marker
@@ -183,11 +183,11 @@ direction whose failure you would rather explain.
 The mode is stored per install rather than per agent, and a later bare
 `install-hooks --apply` (including an upgrade refresh) leaves it in place.
 
-It is enforced both by native `ai-memory hook` commands and by the generated
+It is enforced both by native `sessionmunch hook` commands and by the generated
 TypeScript integrations (`pi`, `omp`, `opencode`, `opencode2`, `openclaw`) —
 each bakes the selected mode in and carries the same marker-presence gate
 before it ever POSTs. Only the raw script-fallback paths (the
-`AI_MEMORY_HOOK_PLATFORM` override, the Docker host wrapper, and
+`SESSIONMUNCH_HOOK_PLATFORM` override, the Docker host wrapper, and
 `setup-agent` snippets) POST to the server directly without running either
 enforcement point, so allowlist mode does not gate them.
 
@@ -209,7 +209,7 @@ read of it is captured and consolidation compiles it into wiki pages that do
 not follow the repo, so the copy is stale the moment the record is superseded
 (see the "Repo-native decision records" section of [`usage.md`](usage.md)).
 
-The **nearest** `.ai-memory.toml` is authoritative; marker sections do not
+The **nearest** `.sessionmunch.toml` is authoritative; marker sections do not
 merge. A missing `[capture]` section or `ignore_paths = []` is inactive and
 preserves current behavior. `[capture]` accepts only `ignore_paths`: unknown
 keys, invalid types/globs/roots, unreadable markers, or a marker over 64 KiB
@@ -224,7 +224,7 @@ case-insensitive. Bounds are 128 patterns, 1,024 characters per pattern, 32
 direct candidates and 4,096 characters per candidate, and 1,000,000 bounded
 pattern/candidate comparisons.
 
-For fixture-proven direct file tools, ai-memory reads only explicit path fields
+For fixture-proven direct file tools, sessionmunch reads only explicit path fields
 and documented direct arrays for multi-file calls. If any candidate matches, the
 entire event is **dropped locally** before spool, queue, network, transport
 logs, or server storage. With an active policy, recognized search/list tools are
@@ -245,7 +245,7 @@ can be mentioned.
 
 ### Supported integrations and refresh
 
-Capture policy v1 is enforced by native `ai-memory hook` commands (including
+Capture policy v1 is enforced by native `sessionmunch hook` commands (including
 native POSIX/Windows hook commands) and generated OpenCode, OMP, Pi, and
 OpenClaw integrations. Local installers default to native commands where that
 path is supported. Legacy `.sh`/`.ps1` hooks and remote-only/Docker script
@@ -260,7 +260,7 @@ saw. The policy adds no MCP tool and no database migration.
 
 ### Check a decision locally
 
-`ai-memory hook --event ... --agent ... --check-capture` reads one JSON payload
+`sessionmunch hook --event ... --agent ... --check-capture` reads one JSON payload
 from stdin and performs no spool, queue, drain, network, or handoff work. It
 prints only bounded decision metadata (protocol version, policy state, tool
 family, path count, disposition, and extraction state), never paths, patterns,
@@ -268,7 +268,7 @@ or payload content:
 
 ```bash
 printf '%s\n' '{"session_id":"demo","cwd":"/example/workspace","tool_name":"Edit","tool_input":{"path":"docs/example.md"}}' \
-  | ai-memory hook --event post-tool-use --agent claude-code \
+  | sessionmunch hook --event post-tool-use --agent claude-code \
       --server-url http://127.0.0.1:49374 --check-capture
 ```
 
@@ -293,7 +293,7 @@ available only through the explicit double opt-in described in the install guide
 (`install-hooks --capture-assistant` on the client plus `capture_assistant` on
 the server), where the excerpt is sanitized on both sides and capped. It is not
 gated by this marker file — assistant text is not path-attributable, so a
-`.ai-memory.toml` cannot narrow it. The metadata header is closed; the
+`.sessionmunch.toml` cannot narrow it. The metadata header is closed; the
 PostToolUse response/error excerpt remains the existing bounded content capture.
 Capture exclusions are evaluated only where paths have a proven schema, so they
 do not claim to filter those other bodies.
@@ -303,9 +303,9 @@ do not claim to filter those other bodies.
 ### Multi-client
 
 ```
-~/projects/movvia/.ai-memory.toml     → workspace = "movvia"
-~/projects/cliente-x/.ai-memory.toml  → workspace = "cliente-x"
-~/personal/.ai-memory.toml            → workspace = "personal"
+~/projects/movvia/.sessionmunch.toml     → workspace = "movvia"
+~/projects/cliente-x/.sessionmunch.toml  → workspace = "cliente-x"
+~/personal/.sessionmunch.toml            → workspace = "personal"
 ```
 
 Outcome:
@@ -317,8 +317,8 @@ Outcome:
 ### Mono-repo with grouped packages
 
 ```
-~/projects/movvia/.ai-memory.toml              → workspace = "movvia"
-~/projects/movvia/pe-portais/.ai-memory.toml   → workspace = "movvia"
+~/projects/movvia/.sessionmunch.toml              → workspace = "movvia"
+~/projects/movvia/pe-portais/.sessionmunch.toml   → workspace = "movvia"
                                                   project   = "pe-portais"
 ```
 
@@ -331,18 +331,18 @@ Outcome:
 ### Git worktrees / repo-root identity
 
 ```
-~/projects/.ai-memory.toml → workspace        = "oss"
+~/projects/.sessionmunch.toml → workspace        = "oss"
                             → project_strategy = "repo-root"
 ```
 
 Outcome:
 
-- `~/projects/ai-memory`                → workspace = `oss`, project = `ai-memory`
-- `~/projects/ai-memory/crates/cli`     → workspace = `oss`, project = `ai-memory`
-- `~/projects/ai-memory-feature-branch` → workspace = `oss`, project = `ai-memory`
+- `~/projects/sessionmunch`                → workspace = `oss`, project = `sessionmunch`
+- `~/projects/sessionmunch/crates/cli`     → workspace = `oss`, project = `sessionmunch`
+- `~/projects/sessionmunch-feature-branch` → workspace = `oss`, project = `sessionmunch`
 
 If the marker lives inside the main checkout instead (for example
-`~/projects/ai-memory/.ai-memory.toml`), copy or commit it into each
+`~/projects/sessionmunch/.sessionmunch.toml`), copy or commit it into each
 out-of-tree worktree, or place a shared marker above the worktree parent
 directory as shown here.
 
@@ -355,15 +355,15 @@ plugins follow the worktree's commondir pointer (`git rev-parse
 the main repository and send the resolved name as an explicit `project`.
 This means it works even when the worktree directory lives **outside**
 the main repo tree (some tools keep worktrees in a separate directory,
-so the worktree has no `.ai-memory.toml` ancestor of its own) and even
+so the worktree has no `.sessionmunch.toml` ancestor of its own) and even
 when the server runs in a container that cannot see the host checkout.
 Put the marker anywhere on the walk-up path from the worktree — commonly
-a single `~/.ai-memory.toml` — to select the strategy.
+a single `~/.sessionmunch.toml` — to select the strategy.
 
 ### Single workspace, no per-repo overrides
 
 ```
-~/.ai-memory.toml → workspace = "home"
+~/.sessionmunch.toml → workspace = "home"
 ```
 
 Every cwd under `$HOME` lands in workspace `home` with
@@ -376,7 +376,7 @@ Projects already created under workspace `default` stay there. Move one to a
 different workspace with the CLI:
 
 ```sh
-ai-memory move-project \
+sessionmunch move-project \
     --from-workspace default --project foo \
     --to-workspace movvia --confirm
 ```
@@ -384,12 +384,12 @@ ai-memory move-project \
 ## Install-wide default (no marker)
 
 `project_strategy = "repo-root"` normally lives in a marker, which means
-dropping a `.ai-memory.toml` in (or above) every repo. To get the same
+dropping a `.sessionmunch.toml` in (or above) every repo. To get the same
 repo-root resolution for a whole install **without** a per-repo marker, bake
 it into the generated hooks at install time:
 
 ```sh
-ai-memory install-hooks --apply --agent claude-code --project-strategy repo-root
+sessionmunch install-hooks --apply --agent claude-code --project-strategy repo-root
 ```
 
 Every session for that install then resolves its project from the main git
@@ -398,11 +398,11 @@ longer forks the rest of the session into a phantom project named `sub`.
 
 This is **install-time config**, written into the agent's hook command (and
 the generated OpenCode / OMP / Pi / OpenClaw plugins) — the same status as the
-`AI_MEMORY_AUTH_TOKEN` / `AI_MEMORY_HOOK_URL` it sits beside, *not* a user-set
+`SESSIONMUNCH_AUTH_TOKEN` / `SESSIONMUNCH_HOOK_URL` it sits beside, *not* a user-set
 runtime override (which was deliberately rejected in #16). The flag accepts
 `basename` (the new-install default — bakes nothing) or `repo-root`. A later
 `install-hooks --apply` without the flag preserves the value already baked into
-ai-memory's hooks; pass `--project-strategy basename` explicitly to remove it.
+sessionmunch's hooks; pass `--project-strategy basename` explicitly to remove it.
 
 Precedence is unchanged: a marker's explicit `project_strategy` or `project`
 still wins over the install default.
@@ -434,7 +434,7 @@ mid_session = "follow-cwd"   # default
 
 Two guarantees hold in **both** modes:
 
-- **A marker still wins.** A `.ai-memory.toml` naming a project is a
+- **A marker still wins.** A `.sessionmunch.toml` naming a project is a
   deliberate rescope, not drift, so it is never overruled. The hook tells the
   server which kind of override it sent (`project_src=marker` vs
   `project_src=repo-root`), which is what lets `sticky` overrule a derived
@@ -470,7 +470,7 @@ Both entry points, as of v1.20:
 Before v1.20 only the hooks read it. A checkout declaring
 `workspace = "acme"` therefore had its captures land in `acme` while every
 CLI command resolved into `default` — the same repository split across two
-scopes, with `ai-memory run`'s managed workstream on the wrong side of the
+scopes, with `sessionmunch run`'s managed workstream on the wrong side of the
 split.
 
 Each field is resolved independently:
@@ -485,18 +485,18 @@ the resolved scope, which half (or halves) the marker decided, and the
 marker that decided it:
 
 ```console
-$ ai-memory search "scope resolver"
-ai-memory: scope acme/api (workspace + project from /Users/dev/projects/acme/.ai-memory.toml)
+$ sessionmunch search "scope resolver"
+sessionmunch: scope acme/api (workspace + project from /Users/dev/projects/acme/.sessionmunch.toml)
 ```
 
-`AI_MEMORY_IGNORE_MARKER=1` skips rung 2 for one invocation, restoring the
+`SESSIONMUNCH_IGNORE_MARKER=1` skips rung 2 for one invocation, restoring the
 pre-v1.20 resolution without editing or leaving the marker's tree. It
 applies to **client commands only** — the lifecycle hooks still forward the
 marker's fields on every event, so an invocation run with it set resolves
 into a different scope than the session captures around it. Use it for
 one-off reads, not as a way to relocate a repository's memory.
 
-`ai-memory serve` is deliberately excluded: the server has no caller cwd to
+`sessionmunch serve` is deliberately excluded: the server has no caller cwd to
 walk up from, and its `--workspace` / `--project` are the baked fallback for
 hook events that arrive without a usable one.
 
@@ -509,7 +509,7 @@ hook events that arrive without a usable one.
   share a project when `project_strategy = "repo-root"` is explicitly set
   (per marker, or baked install-wide — see above).
 - ❌ No user-set env / auth / hook-url override. Use the existing env vars
-  (`AI_MEMORY_AUTH_TOKEN`, `AI_MEMORY_HOOK_URL`) for those. (A repo-root
+  (`SESSIONMUNCH_AUTH_TOKEN`, `SESSIONMUNCH_HOOK_URL`) for those. (A repo-root
   *default* can still be baked into an install without a marker via
   `install-hooks --project-strategy repo-root`, but that is install-time
   config, not a runtime override the user sets in their shell.)
@@ -522,11 +522,11 @@ hook events that arrive without a usable one.
 
 **My marker isn't being picked up.** Walk through:
 
-1. File is named exactly `.ai-memory.toml` (note the leading dot).
+1. File is named exactly `.sessionmunch.toml` (note the leading dot).
 2. File is in an **ancestor** of the cwd — not a sibling, not a
    descendant.
 3. There isn't a closer marker overriding it. Run
-   `find ~/projects -maxdepth 5 -name '.ai-memory.toml'` to see all
+   `find ~/projects -maxdepth 5 -name '.sessionmunch.toml'` to see all
    markers in your tree.
 4. The workspace / project values match the regex above (lowercase
    alphanumerics, dots, dashes, underscores).
@@ -538,7 +538,7 @@ hand:
 
 ```sh
 printf '{"cwd":"%s"}' "$PWD" \
-  | sh ~/.local/share/ai-memory/hooks/claude-code/post-tool-use.sh
+  | sh ~/.local/share/sessionmunch/hooks/claude-code/post-tool-use.sh
 ```
 
 If the marker is being read, the curl line (visible with `set -x`

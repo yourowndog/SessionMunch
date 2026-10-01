@@ -6,7 +6,7 @@ changes to the wiki directory.
 
 ## When to write a wiki migration
 
-Write a wiki migration any time a new version of ai-memory requires an
+Write a wiki migration any time a new version of sessionmunch requires an
 on-disk wiki directory that was created by an older version to be
 restructured. Examples that require a migration:
 
@@ -23,7 +23,7 @@ backward-compatible (e.g. a new optional frontmatter field that defaults to
 
 ### 1. Create the migration file
 
-Add a new file in `crates/ai-memory-wiki/src/migrations/`. Use the naming
+Add a new file in `crates/sessionmunch-wiki/src/migrations/`. Use the naming
 convention:
 
 ```
@@ -36,7 +36,7 @@ For example: `m2026_06_01_1200_rename_logs_dir.rs`.
 
 ```rust
 use std::path::Path;
-use ai_memory_store::WriterHandle;
+use sessionmunch_store::WriterHandle;
 use crate::error::WikiResult;
 use crate::migrations::WikiMigration;
 
@@ -70,7 +70,7 @@ impl WikiMigration for RenameLogs2026 {
 
 ### 3. Register it
 
-Open `crates/ai-memory-wiki/src/migrations/mod.rs` and append to the
+Open `crates/sessionmunch-wiki/src/migrations/mod.rs` and append to the
 `registry()` function:
 
 ```rust
@@ -100,7 +100,7 @@ Every migration module must include a `#[cfg(test)]` block that:
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    use ai_memory_store::Store;
+    use sessionmunch_store::Store;
 
     #[tokio::test]
     async fn renames_logs_dir() {

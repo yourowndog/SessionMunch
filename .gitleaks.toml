@@ -1,11 +1,11 @@
-# gitleaks configuration for ai-memory.
+# gitleaks configuration for sessionmunch.
 #
 # Wired into CI via `.github/workflows/ci.yml` for changed commits and
 # `.github/workflows/secret-scan.yml` for scheduled/manual full-history
 # scans. Both fail if a credential-shaped value is not explicitly reviewed.
 #
 # The default ruleset (Google API keys, Anthropic, OpenAI, Slack, AWS,
-# GitHub PATs, …) covers what ai-memory's own sanitiser covers. We
+# GitHub PATs, …) covers what sessionmunch's own sanitiser covers. We
 # inherit it and only ADD an allowlist for the specific test fixtures
 # we deliberately ship. `.gitleaksignore` contains exact fingerprints for
 # reviewed legacy findings; never add broad commit, path, or rule exclusions.
@@ -17,7 +17,7 @@
 # and any DRIFT from those shapes (i.e. a real key showing up) fails
 # CI loudly before push.
 
-title = "ai-memory secret-scan config"
+title = "sessionmunch secret-scan config"
 
 [extend]
 useDefault = true

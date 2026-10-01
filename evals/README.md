@@ -1,12 +1,12 @@
 # `evals/` — evaluation harnesses
 
-One Rust binary (`ai-memory-eval`) with two subcommands:
+One Rust binary (`sessionmunch-eval`) with two subcommands:
 
-- **`ab`** — runs the EXACT consolidation prompt ai-memory uses in
+- **`ab`** — runs the EXACT consolidation prompt sessionmunch uses in
   production against two LLM providers side by side, and saves both
   outputs to disk for human comparison.
 - **`retrieval`** — the LongMemEval retrieval benchmark, driven end to
-  end through a real `ai-memory serve` subprocess. Published baselines
+  end through a real `sessionmunch serve` subprocess. Published baselines
   live in `docs/benchmarks/`.
 
 **This is not part of the shipped binary.** It's a workspace member
@@ -34,12 +34,12 @@ distinction).
 For each `*.json` under `evals/fixtures/`:
 
 1. Builds the request via
-   [`ai_memory_consolidate::build_batch_request`] — same code path
+   [`sessionmunch_consolidate::build_batch_request`] — same code path
    the live consolidator uses.
 2. Sends it to a **baseline** and a **candidate** provider, *in
    parallel*.
 3. Runs the result through
-   [`ai_memory_llm::complete_structured`] — same JSON-schema
+   [`sessionmunch_llm::complete_structured`] — same JSON-schema
    validation the live system applies. Schema-parse failure is
    recorded (not fatal).
 4. Persists to `evals/runs/<timestamp>/{baseline,candidate}/<fixture>.{json,md,meta.json}`.
@@ -58,7 +58,7 @@ judge faithfulness, scoping, hallucination, etc.
 # string for the candidate (Ollama doesn't validate).
 export OPENROUTER_API_KEY="sk-or-v1-..."
 
-cargo run -p ai-memory-eval -- ab \
+cargo run -p sessionmunch-eval -- ab \
     --baseline-provider openai-compat \
     --baseline-base-url https://openrouter.ai/api/v1 \
     --baseline-model moonshotai/kimi-k2.6 \
@@ -72,7 +72,7 @@ cargo run -p ai-memory-eval -- ab \
 ### Two Ollama models against each other
 
 ```bash
-cargo run -p ai-memory-eval -- ab \
+cargo run -p sessionmunch-eval -- ab \
     --baseline-provider openai-compat \
     --baseline-base-url http://192.168.0.90:11434/v1 \
     --baseline-model qwen3:32b \
@@ -85,13 +85,13 @@ cargo run -p ai-memory-eval -- ab \
 
 ### ChatGPT/Codex OAuth as one side
 
-Run `ai-memory auth login openai-oauth` first, then point the eval harness at
+Run `sessionmunch auth login openai-oauth` first, then point the eval harness at
 the same token file:
 
 ```bash
-cargo run -p ai-memory-eval -- ab \
+cargo run -p sessionmunch-eval -- ab \
     --baseline-provider openai-oauth \
-    --baseline-token-file ~/.local/share/ai-memory/auth.json \
+    --baseline-token-file ~/.local/share/sessionmunch/auth.json \
     --baseline-model gpt-5.5 \
     --candidate-provider openai-compat \
     --candidate-base-url http://192.168.0.90:11434/v1 \
@@ -101,13 +101,13 @@ cargo run -p ai-memory-eval -- ab \
 
 ### GitHub Copilot as one side
 
-Run `ai-memory auth login copilot` first, then point the eval harness at the
+Run `sessionmunch auth login copilot` first, then point the eval harness at the
 same auth file:
 
 ```bash
-cargo run -p ai-memory-eval -- ab \
+cargo run -p sessionmunch-eval -- ab \
     --baseline-provider copilot \
-    --baseline-token-file ~/.local/share/ai-memory/auth.json \
+    --baseline-token-file ~/.local/share/sessionmunch/auth.json \
     --baseline-model gpt-5.5 \
     --candidate-provider openai-compat \
     --candidate-base-url http://192.168.0.90:11434/v1 \
@@ -149,7 +149,7 @@ Each fixture is a JSON file:
 
 `kind` values: `session-start`, `user-prompt`, `pre-tool-use`,
 `post-tool-use`, `pre-compact`, `notification`, `stop`,
-`session-end`, `other` (see `ObservationKind` in `ai-memory-core`).
+`session-end`, `other` (see `ObservationKind` in `sessionmunch-core`).
 
 The `description` field isn't read by the runner — it's a comment
 for the next human who opens the file.
@@ -177,7 +177,7 @@ Measures the real retrieval stack against
 (v1, S variant, MIT license, 500 questions over ~50-session chat
 haystacks). Nothing is mocked:
 
-1. a real `ai-memory serve` subprocess starts on a fresh temp data dir
+1. a real `sessionmunch serve` subprocess starts on a fresh temp data dir
    (zero-LLM: no consolidation LLM, no embedder, no reranker — fully
    deterministic and offline);
 2. each question's haystack replays through `POST /hook/batch` at the
@@ -196,9 +196,9 @@ The dataset (278 MB) is NOT committed; it downloads to
 on upstream drift.
 
 ```bash
-cargo build --release -p ai-memory-cli   # the server under test
-cargo run --release -p ai-memory-eval -- retrieval --fetch   # full 500
-cargo run -p ai-memory-eval -- retrieval --sample 10         # smoke
+cargo build --release -p sessionmunch-cli   # the server under test
+cargo run --release -p sessionmunch-eval -- retrieval --fetch   # full 500
+cargo run -p sessionmunch-eval -- retrieval --sample 10         # smoke
 ```
 
 Output: a per-category table on stdout plus

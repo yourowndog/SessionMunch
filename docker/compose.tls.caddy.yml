@@ -1,4 +1,4 @@
-# docker compose template — ai-memory + Caddy TLS-terminating reverse proxy.
+# docker compose template — sessionmunch + Caddy TLS-terminating reverse proxy.
 #
 # Three usable variants, all in this one file. Pick one and either:
 #   - Copy this file, prune the variants you don't want, then
@@ -8,31 +8,31 @@
 #
 # Adjacent files this compose expects:
 #   ./Caddyfile             — your reverse-proxy config; see variants below
-#   ./.env.production       — AI_MEMORY_AUTH_TOKEN + AI_MEMORY_ALLOWED_HOSTS +
+#   ./.env.production       — SESSIONMUNCH_AUTH_TOKEN + SESSIONMUNCH_ALLOWED_HOSTS +
 #                             your LLM provider creds. NOT committed.
 #
 # Walkthrough + variant explanations + client-side install:
 #   docs/https-via-proxy.md
 
-name: ai-memory-tls
+name: sessionmunch-tls
 
 services:
-  ai-memory:
+  sessionmunch:
     image: akitaonrails/ai-memory:latest
-    container_name: ai-memory
+    container_name: sessionmunch
     restart: unless-stopped
-    # No host port. Caddy reaches ai-memory over the internal docker
+    # No host port. Caddy reaches sessionmunch over the internal docker
     # network; the only inbound surface is Caddy's 80/443 below.
     expose:
       - "49374"
     volumes:
-      - ai-memory-data:/data
+      - sessionmunch-data:/data
     env_file:
       - .env.production
     environment:
-      - RUST_LOG=ai_memory=info,ai_memory_store=info,ai_memory_wiki=info,ai_memory_mcp=info,tracing_appender=warn
+      - RUST_LOG=sessionmunch=info,sessionmunch_store=info,sessionmunch_wiki=info,sessionmunch_mcp=info,tracing_appender=warn
     healthcheck:
-      test: ["CMD", "/usr/local/bin/ai-memory", "status"]
+      test: ["CMD", "/usr/local/bin/sessionmunch", "status"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -40,10 +40,10 @@ services:
 
   caddy:
     image: caddy:2-alpine
-    container_name: ai-memory-caddy
+    container_name: sessionmunch-caddy
     restart: unless-stopped
     depends_on:
-      - ai-memory
+      - sessionmunch
     ports:
       # 80 is needed for Let's Encrypt's HTTP-01 challenge during issuance
       # and renewal. Drop it when using internal-CA mode (Variant B) since
@@ -61,8 +61,8 @@ services:
       # - /your/cert/path:/etc/caddy/certs:ro
 
 volumes:
-  ai-memory-data:
-    name: ai-memory-data
+  sessionmunch-data:
+    name: sessionmunch-data
   caddy-data:
   caddy-config:
 
@@ -74,7 +74,7 @@ volumes:
 # Put this in ./Caddyfile next to this compose file:
 #
 #     memory.example.com {
-#         reverse_proxy ai-memory:49374
+#         reverse_proxy sessionmunch:49374
 #     }
 #
 # Requires:
@@ -96,7 +96,7 @@ volumes:
 #     }
 #
 #     homelab.local, 192.168.1.50 {
-#         reverse_proxy ai-memory:49374
+#         reverse_proxy sessionmunch:49374
 #     }
 #
 # List every hostname + IP a client will use in the site address.
@@ -119,7 +119,7 @@ volumes:
 #
 #     memory.example.com {
 #         tls /etc/caddy/certs/memory.crt /etc/caddy/certs/memory.key
-#         reverse_proxy ai-memory:49374
+#         reverse_proxy sessionmunch:49374
 #     }
 #
 # Uncomment the cert volume mount in the caddy service above.

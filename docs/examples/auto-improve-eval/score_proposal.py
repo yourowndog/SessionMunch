@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Example ai-memory auto-improve eval scorer.
+"""Example sessionmunch auto-improve eval scorer.
 
 Reads proposal JSON from stdin and emits:
   {"passed": bool, "score_before": float, "score_after": float, "reason": str?}

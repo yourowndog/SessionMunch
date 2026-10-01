@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ai-memory-wrapper-upgrade.XXXXXX")"
+TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/sessionmunch-wrapper-upgrade.XXXXXX")"
 trap 'rm -rf "${TMP_ROOT}"' EXIT
 
 fail() {
@@ -27,17 +27,17 @@ FAKE_DOCKER="${TMP_ROOT}/podman"
 cat >"${FAKE_DOCKER}" <<'DOCKER'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "$*" >>"${AI_MEMORY_WRAPPER_TEST_LOG}"
+printf '%s\n' "$*" >>"${SESSIONMUNCH_WRAPPER_TEST_LOG}"
 
 case "${1:-}" in
   pull)
     exit 0
     ;;
   ps)
-    printf 'ai-memory\n'
+    printf 'sessionmunch\n'
     ;;
   compose)
-    if [ "${2:-}" = "ps" ] && [ "${AI_MEMORY_TEST_COMPOSE_OWNS:-}" = "1" ]; then
+    if [ "${2:-}" = "ps" ] && [ "${SESSIONMUNCH_TEST_COMPOSE_OWNS:-}" = "1" ]; then
       printf 'running-container-id\n'
     fi
     ;;
@@ -48,15 +48,15 @@ case "${1:-}" in
       *PortBindings*) printf '%s\n' '-p 127.0.0.1:49374:49374/tcp ' ;;
       *Mounts*)
         if printf '%s\n' "${4:-}" | grep -q 'if \.Mode'; then
-          printf '%s\n' '-v ai-memory-data:/data:Z '
+          printf '%s\n' '-v sessionmunch-data:/data:Z '
         else
-          printf '%s\n' '-v ai-memory-data:/data '
+          printf '%s\n' '-v sessionmunch-data:/data '
         fi
         ;;
       *RestartPolicy*) printf '%s\n' '--restart unless-stopped' ;;
       '{{json .Config.Cmd}}') printf '[]\n' ;;
       *'.Config.Env'*)
-        if [ "${2:-}" = "ai-memory" ]; then
+        if [ "${2:-}" = "sessionmunch" ]; then
           printf 'CUSTOM_VAR=custom_val\nHOSTNAME=container-id-123\ncontainer=podman\n'
         fi
         ;;
@@ -83,28 +83,28 @@ run_upgrade_case() {
     cd "${case_dir}"
     HOME="${case_dir}/home" \
     XDG_CACHE_HOME="${case_dir}/cache" \
-    AI_MEMORY_DOCKER="${FAKE_DOCKER}" \
-    AI_MEMORY_SKIP_SELF_UPGRADE=1 \
-    AI_MEMORY_WRAPPER_TEST_LOG="${log}" \
-    AI_MEMORY_TEST_COMPOSE_OWNS="${owns}" \
-      "${ROOT}/bin/ai-memory" upgrade >"${output}" 2>&1
+    SESSIONMUNCH_DOCKER="${FAKE_DOCKER}" \
+    SESSIONMUNCH_SKIP_SELF_UPGRADE=1 \
+    SESSIONMUNCH_WRAPPER_TEST_LOG="${log}" \
+    SESSIONMUNCH_TEST_COMPOSE_OWNS="${owns}" \
+      "${ROOT}/bin/sessionmunch" upgrade >"${output}" 2>&1
   )
 }
 
 run_upgrade_case standalone 0
-assert_contains "${TMP_ROOT}/standalone/output.log" "does not manage the running ai-memory container"
+assert_contains "${TMP_ROOT}/standalone/output.log" "does not manage the running sessionmunch container"
 assert_not_contains "${TMP_ROOT}/standalone/docker.log" "compose up -d"
-assert_contains "${TMP_ROOT}/standalone/cache/ai-memory/recreate-ai-memory.sh" "-v ai-memory-data:/data:Z"
-assert_contains "${TMP_ROOT}/standalone/cache/ai-memory/recreate-ai-memory.sh" "-e CUSTOM_VAR=custom_val"
-assert_not_contains "${TMP_ROOT}/standalone/cache/ai-memory/recreate-ai-memory.sh" "HOSTNAME="
-assert_not_contains "${TMP_ROOT}/standalone/cache/ai-memory/recreate-ai-memory.sh" "container=podman"
-assert_contains "${TMP_ROOT}/standalone/cache/ai-memory/recreate-ai-memory.sh" "${FAKE_DOCKER} stop ai-memory"
-assert_not_contains "${TMP_ROOT}/standalone/cache/ai-memory/recreate-ai-memory.sh" "docker stop ai-memory"
+assert_contains "${TMP_ROOT}/standalone/cache/sessionmunch/recreate-sessionmunch.sh" "-v sessionmunch-data:/data:Z"
+assert_contains "${TMP_ROOT}/standalone/cache/sessionmunch/recreate-sessionmunch.sh" "-e CUSTOM_VAR=custom_val"
+assert_not_contains "${TMP_ROOT}/standalone/cache/sessionmunch/recreate-sessionmunch.sh" "HOSTNAME="
+assert_not_contains "${TMP_ROOT}/standalone/cache/sessionmunch/recreate-sessionmunch.sh" "container=podman"
+assert_contains "${TMP_ROOT}/standalone/cache/sessionmunch/recreate-sessionmunch.sh" "${FAKE_DOCKER} stop sessionmunch"
+assert_not_contains "${TMP_ROOT}/standalone/cache/sessionmunch/recreate-sessionmunch.sh" "docker stop sessionmunch"
 
 run_upgrade_case compose 1
-assert_contains "${TMP_ROOT}/compose/output.log" "restarting local ai-memory container via ${FAKE_DOCKER} compose"
+assert_contains "${TMP_ROOT}/compose/output.log" "restarting local sessionmunch container via ${FAKE_DOCKER} compose"
 assert_contains "${TMP_ROOT}/compose/docker.log" "compose up -d"
-if [ -e "${TMP_ROOT}/compose/cache/ai-memory/recreate-ai-memory.sh" ]; then
+if [ -e "${TMP_ROOT}/compose/cache/sessionmunch/recreate-sessionmunch.sh" ]; then
   fail "Compose-owned container unexpectedly produced a standalone recreation script"
 fi
 
@@ -194,10 +194,10 @@ if pid == 0:
     os.close(slave)
     env = dict(os.environ)
     env["PATH"] = sys.argv[1] + ":" + env["PATH"]
-    env["AI_MEMORY_DOCKER"] = sys.argv[2]
-    env["AI_MEMORY_NO_TTY"] = "1"
+    env["SESSIONMUNCH_DOCKER"] = sys.argv[2]
+    env["SESSIONMUNCH_NO_TTY"] = "1"
     env["XDG_CACHE_HOME"] = sys.argv[3]
-    env.pop("AI_MEMORY_NO_VERSION_CHECK", None)
+    env.pop("SESSIONMUNCH_NO_VERSION_CHECK", None)
     os.execvpe(sys.argv[4], [sys.argv[4], "status"], env)
 else:
     os.close(slave)
@@ -213,7 +213,7 @@ else:
     os.waitpid(pid, 0)
     with open(sys.argv[5], "wb") as f:
         f.write(output)
-' "${case_dir}" "${fake_engine}" "${case_dir}/cache" "${ROOT}/bin/ai-memory" "${out}"
+' "${case_dir}" "${fake_engine}" "${case_dir}/cache" "${ROOT}/bin/sessionmunch" "${out}"
 
     if [ "${expect_warn}" -eq 1 ]; then
       assert_contains "${out}" "a newer image is available on Docker Hub"

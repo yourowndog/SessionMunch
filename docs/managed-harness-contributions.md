@@ -4,7 +4,7 @@ Managed-workstream support is narrower than MCP or lifecycle-hook support. This
 release can manage Claude Code, Codex, OpenCode, OpenCode 2 beta, Pi, Crush, Kimi Code, Command
 Code, Kiro CLI v2/v3, OMP, Grok Build CLI, and Antigravity CLI. Gemini CLI,
 Devin CLI, Cursor, and the other integrations in the README support matrix do
-not become managed merely because ai-memory can capture their hooks.
+not become managed merely because sessionmunch can capture their hooks.
 
 A managed adapter must preserve a harness's real native session, deliver the
 portable workstream delta exactly once, and import only visible history without
@@ -43,13 +43,13 @@ already-released migration.
 
 Then wire the explicit managed surface:
 
-- `RunHarnessChoice` in `ai-memory-cli`;
+- `RunHarnessChoice` in `sessionmunch-cli`;
 - `ManagedHarness`, its executable, and its `AgentKind` mapping in
-  `ai-memory-workstream`;
+  `sessionmunch-workstream`;
 - the server's managed-harness validation list; and
 - README, install, architecture, design-decision, and changelog references.
 
-Explicit support comes first. Add a harness to bare `ai-memory run` automatic
+Explicit support comes first. Add a harness to bare `sessionmunch run` automatic
 selection only after checkout-local candidate discovery is reliable. A local
 file timestamp is a bootstrap hint; the server's current linked harness remains
 authoritative for an established workstream.
@@ -57,9 +57,9 @@ authoritative for an established workstream.
 ## 3. Preserve native argv and session ownership
 
 Implement fresh, resume, and explicit-selector behavior in
-`crates/ai-memory-workstream/src/harness.rs`. Preserve every user argument and
+`crates/sessionmunch-workstream/src/harness.rs`. Preserve every user argument and
 its order except the exact wrapper-owned `--yolo` and `--fresh` tokens. An
-explicit native selector always wins over ai-memory's linked session. Help,
+explicit native selector always wins over sessionmunch's linked session. Help,
 version, login, doctor, export, and similar utility commands must not receive
 session flags.
 
@@ -78,7 +78,7 @@ continue, or fork selector.
 
 ## 4. Discover and export read-only
 
-Implement candidate discovery in `crates/ai-memory-workstream/src/transcript.rs`.
+Implement candidate discovery in `crates/sessionmunch-workstream/src/transcript.rs`.
 Implement incremental export only when a documented or repeatably observed
 native format exposes visible conversation records without private state.
 
@@ -105,7 +105,7 @@ record "just in case."
 ## 5. Deliver context before acknowledging it
 
 The preferred path is a native SessionStart hook. The managed child inherits
-`AI_MEMORY_RUN_ID`; the hook links the actual native session, renders the unseen
+`SESSIONMUNCH_RUN_ID`; the hook links the actual native session, renders the unseen
 bounded workstream range, makes it model-visible, and only then accepts the
 delivery cursor.
 
@@ -113,7 +113,7 @@ If the harness has no suitable hook, use a documented native context mechanism.
 Crush is the reference: the launcher fetches without accepting, writes a private
 temporary copy of the supported config plus an ephemeral context file, starts
 the child, and acknowledges only after spawn succeeds. The original config and
-session store are never written by ai-memory, the harness retains its normal
+session store are never written by sessionmunch, the harness retains its normal
 native writes, and the temporary directory is removed after exit.
 
 Fetching must be repeatable until acceptance. A failed spawn, hook, or network

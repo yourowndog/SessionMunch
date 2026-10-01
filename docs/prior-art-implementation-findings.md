@@ -1,13 +1,13 @@
 # Prior-Art Implementation Findings
 
 > Scope: compare the checked-in prior-art analyses for agentmemory,
-> basic-memory, cognee, and MemPalace against the current ai-memory
+> basic-memory, cognee, and MemPalace against the current sessionmunch
 > implementation. This is an analysis document only; no code changes
 > are implied by this file.
 
 ## Executive Summary
 
-ai-memory already captured the most important prior-art lessons:
+sessionmunch already captured the most important prior-art lessons:
 automatic capture, a narrow MCP surface, markdown-in-git as the human
 source of truth, SQLite as the derived index/state store, single-writer
 durability, opt-in LLM consolidation, structured JSON outputs, typed
@@ -41,18 +41,18 @@ The follow-up implementation landed the pragmatic subset of this roadmap:
 
 ## Prior Art Summary
 
-| Project | Main strengths | Main weaknesses | ai-memory stance |
+| Project | Main strengths | Main weaknesses | sessionmunch stance |
 |---|---|---|---|
-| agentmemory | Automatic hook capture, four memory tiers, versioned supersession, retention scoring, hybrid BM25/vector/graph retrieval, slots, handoff patterns, snapshots, diagnostics. | iii-engine sidecar, JSON-in-KV storage, in-memory indexes, XML parsing, too many tools/endpoints, early default-on LLM costs, hook blocking/config drift bugs. | ai-memory follows the concepts more than any other project, but replaces the substrate with one Rust binary, SQLite, markdown, structured JSON, and a narrow tool surface. |
-| basic-memory | Markdown files as source of truth, derived SQL index, human-editable notes, MCP hints/aliases, `memory://` style navigation, unresolved links, multi-project routing. | Manual `write_note` ceremony, append-only memory, fragile file watcher/sync, markdown grammar burden on the LLM, weak lifecycle/ranking. | ai-memory borrows markdown/source-of-truth and human editability, but rejects manual capture and adds lifecycle, decay, supersession, and hook capture. |
-| cognee | Task-list pipeline shape, structured graph extraction, provenance stamping, triplet embeddings, multi-collection retrieval, feedback-weighted `improve()`. | Heavy Python dependency stack, LiteLLM/Instructor brittleness, multi-store graph/vector/relational sync bugs, SQLite deadlocks, retrieval filter propagation regressions. | ai-memory should borrow only the pipeline and retrieval ideas, not the multi-store architecture or generic LLM gateway. |
-| MemPalace | Strong verbatim/raw recall story, deterministic IDs, resume-safe mining, transparent benchmark culture, temporal KG ideas. | Chroma/HNSW/FTS corruption under concurrent writers, deferred persistence, destructive repair paths, no decay causing bloat, embedding metadata drift. | ai-memory already avoids the durability failures through a single writer, one SQLite file, provider/model/dim metadata, and decay. The useful feature to steal is bounded raw fallback recall. |
+| agentmemory | Automatic hook capture, four memory tiers, versioned supersession, retention scoring, hybrid BM25/vector/graph retrieval, slots, handoff patterns, snapshots, diagnostics. | iii-engine sidecar, JSON-in-KV storage, in-memory indexes, XML parsing, too many tools/endpoints, early default-on LLM costs, hook blocking/config drift bugs. | sessionmunch follows the concepts more than any other project, but replaces the substrate with one Rust binary, SQLite, markdown, structured JSON, and a narrow tool surface. |
+| basic-memory | Markdown files as source of truth, derived SQL index, human-editable notes, MCP hints/aliases, `memory://` style navigation, unresolved links, multi-project routing. | Manual `write_note` ceremony, append-only memory, fragile file watcher/sync, markdown grammar burden on the LLM, weak lifecycle/ranking. | sessionmunch borrows markdown/source-of-truth and human editability, but rejects manual capture and adds lifecycle, decay, supersession, and hook capture. |
+| cognee | Task-list pipeline shape, structured graph extraction, provenance stamping, triplet embeddings, multi-collection retrieval, feedback-weighted `improve()`. | Heavy Python dependency stack, LiteLLM/Instructor brittleness, multi-store graph/vector/relational sync bugs, SQLite deadlocks, retrieval filter propagation regressions. | sessionmunch should borrow only the pipeline and retrieval ideas, not the multi-store architecture or generic LLM gateway. |
+| MemPalace | Strong verbatim/raw recall story, deterministic IDs, resume-safe mining, transparent benchmark culture, temporal KG ideas. | Chroma/HNSW/FTS corruption under concurrent writers, deferred persistence, destructive repair paths, no decay causing bloat, embedding metadata drift. | sessionmunch already avoids the durability failures through a single writer, one SQLite file, provider/model/dim metadata, and decay. The useful feature to steal is bounded raw fallback recall. |
 
-## What ai-memory Already Implements Well
+## What sessionmunch Already Implements Well
 
 ### Storage And Durability
 
-ai-memory's store matches the strongest lesson from the issue research:
+sessionmunch's store matches the strongest lesson from the issue research:
 keep durable storage and mutation ordering boring. `Store::open` uses
 SQLite in WAL mode with foreign keys and migrations. `WriterHandle`
 serializes all mutations through one writer thread. Page writes go
@@ -86,7 +86,7 @@ cleaner version of agentmemory's informal handoff behavior.
 
 ### Consolidation Model
 
-ai-memory implements versioned page supersession (`is_latest`,
+sessionmunch implements versioned page supersession (`is_latest`,
 `supersedes`) and structured JSON-schema consolidation. Multi-page
 consolidation can fan out into `sessions/`, `concepts/`, `decisions/`,
 `gotchas/`, and `_rules/`. Rule routing is a useful extension beyond the
@@ -117,7 +117,7 @@ of truth: the running server owns state.
 
 agentmemory's most useful missing idea is the slot system: small,
 human-editable, durable memory blocks for project context, user
-preferences, current focus, and pending items. ai-memory now implements
+preferences, current focus, and pending items. sessionmunch now implements
 this as pinned `_slots/` markdown pages.
 
 Recommended shape:
@@ -146,7 +146,7 @@ clear intervals and summaries while preserving the manual commands:
 | forget sweep | Runs daily by default so retention does not depend on a manual request. |
 | lint | Runs daily by default to surface stale pages, duplicate titles, rule suggestions, broken cross-project links, and optional LLM contradictions. |
 | embedding backfill | Runs only when its interval is enabled and an embedder is configured. |
-| optional consolidation queue | Enqueues SessionEnd provider work durably when `AI_MEMORY_CONSOLIDATE_ON_SESSION_END` is enabled; one bounded worker retries it outside hook processing. |
+| optional consolidation queue | Enqueues SessionEnd provider work durably when `SESSIONMUNCH_CONSOLIDATE_ON_SESSION_END` is enabled; one bounded worker retries it outside hook processing. |
 
 The deterministic SessionEnd page and handoff remain independent of provider
 availability. Agentmemory's hook-blocking incidents remain the warning label
@@ -207,7 +207,7 @@ enough for the expected corpus size.
 
 MemPalace's strongest useful idea is not its storage stack. It is the
 evidence that raw text recall can recover details that compiled summaries
-drop. ai-memory reserves `raw/`; the implemented fallback searches the
+drop. sessionmunch reserves `raw/`; the implemented fallback searches the
 durable `observations` table through `observations_fts`.
 
 Recommended shape:
@@ -219,13 +219,13 @@ Recommended shape:
 | retention budget | Prevent MemPalace-style bloat. |
 | privacy boundary | Use the same sanitizer before raw text becomes durable/searchable. |
 
-This gives ai-memory the best of both philosophies: compile first, but
+This gives sessionmunch the best of both philosophies: compile first, but
 keep a bounded escape hatch for exact details.
 
 ### P1: Add Diagnostics And Safe Heal Paths
 
 The prior-art trackers show that users forgive complexity less than they
-forgive uncertainty. ai-memory has a simple architecture, but it should
+forgive uncertainty. sessionmunch has a simple architecture, but it should
 still expose health checks.
 
 Useful diagnostics:
@@ -264,7 +264,7 @@ should have tests or should not be claims.
 
 ### P2: Consider Feedback/Reinforcement Beyond Access Counts
 
-ai-memory already tracks access count and last access time. cognee's
+sessionmunch already tracks access count and last access time. cognee's
 useful idea is finer-grained feedback: which memory items were used in a
 successful answer or handoff. This can wait until retrieval paths are
 more mature.
@@ -281,7 +281,7 @@ Possible future signals:
 ### P2: Temporal Triples Later
 
 MemPalace's temporal triples are useful for facts that change over time,
-but ai-memory should not add them before basic link extraction and graph
+but sessionmunch should not add them before basic link extraction and graph
 retrieval exist. A future lightweight table could model
 `subject/predicate/object/valid_from/valid_to/source_page_id`, but adding
 that now would be speculative.
@@ -292,10 +292,10 @@ that now would be speculative.
 |---|---|
 | agentmemory's iii-engine sidecar | Install and ops fragility were the largest pain cluster. |
 | JSON blobs as primary state with in-memory indexes | Scaling, rebuild, and durability issues. |
-| XML or regex-parsed LLM output | Fragile extraction; ai-memory's JSON-schema path is better. |
+| XML or regex-parsed LLM output | Fragile extraction; sessionmunch's JSON-schema path is better. |
 | 50+ MCP tools and 100+ REST endpoints | Burns context and confuses agents. |
 | Broad automatic context injection | Token costs and stale context outweigh convenience. |
-| basic-memory's manual `write_note` workflow | Ambient capture is ai-memory's core advantage. |
+| basic-memory's manual `write_note` workflow | Ambient capture is sessionmunch's core advantage. |
 | LLM-authored markdown grammar as storage API | Forces models to generate syntax instead of meaning. |
 | cognee's LiteLLM/Instructor gateway | Provider drift and silent kwarg drops are documented failure modes. |
 | cognee's three-store sync | Correctness bugs concentrate at graph/vector/relational seams. |
@@ -340,7 +340,7 @@ These items previously drifted from the code. Their current status is:
 
 ## Bottom Line
 
-ai-memory followed agentmemory most closely at the idea level and made
+sessionmunch followed agentmemory most closely at the idea level and made
 the right substrate choices to avoid agentmemory's worst operational
 costs. The implemented follow-up kept that discipline: slots, scheduled
 decay/lint, entity- and graph-aware retrieval, raw fallback, and diagnostics

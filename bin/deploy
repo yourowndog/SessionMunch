@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build + push + deploy ai-memory to a homelab Docker host.
+# Build + push + deploy sessionmunch to a homelab Docker host.
 #
 # Reads SERVER, DEPLOY_DIR, and IMAGE from bin/deploy.env (which is
 # .gitignored — see bin/deploy.env.example for the template). The
@@ -54,7 +54,7 @@ source "$ENV_FILE"
 : "${IMAGE:?IMAGE not set in bin/deploy.env}"
 
 SSH_OPTS=("-F" "/dev/null" "-o" "StrictHostKeyChecking=accept-new")
-CONTAINER_NAME="${CONTAINER_NAME:-ai-memory}"
+CONTAINER_NAME="${CONTAINER_NAME:-sessionmunch}"
 
 cd "$REPO_ROOT"
 

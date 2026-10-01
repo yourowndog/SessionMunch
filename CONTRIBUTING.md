@@ -1,10 +1,10 @@
-# Contributing to ai-memory
+# Contributing to sessionmunch
 
 ## Dev setup
 
 ```bash
 git clone https://github.com/akitaonrails/ai-memory
-cd ai-memory
+cd sessionmunch
 cargo build --workspace
 cargo test --workspace --all-targets
 ```
@@ -64,7 +64,7 @@ cargo install cargo-deny cargo-audit
 
 ```bash
 cargo t                        # all but the slow tier, ~20s warm
-cargo t -p ai-memory-store     # one crate: builds only its test binaries
+cargo t -p sessionmunch-store     # one crate: builds only its test binaries
 cargo t -E 'test(/purge/)'     # one topic (builds everything, runs a subset)
 ```
 
@@ -77,7 +77,7 @@ Skipped tests still count as "skipped" in the summary, never hidden, and two
 independent things run them anyway: the pre-push hook and CI.
 
 Install the hook once per clone with `scripts/install-git-hooks.sh` (from Git
-Bash on Windows). It appends or updates only ai-memory's managed block in
+Bash on Windows). It appends or updates only sessionmunch's managed block in
 `.git/hooks/pre-push`, preserving any existing hook body. Bypass it on a
 work-in-progress branch with `git push --no-verify`.
 
@@ -85,14 +85,14 @@ Integration tests live in `tests/suite/` per crate and compile into the
 crate's own test harness (declare a new file with `mod name;` in
 `tests/suite/mod.rs`); only the CLI keeps a separate test binary, because its
 tests run the built executable. Helpers shared across crates go in
-`crates/ai-memory-test-support`. Platform-specific speedups
+`crates/sessionmunch-test-support`. Platform-specific speedups
 (macOS Keychain, Windows linker and Defender) are in AGENTS.md.
 ## CHANGELOG is a merge gate
 
 Every **user-facing** change must add a `CHANGELOG.md` entry under
 `## [Unreleased]` in the same PR. User-facing means: a new CLI flag or
 subcommand, env var, HTTP/admin endpoint, MCP tool or tool-response field,
-`.ai-memory.toml` marker key, any changed behaviour or default, or an
+`.sessionmunch.toml` marker key, any changed behaviour or default, or an
 observable bug fix. Internal refactors, dead-code removal, and test-only
 churn are exempt.
 

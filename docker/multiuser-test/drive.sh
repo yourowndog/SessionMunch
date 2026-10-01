@@ -16,8 +16,8 @@ ALICE=8081; BOB=8082; CAROL=8083; RAW=49374
 # than inline so the file carries no `Authorization: Bearer <literal>` pattern
 # for a secret scanner to flag — this is a throwaway value for a loopback-only
 # container, but a repo-wide scanner cannot know that.
-BEARER="${AI_MEMORY_TEST_BEARER:-$(sed -n 's/^bearer_token = "\(.*\)"/\1/p' config.toml)}"
-PROXY_BEARER="${AI_MEMORY_TEST_PROXY_BEARER:-$(sed -n 's/^actor_proxy_bearer_token = "\(.*\)"/\1/p' config.toml)}"
+BEARER="${SESSIONMUNCH_TEST_BEARER:-$(sed -n 's/^bearer_token = "\(.*\)"/\1/p' config.toml)}"
+PROXY_BEARER="${SESSIONMUNCH_TEST_PROXY_BEARER:-$(sed -n 's/^actor_proxy_bearer_token = "\(.*\)"/\1/p' config.toml)}"
 
 mcp() { # mcp <port> <tool> <json-args>
   curl -s -X POST "http://localhost:$1/mcp" \
@@ -69,7 +69,7 @@ check "alice's session brief does NOT carry bob's slot body" "$R" "LEAKED into a
 echo "$A_BRIEF" | grep -q "SHARED-CONTEXT" && R=yes || R=no
 check "the SHARED slot still reaches everyone (absent = shared)" "$R" "shared slot went missing"
 
-if [ "${AI_MEMORY_TEST_HANDOFF_OWNERSHIP:-0}" = "1" ]; then
+if [ "${SESSIONMUNCH_TEST_HANDOFF_OWNERSHIP:-0}" = "1" ]; then
 echo
 echo "=============================================================="
 echo "B. Handoffs go to their owner (handoff-ownership slice)"
@@ -84,7 +84,7 @@ echo "$ALICE_FETCH" | grep -q "ALICE-BATON" && R=yes || R=no
 check "alice DOES receive her own baton" "$R" "$(echo "$ALICE_FETCH" | tr -d '\n' | head -c 200)"
 else
 echo
-echo "  SKIP  B. handoff-ownership cases (set AI_MEMORY_TEST_HANDOFF_OWNERSHIP=1"
+echo "  SKIP  B. handoff-ownership cases (set SESSIONMUNCH_TEST_HANDOFF_OWNERSHIP=1"
 echo "        once the handoff-ownership slice is merged — see README.md)"
 fi
 

@@ -11,9 +11,9 @@
 # one of the two identities.
 
 services:
-  ai-memory:
-    image: ai-memory:multiuser-test
-    container_name: multiuser-test-ai-memory
+  sessionmunch:
+    image: sessionmunch:multiuser-test
+    container_name: multiuser-test-sessionmunch
     restart: "no"
     volumes:
       - multiuser-test-data:/data
@@ -21,7 +21,7 @@ services:
     ports:
       - "127.0.0.1:49374:49374"
     environment:
-      - RUST_LOG=ai_memory=debug,ai_memory_mcp=debug,ai_memory_hooks=debug,ai_memory_store=info
+      - RUST_LOG=sessionmunch=debug,sessionmunch_mcp=debug,sessionmunch_hooks=debug,sessionmunch_store=info
     command: ["serve", "--transport", "http", "--bind", "0.0.0.0:49374", "--workspace", "mutest", "--project", "app"]
 
   proxy:
@@ -29,7 +29,7 @@ services:
     container_name: multiuser-test-proxy
     restart: "no"
     depends_on:
-      - ai-memory
+      - sessionmunch
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     ports:

@@ -65,7 +65,7 @@ proposals in the same run can still proceed.
 - Keep scorers deterministic, fast, and side-effect-free.
 - Read only stdin and local project files that are safe to inspect.
 - Do not call LLMs, mutate files, run deploys, or depend on network services.
-- Return bounded reasons; ai-memory caps captured eval evidence.
+- Return bounded reasons; sessionmunch caps captured eval evidence.
 - Prefer simple checks that match the target path: heading structure for
   procedures, forbidden placeholders for `_rules`, or project-specific smoke
   assertions for critical docs.
@@ -90,4 +90,4 @@ sh docs/examples/auto-improve-eval/score_proposal.sh \
   < docs/examples/auto-improve-eval/sample-proposal.json
 ```
 
-Both print compact JSON suitable for ai-memory's eval gate.
+Both print compact JSON suitable for sessionmunch's eval gate.

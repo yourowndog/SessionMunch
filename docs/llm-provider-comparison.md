@@ -1,6 +1,6 @@
 # LLM provider comparison - local Ollama vs hosted OpenRouter
 
-> **TL;DR.** ai-memory's consolidation prompt had a latent
+> **TL;DR.** sessionmunch's consolidation prompt had a latent
 > schema-vs-prompt bug that made every provider fail JSON validation.
 > After two rounds of fixes (schema + tightened anti-hallucination
 > prompt), six providers were benchmarked on the same 5 fixtures:
@@ -35,10 +35,10 @@
 
 ## Why this document exists
 
-When the homelab deploy switched ai-memory off the billed
+When the homelab deploy switched sessionmunch off the billed
 OpenAI / OpenRouter providers and onto the locally-hosted Ollama
 server, we needed empirical evidence - not a vibes-based claim -
-that *consolidation quality didn't degrade*. ai-memory's
+that *consolidation quality didn't degrade*. sessionmunch's
 consolidator turns a session's raw observations into 1–5 wiki
 pages classified as `concept`, `decision`, `gotcha`, or `rule`;
 small drops in quality compound fast across hundreds of sessions.
@@ -77,10 +77,10 @@ exactly as the production hook ingress emits them.
 ### The exact request
 
 Per fixture, the runner calls
-[`ai_memory_consolidate::build_batch_request(session_id, &observations)`](../crates/ai-memory-consolidate/src/consolidator.rs)
+[`sessionmunch_consolidate::build_batch_request(session_id, &observations)`](../crates/sessionmunch-consolidate/src/consolidator.rs)
 - the **same** function the live consolidator uses on every
 `memory_consolidate` invocation. That request is then sent
-through [`ai_memory_llm::complete_structured`](../crates/ai-memory-llm/src/lib.rs)
+through [`sessionmunch_llm::complete_structured`](../crates/sessionmunch-llm/src/lib.rs)
 (also the live path). Apples-to-apples by construction.
 
 ### The six providers
@@ -135,7 +135,7 @@ Two separate problems, both **on our side**:
 
 ### Bug A - `Tier` had no `JsonSchema` derive
 
-In `crates/ai-memory-consolidate/src/types.rs`:
+In `crates/sessionmunch-consolidate/src/types.rs`:
 
 ```rust
 pub struct ConsolidatedPageUpdate {
@@ -147,7 +147,7 @@ pub struct ConsolidatedPageUpdate {
 ```
 
 `schemars` couldn't produce an enum constraint for `tier`
-because `Tier` (the actual enum in `ai-memory-core`) didn't
+because `Tier` (the actual enum in `sessionmunch-core`) didn't
 have the `JsonSchema` derive. The generated schema field was
 just `{ "type": "string" }` - no `enum` constraint - so models
 were free to guess. Both Kimi and qwen3 guessed numeric indices.
@@ -155,7 +155,7 @@ were free to guess. Both Kimi and qwen3 guessed numeric indices.
 ### Bug B - prompt described values, didn't enforce them
 
 The system prompt in
-[`build_batch_request`](../crates/ai-memory-consolidate/src/consolidator.rs)
+[`build_batch_request`](../crates/sessionmunch-consolidate/src/consolidator.rs)
 listed the valid `tier` and `kind` values in prose but never
 said "use these EXACT string values, never an integer, never a
 synonym, never code fences". Local instruction-tuned models -
@@ -163,7 +163,7 @@ especially when there's no `response_format: json_schema`
 support to enforce - will drift to whatever feels natural.
 
 Compounding this at the time of the run: openai-compat providers
-(Ollama, OpenRouter passthrough) were using ai-memory's tolerant
+(Ollama, OpenRouter passthrough) were using sessionmunch's tolerant
 parser path, so the schema was descriptive, not coercive. The
 provider opt-in for coercive structured output is documented below.
 
@@ -173,9 +173,9 @@ provider opt-in for coercive structured output is documented below.
 `response_format={ type: "json_schema", strict: true }` by default. On a
 parse-shape failure (the upstream returned a response but it wasn't a
 valid JSON object), or an explicit 400/422 rejection naming
-`response_format`, `json_schema`, or structured output, ai-memory falls back to
+`response_format`, `json_schema`, or structured output, sessionmunch falls back to
 the tolerant parser. Other HTTP / auth / transport errors propagate without
-retry. Set `AI_MEMORY_LLM_COMPAT_STRICT=false` to opt out.
+retry. Set `SESSIONMUNCH_LLM_COMPAT_STRICT=false` to opt out.
 
 **Cost.** Strict mode is one HTTP call when the upstream honours
 `response_format`. When it doesn't, you pay a second call for the
@@ -184,9 +184,9 @@ tolerant fallback. Pick by engine:
 | Engine class | Setting |
 |---|---|
 | Modern Ollama / vLLM / LM Studio honouring `response_format=json_schema` | Keep the default (one call, schema-constrained) |
-| Reasoning models with `<think>…</think>` inside `content` (DeepSeek-R1, Qwen3-Thinking, MiniMax M2) | Set `AI_MEMORY_LLM_COMPAT_STRICT=false` if the strict-then-fallback double call is frequent |
-| Older engines / proxies that reject `response_format` explicitly | Keep the default; ai-memory retries without it |
-| Older engines / proxies that mishandle the field without a recognizable rejection | Set `AI_MEMORY_LLM_COMPAT_STRICT=false` |
+| Reasoning models with `<think>…</think>` inside `content` (DeepSeek-R1, Qwen3-Thinking, MiniMax M2) | Set `SESSIONMUNCH_LLM_COMPAT_STRICT=false` if the strict-then-fallback double call is frequent |
+| Older engines / proxies that reject `response_format` explicitly | Keep the default; sessionmunch retries without it |
+| Older engines / proxies that mishandle the field without a recognizable rejection | Set `SESSIONMUNCH_LLM_COMPAT_STRICT=false` |
 
 The prompt still has to do the load-bearing work when strict mode is
 off or the strict call falls back.
@@ -197,7 +197,7 @@ Three small changes landed together:
 
 ### 1. Derive `JsonSchema` on `Tier`
 
-`crates/ai-memory-core/src/page.rs`:
+`crates/sessionmunch-core/src/page.rs`:
 
 ```rust
 #[derive(
@@ -209,13 +209,13 @@ Three small changes landed together:
 pub enum Tier { Working, Episodic, Semantic, Procedural }
 ```
 
-Adds `schemars` as a dep on `ai-memory-core` (acceptable -
+Adds `schemars` as a dep on `sessionmunch-core` (acceptable -
 schemars is already a workspace dep used by every type that
 crosses the LLM boundary).
 
 ### 2. Type the field as `Tier`, not `String`
 
-`crates/ai-memory-consolidate/src/types.rs`:
+`crates/sessionmunch-consolidate/src/types.rs`:
 
 ```rust
 pub struct ConsolidatedPageUpdate {
@@ -357,7 +357,7 @@ loose prompt let Kimi emit prose markdown, which used `content`
 naturally. The post-fix strict-JSON prompt provokes Kimi's
 reasoning mode and starves the visible response.
 
-**Kimi-K2.6 is not a suitable provider for ai-memory's
+**Kimi-K2.6 is not a suitable provider for sessionmunch's
 consolidation workload.** It would work for the broader
 "summarise this for me" use case where formatted prose is
 fine - just not for our JSON-schema-validated path.
@@ -407,7 +407,7 @@ Do:
 ```
 
 This change is in
-[`crates/ai-memory-consolidate/src/consolidator.rs`](../crates/ai-memory-consolidate/src/consolidator.rs)
+[`crates/sessionmunch-consolidate/src/consolidator.rs`](../crates/sessionmunch-consolidate/src/consolidator.rs)
 under `pub const BATCH_SYSTEM_PROMPT`.
 
 ### Same fixtures, tightened prompt - Haiku vs Sonnet
@@ -504,7 +504,7 @@ exuberant than Haiku.
 Ranking on a 0–5 scale per axis, then aggregated.
 **Higher is better** in every column except Cost (where
 lower-cost gets a higher score). Bold = best in that column.
-Rows sorted by overall fitness for ai-memory.
+Rows sorted by overall fitness for sessionmunch.
 
 | # | Provider | Parse | Speed | Cost† | Faithfulness | Restraint | Classification | Fitness |
 |---|---|---|---|---|---|---|---|---|
@@ -547,13 +547,13 @@ better defaults for this task.
   `kind: rule`, decisions as `kind: decision`, etc.? Wrong
   classification breaks the consolidator's auto-routing to
   `_rules/<slug>.md`.
-- **Fitness for ai-memory**: holistic verdict per provider for
+- **Fitness for sessionmunch**: holistic verdict per provider for
   this specific consolidation workload. Not a generic LLM
   benchmark.
 
 ### Final ordering
 
-For ai-memory's consolidation task specifically:
+For sessionmunch's consolidation task specifically:
 
 1. **Haiku 4.5** - **recommended default for most users.**
    Hosted (always available), 7 s avg latency, restraint +
@@ -690,7 +690,7 @@ mode models if used in this pipeline.
 | Sonnet 4.5 (OpenRouter) | ~$0.06 | ~11 s | 3× cost of Haiku for same task |
 | Kimi-K2.6 (OpenRouter) | n/a | ✗ hangs | reasoning model - ineligible |
 
-\* Rough order of magnitude; ai-memory consolidations land
+\* Rough order of magnitude; sessionmunch consolidations land
 around 2–3 KB of output with the tightened prompt. Per-run $
 multiplies $/M-tokens by the input+output token budget.
 
@@ -704,7 +704,7 @@ Re-run this harness when any of the following changes:
 - A new fixture is added to `evals/fixtures/`
 - The home server hardware changes
 - A local engine changes its `response_format=json_schema` implementation,
-  making a fresh default-vs-`AI_MEMORY_LLM_COMPAT_STRICT=false` comparison
+  making a fresh default-vs-`SESSIONMUNCH_LLM_COMPAT_STRICT=false` comparison
   worthwhile
 
 ## How to reproduce
@@ -724,7 +724,7 @@ The canonical 2-side invocation (the harness compares two
 providers per run):
 
 ```bash
-cargo run -p ai-memory-eval --release -- \
+cargo run -p sessionmunch-eval --release -- \
     --baseline-provider  openai-compat \
     --baseline-base-url  https://openrouter.ai/api/v1 \
     --baseline-model     moonshotai/kimi-k2.6 \
@@ -782,7 +782,7 @@ Each fixture is a JSON file under `evals/fixtures/`:
 ```
 
 `kind` accepts any string the
-[`ObservationKind`](../crates/ai-memory-core/src/observation.rs)
+[`ObservationKind`](../crates/sessionmunch-core/src/observation.rs)
 enum's `FromStr` understands. Anything unknown silently falls
 back to `Other`.
 

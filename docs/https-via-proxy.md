@@ -1,6 +1,6 @@
 # HTTPS via a reverse proxy
 
-> ai-memory does **not** terminate TLS itself, by design. This page is
+> sessionmunch does **not** terminate TLS itself, by design. This page is
 > the operator's guide to fronting it with a mature TLS terminator
 > (Caddy, Cloudflare Tunnel, nginx) so tokens and `/web` cookies
 > travel encrypted between clients and the server. Default install
@@ -12,31 +12,31 @@
 Skip TLS entirely if you're in one of these shapes — the security
 budget is better spent elsewhere:
 
-- **Single-user, stdio MCP transport.** `claude mcp add ai-memory -- ai-memory serve --transport stdio` never touches the network. No TLS to worry about.
+- **Single-user, stdio MCP transport.** `claude mcp add sessionmunch -- sessionmunch serve --transport stdio` never touches the network. No TLS to worry about.
 - **Loopback-only HTTP server**, single user, no `/web` access from another machine. `127.0.0.1:49374` is unreachable from outside the host; TLS protects nothing here that the kernel's loopback boundary doesn't already.
 - **Local dev / one-off experiments.** Bring TLS in when the deployment shape calls for it; not before.
 
 The single-user happy path documented in the README's Quick Start is
-this case. Most ai-memory installs never need a proxy.
+this case. Most sessionmunch installs never need a proxy.
 
 ## When you do need this
 
-Add a TLS-terminating proxy in front of ai-memory when any of these
+Add a TLS-terminating proxy in front of sessionmunch when any of these
 apply:
 
 - **Multi-user mode is on** (at least one user row exists; `[auth].token_pepper`
   is the credential prerequisite). Native `aim_` keys travel between clients and
   the server — sniffable over plain HTTP on the LAN. See
   [`docs/users.md`](users.md).
-- **The server is bound beyond loopback** (`AI_MEMORY_BIND=0.0.0.0:49374` or a LAN-routable IP). Anyone on the network segment sees plaintext token traffic and `/web` cookies.
-- **You access `/web` from a different machine** than the one running ai-memory. The browser session cookie set after password login lives in the clear over HTTP.
-- **You're exposing ai-memory beyond the LAN.** Cloudflare Tunnel or a public-domain Caddy with Let's Encrypt are the two patterns most homelab operators land on.
+- **The server is bound beyond loopback** (`SESSIONMUNCH_BIND=0.0.0.0:49374` or a LAN-routable IP). Anyone on the network segment sees plaintext token traffic and `/web` cookies.
+- **You access `/web` from a different machine** than the one running sessionmunch. The browser session cookie set after password login lives in the clear over HTTP.
+- **You're exposing sessionmunch beyond the LAN.** Cloudflare Tunnel or a public-domain Caddy with Let's Encrypt are the two patterns most homelab operators land on.
 
-ai-memory refuses unauthenticated non-loopback HTTP by default. Machine-only
+sessionmunch refuses unauthenticated non-loopback HTTP by default. Machine-only
 Bearer deployments may still bind authenticated plain HTTP and receive a loud
 warning because those credentials remain sniffable. Human authentication is
 stricter: a non-loopback listener refuses startup unless
-`AI_MEMORY_AUTH__SECURE_COOKIE=true`, which is the operator's explicit signal
+`SESSIONMUNCH_AUTH__SECURE_COOKIE=true`, which is the operator's explicit signal
 that a trusted HTTPS proxy owns the browser-facing edge. Non-Secure human
 cookies are supported only on an actual loopback listener.
 
@@ -72,20 +72,20 @@ relevant block is:
 
 ```yaml
 services:
-  ai-memory:
+  sessionmunch:
     image: akitaonrails/ai-memory:latest
-    container_name: ai-memory
+    container_name: sessionmunch
     restart: unless-stopped
     expose:
       - "49374"          # internal only — Caddy reaches it over the docker network
     volumes:
-      - ai-memory-data:/data
+      - sessionmunch-data:/data
     env_file:
-      - .env.production  # AI_MEMORY_AUTH_TOKEN + AI_MEMORY_ALLOWED_HOSTS + your LLM provider creds
+      - .env.production  # SESSIONMUNCH_AUTH_TOKEN + SESSIONMUNCH_ALLOWED_HOSTS + your LLM provider creds
 
   caddy:
     image: caddy:2-alpine
-    container_name: ai-memory-caddy
+    container_name: sessionmunch-caddy
     restart: unless-stopped
     ports:
       - "80:80"           # for Let's Encrypt HTTP-01 challenges
@@ -96,8 +96,8 @@ services:
       - caddy-config:/config
 
 volumes:
-  ai-memory-data:
-    name: ai-memory-data
+  sessionmunch-data:
+    name: sessionmunch-data
   caddy-data:           # cert + ACME account key live here. Back this up.
   caddy-config:
 ```
@@ -108,7 +108,7 @@ A complete one, three lines that actually matter:
 
 ```caddyfile
 memory.example.com {
-    reverse_proxy ai-memory:49374
+    reverse_proxy sessionmunch:49374
 }
 ```
 
@@ -120,55 +120,55 @@ Caddy will:
 4. Forward `Authorization: Bearer ...` headers (and your auth flow) untouched.
 5. Set `X-Forwarded-Proto: https` and `X-Forwarded-For: <client-ip>` automatically.
 
-### ai-memory `.env.production` adjustments
+### sessionmunch `.env.production` adjustments
 
 ```bash
-AI_MEMORY_AUTH_TOKEN=...long-random-token-from-generate-auth-token...
-AI_MEMORY_AUTH__SECURE_COOKIE=true
-AI_MEMORY_ALLOWED_HOSTS=memory.example.com,localhost,127.0.0.1
-AI_MEMORY_BIND=0.0.0.0:49374
+SESSIONMUNCH_AUTH_TOKEN=...long-random-token-from-generate-auth-token...
+SESSIONMUNCH_AUTH__SECURE_COOKIE=true
+SESSIONMUNCH_ALLOWED_HOSTS=memory.example.com,localhost,127.0.0.1
+SESSIONMUNCH_BIND=0.0.0.0:49374
 ```
 
-The `AI_MEMORY_ALLOWED_HOSTS` must include the public hostname or
-ai-memory's DNS-rebinding guard will refuse Caddy's forwarded
+The `SESSIONMUNCH_ALLOWED_HOSTS` must include the public hostname or
+sessionmunch's DNS-rebinding guard will refuse Caddy's forwarded
 requests.
 
 ### Hosting under a subpath
 
-If ai-memory shares a hostname with other apps, keep the prefix when proxying
-and tell ai-memory about it:
+If sessionmunch shares a hostname with other apps, keep the prefix when proxying
+and tell sessionmunch about it:
 
 ```bash
-AI_MEMORY_BASE_PATH=/wiki
+SESSIONMUNCH_BASE_PATH=/wiki
 ```
 
 ```caddyfile
 memory.example.com {
     handle /wiki/* {
-        reverse_proxy ai-memory:49374
+        reverse_proxy sessionmunch:49374
     }
 }
 ```
 
 Do **not** use `handle_path /wiki/*` for this deployment: it strips `/wiki`
-before forwarding, while ai-memory intentionally serves all routes under the
+before forwarding, while sessionmunch intentionally serves all routes under the
 configured prefix. With the example above, clients use:
 
 ```bash
-ai-memory install-mcp   --client claude-code --apply \
-    --server-url "https://memory.example.com/wiki/mcp" --auth-token "$AI_MEMORY_AUTH_TOKEN"
-ai-memory install-hooks --agent  claude-code --apply \
-    --server-url "https://memory.example.com/wiki" --auth-token "$AI_MEMORY_AUTH_TOKEN"
+sessionmunch install-mcp   --client claude-code --apply \
+    --server-url "https://memory.example.com/wiki/mcp" --auth-token "$SESSIONMUNCH_AUTH_TOKEN"
+sessionmunch install-hooks --agent  claude-code --apply \
+    --server-url "https://memory.example.com/wiki" --auth-token "$SESSIONMUNCH_AUTH_TOKEN"
 ```
 
 The web surface is then at `https://memory.example.com/wiki/web`; add
-`AI_MEMORY_WEB_SLUG=/` if you want the built-in browser or custom
+`SESSIONMUNCH_WEB_SLUG=/` if you want the built-in browser or custom
 `--web-ui-dir` SPA at `https://memory.example.com/wiki` itself. Human console
 login requires the custom SPA; the built-in server-rendered wiki remains
 protected data rather than an authentication page.
 
-**Safety rules on both flags.** `AI_MEMORY_BASE_PATH` and
-`AI_MEMORY_WEB_SLUG` go through the same normaliser. Segments must be
+**Safety rules on both flags.** `SESSIONMUNCH_BASE_PATH` and
+`SESSIONMUNCH_WEB_SLUG` go through the same normaliser. Segments must be
 RFC 3986 unreserved characters (`[A-Za-z0-9-._~]`). Dot-segments
 (`.` / `..`) are rejected — they mean "current" and "parent" at a
 segment boundary, so accepting them would let a typo turn the prefix
@@ -180,10 +180,10 @@ canonical form.
 ### MCP client config (Claude Code shown — others follow the same shape)
 
 ```bash
-ai-memory install-mcp   --client claude-code --apply \
-    --server-url "https://memory.example.com/mcp" --auth-token "$AI_MEMORY_AUTH_TOKEN"
-ai-memory install-hooks --agent  claude-code --apply \
-    --server-url "https://memory.example.com" --auth-token "$AI_MEMORY_AUTH_TOKEN"
+sessionmunch install-mcp   --client claude-code --apply \
+    --server-url "https://memory.example.com/mcp" --auth-token "$SESSIONMUNCH_AUTH_TOKEN"
+sessionmunch install-hooks --agent  claude-code --apply \
+    --server-url "https://memory.example.com" --auth-token "$SESSIONMUNCH_AUTH_TOKEN"
 ```
 
 `https://` flips on, the token rides in `Authorization: Bearer`, and
@@ -214,7 +214,7 @@ forward.
 }
 
 homelab.local, 192.168.1.50 {
-    reverse_proxy ai-memory:49374
+    reverse_proxy sessionmunch:49374
 }
 ```
 
@@ -267,10 +267,10 @@ install dance.
 ### One-time Cloudflare setup
 
 1. Have a domain on Cloudflare (the registrar can be elsewhere; the DNS must be on Cloudflare).
-2. In the Cloudflare dashboard, go to **Zero Trust → Networks → Tunnels** → **Create a tunnel** → name it `ai-memory-homelab` (or whatever) → save.
+2. In the Cloudflare dashboard, go to **Zero Trust → Networks → Tunnels** → **Create a tunnel** → name it `sessionmunch-homelab` (or whatever) → save.
 3. Cloudflare gives you a long token string. Save it for the compose file.
-4. Add a public hostname to the tunnel: `memory.example.com` → service `http://ai-memory:49374`. Save.
-5. (Optional but recommended) Wrap the hostname in a **Cloudflare Access** application — Cloudflare's zero-trust SSO sits in front of the tunnel and you get human auth via Google/GitHub/etc. **on top of** ai-memory's bearer token.
+4. Add a public hostname to the tunnel: `memory.example.com` → service `http://sessionmunch:49374`. Save.
+5. (Optional but recommended) Wrap the hostname in a **Cloudflare Access** application — Cloudflare's zero-trust SSO sits in front of the tunnel and you get human auth via Google/GitHub/etc. **on top of** sessionmunch's bearer token.
 
 ### Compose template
 
@@ -278,41 +278,41 @@ Copy `docker/compose.tls.cloudflared.yml`. The relevant block:
 
 ```yaml
 services:
-  ai-memory:
+  sessionmunch:
     image: akitaonrails/ai-memory:latest
-    container_name: ai-memory
+    container_name: sessionmunch
     restart: unless-stopped
     expose:
       - "49374"          # tunnel reaches it over the docker network — no host port
     volumes:
-      - ai-memory-data:/data
+      - sessionmunch-data:/data
     env_file:
       - .env.production
 
   cloudflared:
     image: cloudflare/cloudflared:latest
-    container_name: ai-memory-tunnel
+    container_name: sessionmunch-tunnel
     restart: unless-stopped
     command: tunnel --no-autoupdate run
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
 
 volumes:
-  ai-memory-data:
-    name: ai-memory-data
+  sessionmunch-data:
+    name: sessionmunch-data
 ```
 
 `CLOUDFLARE_TUNNEL_TOKEN` goes in your `.env` (or compose env). No
 ports exposed on the host. No DNS configuration beyond the dashboard
 step above (Cloudflare manages the CNAME automatically).
 
-### ai-memory `.env.production` adjustments
+### sessionmunch `.env.production` adjustments
 
 ```bash
-AI_MEMORY_AUTH_TOKEN=...long-random-token...
-AI_MEMORY_AUTH__SECURE_COOKIE=true
-AI_MEMORY_ALLOWED_HOSTS=memory.example.com,localhost,127.0.0.1
-AI_MEMORY_BIND=0.0.0.0:49374
+SESSIONMUNCH_AUTH_TOKEN=...long-random-token...
+SESSIONMUNCH_AUTH__SECURE_COOKIE=true
+SESSIONMUNCH_ALLOWED_HOSTS=memory.example.com,localhost,127.0.0.1
+SESSIONMUNCH_BIND=0.0.0.0:49374
 CLOUDFLARE_TUNNEL_TOKEN=eyJ...long-base64-from-the-cf-dashboard...
 ```
 
@@ -321,15 +321,15 @@ CLOUDFLARE_TUNNEL_TOKEN=eyJ...long-base64-from-the-cf-dashboard...
 Same as Path 1:
 
 ```bash
-ai-memory install-mcp   --client claude-code --apply \
-    --server-url "https://memory.example.com/mcp" --auth-token "$AI_MEMORY_AUTH_TOKEN"
+sessionmunch install-mcp   --client claude-code --apply \
+    --server-url "https://memory.example.com/mcp" --auth-token "$SESSIONMUNCH_AUTH_TOKEN"
 ```
 
 ### What can go wrong
 
 - **Token leak**. Anyone with `CLOUDFLARE_TUNNEL_TOKEN` can run a tunnel for your hostname. Keep the env file `0600`, don't commit it.
 - **Tunnel down + cf cached old DNS** → Cloudflare returns 502 for a few minutes after restart. Usually self-heals.
-- **Access policies confused with bearer auth**. Cloudflare Access (the optional SSO layer) is a separate layer from ai-memory's bearer token. Both run; both must pass. If Access blocks a request, ai-memory never sees it.
+- **Access policies confused with bearer auth**. Cloudflare Access (the optional SSO layer) is a separate layer from sessionmunch's bearer token. Both run; both must pass. If Access blocks a request, sessionmunch never sees it.
 
 ---
 
@@ -343,7 +343,7 @@ homelab Vault, anything). You don't want Caddy issuing its own.
 ```caddyfile
 memory.example.com {
     tls /etc/caddy/certs/memory.crt /etc/caddy/certs/memory.key
-    reverse_proxy ai-memory:49374
+    reverse_proxy sessionmunch:49374
 }
 ```
 
@@ -372,7 +372,7 @@ server {
     ssl_certificate_key /etc/nginx/certs/memory.key;
 
     location / {
-        proxy_pass http://ai-memory:49374;
+        proxy_pass http://sessionmunch:49374;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -391,7 +391,7 @@ MCP's Streamable HTTP transport to stream correctly.
 
 ## Native (non-Docker) Caddy
 
-For operators running ai-memory from source / AUR / `cargo run`
+For operators running sessionmunch from source / AUR / `cargo run`
 without Docker:
 
 ```caddyfile
@@ -416,20 +416,20 @@ LaunchDaemon on macOS. Same shape as the Docker variant.
 
 ## Long-running requests: `bootstrap` and proxy idle timeouts
 
-`ai-memory bootstrap` on a large repository holds a **single POST open for
+`sessionmunch bootstrap` on a large repository holds a **single POST open for
 the whole multi-chunk run** — often 20+ minutes — while the server makes
 LLM calls, with no bytes flowing over the wire in between. A reverse proxy
 with a default idle/read timeout in front of the server will cut that
 connection (`Connection reset by peer`), and the run is lost.
 
 If you run `bootstrap` through a proxy, raise or disable the upstream
-read/write timeout for ai-memory's route.
+read/write timeout for sessionmunch's route.
 
 **Caddy** — disable the backend read/write timeouts on the `reverse_proxy`:
 
 ```caddyfile
 memory.example.com {
-    reverse_proxy ai-memory:49374 {
+    reverse_proxy sessionmunch:49374 {
         transport http {
             read_timeout 0
             write_timeout 0
@@ -457,7 +457,7 @@ separately; see #614.)
 
 ---
 
-## What ai-memory does to support being behind a proxy
+## What sessionmunch does to support being behind a proxy
 
 Nothing special — the server intentionally generates no absolute URLs
 in responses, so it doesn't matter whether `https://` or `http://`
@@ -466,15 +466,15 @@ directly off the request, which proxies forward verbatim. The
 `/api/v1` ETag is computed from request-independent fields.
 
 For browser access to `/web` through HTTPS, set
-`AI_MEMORY_AUTH__SECURE_COOKIE=true` (or `[auth] secure_cookie = true`). This
-marks the `ai_memory_session` cookie `Secure`; it is always `HttpOnly`,
-`SameSite=Strict`, and `Path=/`. ai-memory intentionally does **not** infer
+`SESSIONMUNCH_AUTH__SECURE_COOKIE=true` (or `[auth] secure_cookie = true`). This
+marks the `sessionmunch_session` cookie `Secure`; it is always `HttpOnly`,
+`SameSite=Strict`, and `Path=/`. sessionmunch intentionally does **not** infer
 HTTPS from `X-Forwarded-Proto` or any other proxy header. Close direct HTTP
 access to the public hostname, or redirect it to HTTPS. Human auth on a
 non-loopback listener will not start without this setting. It remains false by
 default only so direct loopback smoke/development can use plain HTTP.
 
-The only thing to mind: **`AI_MEMORY_ALLOWED_HOSTS` must include the
+The only thing to mind: **`SESSIONMUNCH_ALLOWED_HOSTS` must include the
 public hostname**, not just `localhost`. The host-allowlist middleware
 runs before any header rewriting, so it sees the proxy's forwarded
 `Host: memory.example.com` and would reject it otherwise.
@@ -485,20 +485,20 @@ Three things to actively avoid:
 
 1. **Don't disable the allowed-hosts guard.** It's the DNS-rebinding defence; pruning it because the proxy "should be" filtering is exactly the kind of "the other layer handles it" assumption that ships bugs. Add the public hostname; don't widen to `*`.
 2. **Don't skip the trust-install step in Path 2.** The temptation is to add `-k` (curl) or `--insecure` (MCP clients that support it) "just to get it working." If you do, you have a security theatre cert: TLS without authentication, which is worse than HTTP with the bearer because it looks safe and isn't.
-3. **Don't run cloudflared with `--no-tls-verify`.** Cloudflare's tunnel daemon validates ai-memory's cert by default — which is fine because ai-memory is on plain HTTP inside the docker network. Don't override the flag; you'd be reaching for it because something else is misconfigured.
+3. **Don't run cloudflared with `--no-tls-verify`.** Cloudflare's tunnel daemon validates sessionmunch's cert by default — which is fine because sessionmunch is on plain HTTP inside the docker network. Don't override the flag; you'd be reaching for it because something else is misconfigured.
 
 If you can't take one of these paths cleanly, the honest answer is
-"keep ai-memory loopback-only" or "front it with the proxy you
+"keep sessionmunch loopback-only" or "front it with the proxy you
 already trust." The configuration that gives operators the wrong
 mental model — looking secure, not being secure — is worse than
 either.
 
 ## The session-aware MCP bridge and HTTPS
 
-`ai-memory mcp-bridge` reaches `https://` server URLs. Earlier releases could not:
+`sessionmunch mcp-bridge` reaches `https://` server URLs. Earlier releases could not:
 its transport pulled in a second `reqwest` with no TLS backend compiled, so any
 non-`http` scheme was refused before a connection was attempted. If you front
-ai-memory with a TLS-terminating proxy as described above, point the bridge at the
+sessionmunch with a TLS-terminating proxy as described above, point the bridge at the
 proxied `https://` URL directly — a second, local proxy on each client machine is
 not needed.
 

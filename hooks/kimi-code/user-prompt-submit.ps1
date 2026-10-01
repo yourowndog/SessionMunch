@@ -4,6 +4,6 @@
 # brief ([briefing] inject_on_session_start) rides the FIRST prompt of
 # the session only — kimi discards SessionStart hook stdout, so this
 # is the once-per-session parity with Claude's SessionStart brief.
-. "$PSScriptRoot\..\lib\ai-memory-hook.ps1"
-Invoke-AiMemoryHook -Event "user-prompt" -Agent "kimi-code" -FetchHandoff -BriefingOncePerSession
+. "$PSScriptRoot\..\lib\sessionmunch-hook.ps1"
+Invoke-SessionMunchHook -Event "user-prompt" -Agent "kimi-code" -FetchHandoff -BriefingOncePerSession
 exit 0

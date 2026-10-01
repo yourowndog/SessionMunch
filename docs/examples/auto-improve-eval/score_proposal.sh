@@ -1,5 +1,5 @@
 #!/bin/sh
-# POSIX-shell entrypoint for ai-memory auto-improve eval gates.
+# POSIX-shell entrypoint for sessionmunch auto-improve eval gates.
 # It embeds a tiny Python scorer so the configured command can be a single
 # script path while keeping JSON parsing correct.
 

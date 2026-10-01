@@ -68,10 +68,10 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            artifact: ai-memory-linux-x86_64
+            artifact: sessionmunch-linux-x86_64
             runner: ubuntu-22.04
           - arch: aarch64
-            artifact: ai-memory-linux-aarch64
+            artifact: sessionmunch-linux-aarch64
             runner: ubuntu-22.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -83,7 +83,7 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
 
       - name: Build release binary
-        run: cargo build --locked --release -p ai-memory-cli
+        run: cargo build --locked --release -p sessionmunch-cli
 
       - name: Create release tarball
         env:
@@ -91,16 +91,16 @@ jobs:
         run: |
           artifact="$RELEASE_ARTIFACT"
           mkdir -p "dist/$artifact"
-          cp target/release/ai-memory "dist/$artifact/ai-memory"
+          cp target/release/sessionmunch "dist/$artifact/sessionmunch"
           cp -a hooks "dist/$artifact/hooks"
           mkdir -p "dist/$artifact/packaging"
           cp -a packaging/systemd "dist/$artifact/packaging/systemd"
           cp -a packaging/sysusers "dist/$artifact/packaging/sysusers"
           cp -a packaging/tmpfiles "dist/$artifact/packaging/tmpfiles"
           cp -a packaging/env "dist/$artifact/packaging/env"
-          mkdir -p "dist/$artifact/crates/ai-memory-cli/templates"
-          cp crates/ai-memory-cli/templates/config.default.toml \
-            "dist/$artifact/crates/ai-memory-cli/templates/config.default.toml"
+          mkdir -p "dist/$artifact/crates/sessionmunch-cli/templates"
+          cp crates/sessionmunch-cli/templates/config.default.toml \
+            "dist/$artifact/crates/sessionmunch-cli/templates/config.default.toml"
           mkdir -p "dist/$artifact/docs"
           cp README.md LICENSE "dist/$artifact/"
           cp docs/install.md "dist/$artifact/docs/install.md"
@@ -123,10 +123,10 @@ jobs:
       matrix:
         include:
           - arch: aarch64
-            artifact: ai-memory-macos-aarch64
+            artifact: sessionmunch-macos-aarch64
             runner: macos-15
           - arch: x86_64
-            artifact: ai-memory-macos-x86_64
+            artifact: sessionmunch-macos-x86_64
             runner: macos-15-intel
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -138,7 +138,7 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
 
       - name: Build release binary
-        run: cargo build --locked --release -p ai-memory-cli
+        run: cargo build --locked --release -p sessionmunch-cli
 
       # Mirrors the Linux tarball, swapping the Linux-only service assets
       # (packaging/systemd|sysusers|tmpfiles|env) for the macOS-only
@@ -152,13 +152,13 @@ jobs:
           set -euo pipefail
           artifact="$RELEASE_ARTIFACT"
           mkdir -p "dist/$artifact"
-          cp target/release/ai-memory "dist/$artifact/ai-memory"
+          cp target/release/sessionmunch "dist/$artifact/sessionmunch"
           cp -a hooks "dist/$artifact/hooks"
           mkdir -p "dist/$artifact/packaging"
           cp -a packaging/launchd "dist/$artifact/packaging/launchd"
-          mkdir -p "dist/$artifact/crates/ai-memory-cli/templates"
-          cp crates/ai-memory-cli/templates/config.default.toml \
-            "dist/$artifact/crates/ai-memory-cli/templates/config.default.toml"
+          mkdir -p "dist/$artifact/crates/sessionmunch-cli/templates"
+          cp crates/sessionmunch-cli/templates/config.default.toml \
+            "dist/$artifact/crates/sessionmunch-cli/templates/config.default.toml"
           mkdir -p "dist/$artifact/docs"
           cp README.md LICENSE "dist/$artifact/"
           cp docs/install.md "dist/$artifact/docs/install.md"
@@ -175,11 +175,11 @@ jobs:
           smoke="dist/smoke-$artifact"
           mkdir -p "$smoke"
           tar -xzf "$artifact.tar.gz" -C "$smoke"
-          "$smoke/ai-memory" --version
+          "$smoke/sessionmunch" --version
           for path in \
             hooks \
-            packaging/launchd/com.github.akitaonrails.ai-memory.plist \
-            crates/ai-memory-cli/templates/config.default.toml \
+            packaging/launchd/com.sessionmunch.server.plist \
+            crates/sessionmunch-cli/templates/config.default.toml \
             docs/install.md \
             docs/macos.md \
             README.md \
@@ -210,7 +210,7 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
 
       - name: Build release binary
-        run: cargo build --locked --release -p ai-memory-cli
+        run: cargo build --locked --release -p sessionmunch-cli
 
       # Mirrors the Linux tarball, minus the Linux-only service assets
       # (packaging/systemd|sysusers|tmpfiles|env). Ships the `.exe`, the full
@@ -221,23 +221,23 @@ jobs:
       - name: Create release zip
         shell: pwsh
         env:
-          RELEASE_ARTIFACT: ai-memory-windows-x86_64
+          RELEASE_ARTIFACT: sessionmunch-windows-x86_64
         run: |
           $artifact = $env:RELEASE_ARTIFACT
           $stage = "dist/$artifact"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item target/release/ai-memory.exe "$stage/ai-memory.exe"
+          Copy-Item target/release/sessionmunch.exe "$stage/sessionmunch.exe"
           Copy-Item -Recurse hooks "$stage/hooks"
-          New-Item -ItemType Directory -Force -Path "$stage/crates/ai-memory-cli/templates" | Out-Null
-          Copy-Item crates/ai-memory-cli/templates/config.default.toml `
-            "$stage/crates/ai-memory-cli/templates/config.default.toml"
+          New-Item -ItemType Directory -Force -Path "$stage/crates/sessionmunch-cli/templates" | Out-Null
+          Copy-Item crates/sessionmunch-cli/templates/config.default.toml `
+            "$stage/crates/sessionmunch-cli/templates/config.default.toml"
           New-Item -ItemType Directory -Force -Path "$stage/docs" | Out-Null
           Copy-Item README.md, LICENSE $stage
           Copy-Item docs/install.md "$stage/docs/install.md"
           Copy-Item docs/windows.md "$stage/docs/windows.md"
           $zip = "$artifact.zip"
           # Pipe the staged items in (rather than a "$stage/*" glob) so the
-          # archive is rooted at the files themselves — ai-memory.exe, hooks/,
+          # archive is rooted at the files themselves — sessionmunch.exe, hooks/,
           # etc. land at the zip root, mirroring the Linux tarball layout.
           Get-ChildItem $stage | Compress-Archive -DestinationPath $zip
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
@@ -247,13 +247,13 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $zip = "ai-memory-windows-x86_64.zip"
+          $zip = "sessionmunch-windows-x86_64.zip"
           $smoke = "dist/smoke-windows-zip"
           Expand-Archive $zip -DestinationPath $smoke -Force
-          & "$smoke/ai-memory.exe" --version
+          & "$smoke/sessionmunch.exe" --version
           foreach ($path in @(
             "hooks",
-            "crates/ai-memory-cli/templates/config.default.toml",
+            "crates/sessionmunch-cli/templates/config.default.toml",
             "docs/install.md",
             "docs/windows.md",
             "README.md",
@@ -264,16 +264,16 @@ jobs:
             }
           }
           $checksum = Get-Content "$zip.sha256" -Raw
-          if ($checksum -notmatch '^[0-9a-f]{64}  ai-memory-windows-x86_64\.zip\r?\n?$') {
+          if ($checksum -notmatch '^[0-9a-f]{64}  sessionmunch-windows-x86_64\.zip\r?\n?$') {
             throw "Windows release zip checksum is not sha256sum format"
           }
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ai-memory-windows-x86_64
+          name: sessionmunch-windows-x86_64
           path: |
-            ai-memory-windows-x86_64.zip
-            ai-memory-windows-x86_64.zip.sha256
+            sessionmunch-windows-x86_64.zip
+            sessionmunch-windows-x86_64.zip.sha256
 
   # Gate the publish on the Docker Hub secrets actually being present, so a
   # fresh clone (or a fork) doesn't get a red failing run on every tag. The
@@ -319,15 +319,15 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ai-memory-linux-x86_64
+          name: sessionmunch-linux-x86_64
           path: artifacts
 
       - name: Unpack prebuilt amd64 binary
         run: |
           set -euo pipefail
-          mkdir -p dist/docker/ai-memory-linux-x86_64
-          tar -xzf artifacts/ai-memory-linux-x86_64.tar.gz \
-            -C dist/docker/ai-memory-linux-x86_64
+          mkdir -p dist/docker/sessionmunch-linux-x86_64
+          tar -xzf artifacts/sessionmunch-linux-x86_64.tar.gz \
+            -C dist/docker/sessionmunch-linux-x86_64
 
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
@@ -347,7 +347,7 @@ jobs:
           platforms: linux/amd64
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
           provenance: false
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/ai-memory
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/sessionmunch
 
       - name: Export amd64 digest
         run: |
@@ -379,15 +379,15 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ai-memory-linux-aarch64
+          name: sessionmunch-linux-aarch64
           path: artifacts
 
       - name: Unpack prebuilt arm64 binary
         run: |
           set -euo pipefail
-          mkdir -p dist/docker/ai-memory-linux-aarch64
-          tar -xzf artifacts/ai-memory-linux-aarch64.tar.gz \
-            -C dist/docker/ai-memory-linux-aarch64
+          mkdir -p dist/docker/sessionmunch-linux-aarch64
+          tar -xzf artifacts/sessionmunch-linux-aarch64.tar.gz \
+            -C dist/docker/sessionmunch-linux-aarch64
 
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
@@ -407,7 +407,7 @@ jobs:
           platforms: linux/arm64
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
           provenance: false
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/ai-memory
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/sessionmunch
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -458,7 +458,7 @@ jobs:
       - name: Publish multi-arch manifest
         run: |
           set -euo pipefail
-          image="${{ secrets.DOCKERHUB_USERNAME }}/ai-memory"
+          image="${{ secrets.DOCKERHUB_USERNAME }}/sessionmunch"
           refs=()
           for digest_file in /tmp/digests/*; do
             refs+=("${image}@sha256:$(basename "$digest_file")")
@@ -475,7 +475,7 @@ jobs:
       - name: Smoke test the published image
         run: |
           set -euo pipefail
-          image="${{ secrets.DOCKERHUB_USERNAME }}/ai-memory:${{ needs.validate-version.outputs.version }}"
+          image="${{ secrets.DOCKERHUB_USERNAME }}/sessionmunch:${{ needs.validate-version.outputs.version }}"
           for platform in linux/amd64 linux/arm64; do
             docker pull --platform "$platform" "$image"
             docker run --rm --platform "$platform" "$image" --version
@@ -492,32 +492,32 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: ai-memory-*
+          pattern: sessionmunch-*
           path: artifacts
           merge-multiple: true
 
       - name: Stage checksum-verified wrapper assets
         run: |
           set -euo pipefail
-          install -m 0755 bin/ai-memory artifacts/ai-memory-wrapper
-          install -m 0644 bin/ai-memory.ps1 artifacts/ai-memory-wrapper.ps1
-          install -m 0644 bin/ai-memory.cmd artifacts/ai-memory-wrapper.cmd
+          install -m 0755 bin/sessionmunch artifacts/sessionmunch-wrapper
+          install -m 0644 bin/sessionmunch.ps1 artifacts/sessionmunch-wrapper.ps1
+          install -m 0644 bin/sessionmunch.cmd artifacts/sessionmunch-wrapper.cmd
           (
             cd artifacts
-            sha256sum ai-memory-wrapper > ai-memory-wrapper.sha256
-            sha256sum ai-memory-wrapper.ps1 > ai-memory-wrapper.ps1.sha256
-            sha256sum ai-memory-wrapper.cmd > ai-memory-wrapper.cmd.sha256
+            sha256sum sessionmunch-wrapper > sessionmunch-wrapper.sha256
+            sha256sum sessionmunch-wrapper.ps1 > sessionmunch-wrapper.ps1.sha256
+            sha256sum sessionmunch-wrapper.cmd > sessionmunch-wrapper.cmd.sha256
           )
 
       - name: Stage checksum-verified hook installer assets
         run: |
           set -euo pipefail
-          install -m 0755 scripts/install-hooks.sh artifacts/ai-memory-install-hooks
-          tar -czf artifacts/ai-memory-hooks.tar.gz hooks
+          install -m 0755 scripts/install-hooks.sh artifacts/sessionmunch-install-hooks
+          tar -czf artifacts/sessionmunch-hooks.tar.gz hooks
           (
             cd artifacts
-            sha256sum ai-memory-install-hooks > ai-memory-install-hooks.sha256
-            sha256sum ai-memory-hooks.tar.gz > ai-memory-hooks.tar.gz.sha256
+            sha256sum sessionmunch-install-hooks > sessionmunch-install-hooks.sha256
+            sha256sum sessionmunch-hooks.tar.gz > sessionmunch-hooks.tar.gz.sha256
           )
 
       - name: Generate release body
@@ -530,16 +530,16 @@ jobs:
           echo "## Install" >> body.md
           echo '```bash' >> body.md
           echo "# Arch Linux (AUR)" >> body.md
-          echo "yay -S ai-memory-bin      # prebuilt Linux x86_64/aarch64 binary" >> body.md
-          echo "yay -S ai-memory          # builds from source" >> body.md
+          echo "yay -S sessionmunch-bin      # prebuilt Linux x86_64/aarch64 binary" >> body.md
+          echo "yay -S sessionmunch          # builds from source" >> body.md
           echo "" >> body.md
           echo "# Docker" >> body.md
           echo "docker pull akitaonrails/ai-memory:${{ needs.validate-version.outputs.version }}" >> body.md
           echo "" >> body.md
-          echo "# macOS aarch64/x86_64 (no toolchain): download the matching ai-memory-macos-<arch>.tar.gz below," >> body.md
+          echo "# macOS aarch64/x86_64 (no toolchain): download the matching sessionmunch-macos-<arch>.tar.gz below," >> body.md
           echo "# extract it, and follow the bundled docs/macos.md." >> body.md
           echo "" >> body.md
-          echo "# Windows x86_64 (no toolchain): download ai-memory-windows-x86_64.zip below," >> body.md
+          echo "# Windows x86_64 (no toolchain): download sessionmunch-windows-x86_64.zip below," >> body.md
           echo "# extract it, and follow the bundled docs/windows.md." >> body.md
           echo "" >> body.md
           echo "# From source" >> body.md
@@ -567,14 +567,14 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: ai-memory-linux-*
+          pattern: sessionmunch-linux-*
           path: artifacts
           merge-multiple: true
 
       - name: Install AUR publish tools
         run: pacman -Syu --noconfirm --needed base-devel curl git openssh
 
-      - name: Publish ai-memory AUR packages
+      - name: Publish sessionmunch AUR packages
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
           VERSION: ${{ needs.validate-version.outputs.version }}
@@ -583,8 +583,8 @@ jobs:
 
           version="$VERSION"
           source_sha="$(curl -fsSL "https://github.com/akitaonrails/ai-memory/archive/refs/tags/v${version}.tar.gz" | sha256sum | awk '{print $1}')"
-          bin_x86_sha="$(sha256sum artifacts/ai-memory-linux-x86_64.tar.gz | awk '{print $1}')"
-          bin_arm_sha="$(sha256sum artifacts/ai-memory-linux-aarch64.tar.gz | awk '{print $1}')"
+          bin_x86_sha="$(sha256sum artifacts/sessionmunch-linux-x86_64.tar.gz | awk '{print $1}')"
+          bin_arm_sha="$(sha256sum artifacts/sessionmunch-linux-aarch64.tar.gz | awk '{print $1}')"
 
           useradd -m aurbuild
           chown -R aurbuild:aurbuild "$GITHUB_WORKSPACE"
@@ -615,9 +615,9 @@ jobs:
           bin_x86_sha="$3"
           bin_arm_sha="$4"
           workspace="$5"
-          workdir="/tmp/ai-memory-aur-publish"
+          workdir="/tmp/sessionmunch-aur-publish"
 
-          git config --global user.name "ai-memory release bot"
+          git config --global user.name "sessionmunch release bot"
           git config --global user.email "actions@github.com"
 
           rm -rf "$workdir"
@@ -647,9 +647,9 @@ jobs:
 
             git clone "ssh://aur@aur.archlinux.org/${pkgbase}.git" "$repo"
             cp "$pkgbuild" "$repo/PKGBUILD"
-            cp "$workspace/packaging/aur/ai-memory.install" "$repo/ai-memory.install"
+            cp "$workspace/packaging/aur/sessionmunch.install" "$repo/sessionmunch.install"
             (cd "$repo" && makepkg --printsrcinfo > .SRCINFO)
-            (cd "$repo" && git add PKGBUILD .SRCINFO ai-memory.install)
+            (cd "$repo" && git add PKGBUILD .SRCINFO sessionmunch.install)
             if (cd "$repo" && git diff --cached --quiet); then
               echo "${pkgbase}: no AUR changes to publish"
               return 0
@@ -658,6 +658,6 @@ jobs:
             (cd "$repo" && git push)
           }
 
-          publish_pkg ai-memory "$source_pkgbuild"
-          publish_pkg ai-memory-bin "$bin_pkgbuild"
+          publish_pkg sessionmunch "$source_pkgbuild"
+          publish_pkg sessionmunch-bin "$bin_pkgbuild"
           EOF

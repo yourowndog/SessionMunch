@@ -81,7 +81,7 @@
 
 7. **Don't depend on an unpinned native sidecar.** Statically link the engine (`tantivy` for BM25, `sqlite-vec` via `rusqlite`, `petgraph` for the concept graph) (#301, #519, #555). Half the install issues in the tracker exist because `iii-engine` is a separate binary the wrapper can't fix.
 
-**Bonus:** Default the data directory to a canonicalized absolute platform path (`dirs::data_local_dir().join("ai-memory")`) and log it loudly on startup - single change would have prevented #303 entirely.
+**Bonus:** Default the data directory to a canonicalized absolute platform path (`dirs::data_local_dir().join("sessionmunch")`) and log it loudly on startup - single change would have prevented #303 entirely.
 
 ### Driver issues
 #138 (auto-compress default), #143 (context-injection default), #195 (CPU-bound JS), #204 (uncaught SDK timeout), #221 (blocking hooks), #274 (lesson discard), #276 (corrupt session fields), #301 (distroless volume), #303 (cwd state), #308 (sessions never end), #309 (in-memory BM25), #338/#492 (XML parser), #440/#507 (MCP recall aliased), #456/#469 (dim mismatch + two env paths), #477 (Windows quoting), #510/#553/#400 (MCP protocol version), #515 (Codex worktrees), #519 (log feedback loop), #522 (silent error swallow), #539 (tool_response vs tool_output), #540 (no lockfile), #544 (unbounded list endpoints), #555 (iii-sdk semver).

@@ -1,4 +1,4 @@
-# ai-memory - Architecture
+# sessionmunch - Architecture
 
 > One canonical doc for "what is this thing and how is it shaped".
 > Long-form research lives next to this file under [`docs/`](.); this
@@ -6,7 +6,7 @@
 
 ## Purpose
 
-ai-memory is a single Rust binary that gives the coding agents in the
+sessionmunch is a single Rust binary that gives the coding agents in the
 [README Support Matrix](../README.md#support-matrix), plus other MCP-capable
 clients, long-term memory shared across CLIs.
 Quit one mid-task; open another in the same directory; continue. No
@@ -22,7 +22,7 @@ with optional vectors; the markdown stays the source of truth.
 
 ## Data flow
 
-![ai-memory architecture overview](architecture-overview.svg)
+![sessionmunch architecture overview](architecture-overview.svg)
 
 Solid arrows are request, read, and write paths. Dashed arrows are
 background reconciliation or provider-backed maintenance. The core invariant is
@@ -46,7 +46,7 @@ from hook paths.
 
 1. Agent CLI emits a lifecycle hook (SessionStart, UserPromptSubmit,
    PostToolUse, …). Shell-script hooks `curl` event JSON to `POST /hook`
-   with a short timeout. Native `ai-memory hook --event ...` commands spool
+   with a short timeout. Native `sessionmunch hook --event ...` commands spool
    events locally with a stable per-entry idempotency key, do a short bounded
    cleanup at session start, and hand
    session-end delivery to a detached lock-aware `hook-drain` helper;
@@ -82,7 +82,7 @@ from hook paths.
    converge. Existing ended sessions are baselined at migration instead of
    becoming historical catch-up work. Auto-commits the wiki. Clients
    without a reliable true session-end hook need an explicit ending action:
-   `ai-memory finalize-session --agent antigravity-cli` for Antigravity CLI
+   `sessionmunch finalize-session --agent antigravity-cli` for Antigravity CLI
    (Codex has a native `SessionEnd` since CLI 0.145.0; `finalize-session
    --agent codex` is only the fallback on older Codex).
    The command selects the latest matching open session and enters the same
@@ -90,7 +90,7 @@ from hook paths.
    frontmatter records `session_id` plus the immutable `sessions.agent_kind`
    as `agent`; it describes the page's harness origin, not the later writer.
    Manual page writes do not receive inferred agent metadata.
-4. When `AI_MEMORY_LLM_PROVIDER` is set, `memory_consolidate` rewrites
+4. When `SESSIONMUNCH_LLM_PROVIDER` is set, `memory_consolidate` rewrites
    that summary into a richer durable page or fans out into a
    multi-page batch under `concepts/`, `decisions/`, `gotchas/`. Consolidation
    prompts preserve the source material's dominant natural language and ask
@@ -123,7 +123,7 @@ from hook paths.
    It favors maintained rules, decisions, procedures, and gotchas in close
    contests while keeping episodic, historical, lint, and test evidence
    searchable. No query-intent regex or hard exclusion participates. An
-   optional `AI_MEMORY_RERANKER=llm` pass sends a bounded query plus up to 30
+   optional `SESSIONMUNCH_RERANKER=llm` pass sends a bounded query plus up to 30
    bounded titles/snippets to the configured provider after project/scope
    fusion; it is limited to one call per query and four calls in flight, and any
    invalid, failed, timed-out, or saturated attempt preserves the local order.
@@ -168,11 +168,11 @@ from hook paths.
    no pages, sessions, observations, handoffs, managed workstreams, or
    auto-improvement data; managed continuity history therefore keeps its
    project scope alive even when no lifecycle-hook session has been captured.
-8. Backups: `ai-memory backup --to <tarball>` uses SQLite's online
-   backup API so the source stays writable; `ai-memory restore`
+8. Backups: `sessionmunch backup --to <tarball>` uses SQLite's online
+   backup API so the source stays writable; `sessionmunch restore`
    reverses. Or: `git push` the wiki dir + `rsync` the data dir.
 
-**Optional managed-workstream loop:** `ai-memory run` opens a lease for the
+**Optional managed-workstream loop:** `sessionmunch run` opens a lease for the
 current repository/worktree workstream, resolves an explicit harness or the
 newest usable local/linked harness, creates or resumes that harness's native
 session, and marks lifecycle calls with an invocation-scoped run id.
@@ -190,7 +190,7 @@ same transaction expires older eligible automatic handoffs while preserving
 manual and sibling-directory work. Insertion also expires prior open automatic
 handoffs from the exact cwd, bounding repeated SessionEnds before any receiver
 starts.
-ai-memory opens native stores read-only. Raw sanitized JSONL segments are
+sessionmunch opens native stores read-only. Raw sanitized JSONL segments are
 immutable, while SQLite supplies monotonic sequences, FTS, native
 source/delivery cursors, and idempotent retry state. A full-ledger
 `workstream-search` path complements
@@ -231,7 +231,7 @@ Unknown events do **not** expand the enum and, by default, leave no
 source-event metadata in storage; they collapse to `other`. Third-party
 integrations that need their own vocabulary can opt in by sending
 `extension=<namespace>` on `/hook`. With a valid extension namespace,
-ai-memory stores an explicit `source_event=<name>` when provided, or the
+sessionmunch stores an explicit `source_event=<name>` when provided, or the
 unknown `event` string when `source_event` is omitted. The stored pair is
 nullable observation metadata; `kind` stays canonical. This is an
 extension seam, not a runtime plugin system: external processors must use
@@ -241,7 +241,7 @@ backpressure, or single-writer SQLite actor.
 Lifecycle bodies have content limits independent of the 10 MiB HTTP request
 limit. User prompts and post-compaction summaries are capped UTF-8-safely at
 16 KiB; notification and tool excerpts are capped at 2 KB. Native
-`ai-memory hook` commands apply the event-specific cap before local spooling
+`sessionmunch hook` commands apply the event-specific cap before local spooling
 and transport, and the server repeats it when parsing every request so direct
 and older clients cannot bypass it. The typed sanitizer boundary then applies a
 16 KiB backstop to every durable observation body after redaction. The
@@ -265,7 +265,7 @@ separately gated Claude Code assistant/Stop excerpt remains capped at 2 KB.
 * `<data_dir>/models/` - reserved for bundled embedding models
   (M9.5+, when local `ort` lands).
 * `<data_dir>/client-projects.json` - private, client-local checkout links for
-  `ai-memory show`, keyed by credential-free server identity plus workspace and
+  `sessionmunch show`, keyed by credential-free server identity plus workspace and
   project. It is not part of the SQLite/wiki source of truth, and no server API
   exposes host paths.
 
@@ -279,7 +279,7 @@ separately gated Claude Code assistant/Stop excerpt remains capped at 2 KB.
 | `sessions`, `observations` | Sanitized, bounded lifecycle-hook projections. `sessions.ended_observation_count` is the stable generation watermark for resumed-session re-end eligibility; wall clocks are not used for that decision. They are an operational audit trail, not a complete native transcript. |
 | `session_consolidation_jobs` | Durable, observation-generation-idempotent queue for opt-in SessionEnd LLM consolidation. One bounded server worker leases jobs, retries provider failures with backoff, and recovers expired leases after restart. |
 | `observations_fts` | FTS5 virtual table over raw observation `(title, body)`, used only as bounded fallback. |
-| `workstreams`, `managed_runs`, `workstream_native_sessions` | Optional lease state plus per-harness native source and delivery cursors for `ai-memory run`. |
+| `workstreams`, `managed_runs`, `workstream_native_sessions` | Optional lease state plus per-harness native source and delivery cursors for `sessionmunch run`. |
 | `workstream_events`, `workstream_events_fts` | Append-only normalized visible transcript events and full-text search; immutable sanitized source batches also live under `raw/workstreams/`. |
 | `links` | Wikilink / markdown cross-references. `to_page_id` (a global PageId) is nullable for unresolved forward links. `to_workspace` / `to_project` carry a cross-project scope (NULL = the source page's own project). |
 | `handoffs` | Typed cross-agent handoff records (open / accepted / expired). |
@@ -328,7 +328,7 @@ so that dependencies between projects become explicit edges in the graph:
 * `[[project:path.md]]` — a sibling project in the same workspace.
 * `[[workspace/project:path.md]]` — a project in another workspace.
 
-The parser (`ai-memory-wiki::extract_links`) yields a `LinkTarget
+The parser (`sessionmunch-wiki::extract_links`) yields a `LinkTarget
 { workspace, project, path }`; the store resolves it against the named
 project's latest page and records the scope in `links.to_workspace` /
 `links.to_project` (NULL = the source's own project, the common case).
@@ -349,15 +349,15 @@ the `/api/v1/graph` endpoint).
 
 ```
 crates/
-├── ai-memory-core/        domain types, errors, ids. NO IO.
-├── ai-memory-store/       SQLite + writer actor + reader pool + decay math.
-├── ai-memory-wiki/        atomic markdown writes, file watcher, git.
-├── ai-memory-mcp/         rmcp transport + tool router.
-├── ai-memory-hooks/       payload schemas, sanitiser, /hook ingress.
-├── ai-memory-llm/         provider auth boundary + LlmProvider / Embedder traits.
-├── ai-memory-consolidate/ Karpathy ingest / lint / sweep / auto-improve pipeline.
-├── ai-memory-workstream/  read-only native transcript + launch adapters.
-└── ai-memory-cli/         `ai-memory` binary entry point + thin HTTP subcommands.
+├── sessionmunch-core/        domain types, errors, ids. NO IO.
+├── sessionmunch-store/       SQLite + writer actor + reader pool + decay math.
+├── sessionmunch-wiki/        atomic markdown writes, file watcher, git.
+├── sessionmunch-mcp/         rmcp transport + tool router.
+├── sessionmunch-hooks/       payload schemas, sanitiser, /hook ingress.
+├── sessionmunch-llm/         provider auth boundary + LlmProvider / Embedder traits.
+├── sessionmunch-consolidate/ Karpathy ingest / lint / sweep / auto-improve pipeline.
+├── sessionmunch-workstream/  read-only native transcript + launch adapters.
+└── sessionmunch-cli/         `sessionmunch` binary entry point + thin HTTP subcommands.
 ```
 
 Each crate has a single responsibility and exposes a typed API. No
@@ -368,7 +368,7 @@ invariants below.
 
 | Tool | Hint | Purpose |
 |---|---|---|
-| `memory_query` | read-only | FTS5 + entity-match + graph RRF + optional vector RRF search, followed by bounded kind/tier/pinned/tag authority adjustment and raw fallback. Bumps access counters for page hits. Defaults to the current project; default-scoped calls also union the reserved `_global` preferences scope as `global_scope_hits`; `scopes` searches named sibling projects; `global=true` searches every project at once (each hit annotated with its workspace + project). With `AI_MEMORY_RERANKER=llm`, project/scopes candidate pools are fused before at most one final LLM relevance pass; query/title/snippet data is bounded and JSON-encoded, and any timeout, provider error, invalid/incomplete score set, or four-call concurrency saturation preserves the adjusted order. The distinct `global=true` FTS-only ranker and supplemental global-preference hits are not reranked. `explain=true` attaches per-hit `score_details` (per-stream ranks, matched entities, raw FTS/cosine/entity inverse-frequency scores, RRF contributions, graph provenance including the typed edge kind (`causes`/`fixes`/`contradicts`) a neighbour was reached by, the page's evidence count, authority multiplier, and optional rerank score) to project/scopes hits plus a top-level `streams_active` list. The global FTS-only ranker reports its active stream without per-hit details. `include_expired=true` also returns TTL-expired pages. |
+| `memory_query` | read-only | FTS5 + entity-match + graph RRF + optional vector RRF search, followed by bounded kind/tier/pinned/tag authority adjustment and raw fallback. Bumps access counters for page hits. Defaults to the current project; default-scoped calls also union the reserved `_global` preferences scope as `global_scope_hits`; `scopes` searches named sibling projects; `global=true` searches every project at once (each hit annotated with its workspace + project). With `SESSIONMUNCH_RERANKER=llm`, project/scopes candidate pools are fused before at most one final LLM relevance pass; query/title/snippet data is bounded and JSON-encoded, and any timeout, provider error, invalid/incomplete score set, or four-call concurrency saturation preserves the adjusted order. The distinct `global=true` FTS-only ranker and supplemental global-preference hits are not reranked. `explain=true` attaches per-hit `score_details` (per-stream ranks, matched entities, raw FTS/cosine/entity inverse-frequency scores, RRF contributions, graph provenance including the typed edge kind (`causes`/`fixes`/`contradicts`) a neighbour was reached by, the page's evidence count, authority multiplier, and optional rerank score) to project/scopes hits plus a top-level `streams_active` list. The global FTS-only ranker reports its active stream without per-hit details. `include_expired=true` also returns TTL-expired pages. |
 | `memory_recent` | read-only | Most-recently-updated `is_latest=1` pages. |
 | `memory_read_page` | read-only | Fetch the FULL body of a single wiki page by `path` or by top FTS5 hit for a `query`; optional `workspace` + `project` targets a named sibling workspace/project. Use when an agent needs more than the 24-word snippets from `memory_query`. |
 | `memory_read_session_observations` | read-only | Page through ONE session's raw hook observations (`ObservationRecord` with full sanitized body, capped per row by `body_max_chars`), restricted to the rows that landed in the resolved scope and to sessions the caller may see; `total` and `elided_other_scope` report the in-scope count and the rows the session left in another project. `session_id` omitted reads the latest completed visible session. |
@@ -380,7 +380,7 @@ invariants below.
 | `memory_handoff_accept` | destructive | Fetch + ack an open own/shared handoff. Pass `handoff_id` from `memory_handoff_list` to claim that exact row; omitting it still claims the latest eligible open handoff (automatic handoffs are cwd-matched). Root-only `any_owner=true` recovers across operators. Optional `workspace` + `project` targets a named sibling workspace/project. |
 | `memory_handoff_cancel` | destructive | Mark an exact visible open handoff id expired when it was created by mistake; root-only `any_owner=true` recovers across operators. |
 
-`memory_handoff_list` is the inspect-without-claim path for clients that cannot inject SessionStart stdout. `memory_handoff_cancel` needs an exact id. `ai-memory handoffs` lists the open
+`memory_handoff_list` is the inspect-without-claim path for clients that cannot inject SessionStart stdout. `memory_handoff_cancel` needs an exact id. `sessionmunch handoffs` lists the open
 handoffs for a project, oldest first, with their ids — read-only, and
 content-free (identity, provenance and age, never the summary body). Automatic
 expiry deliberately spares manual and sibling-directory handoffs, so a
@@ -425,15 +425,15 @@ every new tool has to earn its slot — but the count is 17, not 10.
 
 The managed Agent Skills are a narrow prompt-packaging exception to the
 otherwise wiki-centered architecture. They are static `SKILL.md` files that
-teach agents when to call ai-memory MCP tools; they are not durable wiki pages,
-not auto-improvement output, and not a runtime skill router inside ai-memory.
+teach agents when to call sessionmunch MCP tools; they are not durable wiki pages,
+not auto-improvement output, and not a runtime skill router inside sessionmunch.
 
 MCP parameter aliases are intentionally sparse: `memory_query.query` accepts
 `q|search`, and limit fields accept `n` / `top_k` where shipped. Project and
 cwd parameters use their canonical names.
 
 Claude Code's optional session-aware MCP registration is a transport adapter,
-not a second tool implementation. `ai-memory mcp-bridge` serves the upstream
+not a second tool implementation. `sessionmunch mcp-bridge` serves the upstream
 tool catalogue over local stdio, delegates tool calls to the configured HTTP
 server through rmcp's client transport, and injects the inherited
 `CLAUDE_CODE_SESSION_ID` as `X-Memory-Actor-Session-Id`. The server therefore
@@ -449,10 +449,10 @@ browser compatibility path:
 | Class | Wire | Authorizes |
 |---|---|---|
 | Human password | `POST /auth/login` body | Session issuance only |
-| Web session | `ai_memory_session` cookie + CSRF | `/auth/me`, `/admin/*`, `/api/v1/*` by `AuthLevel`; never `/mcp` or hooks |
+| Web session | `sessionmunch_session` cookie + CSRF | `/auth/me`, `/admin/*`, `/api/v1/*` by `AuthLevel`; never `/mcp` or hooks |
 | Recovery | `POST /auth/recovery` body | Root password reset; no session |
-| API key | `Authorization: Bearer` (`aim_`, root `AI_MEMORY_AUTH_TOKEN`, or external `amk_`) | Machine APIs; never a web session |
-| Deprecated browser compatibility | HTTP Basic root bearer, then HttpOnly `ai_memory_auth` cookie | GET-only browser routes until any human password or completed bootstrap exists; never machine routes |
+| API key | `Authorization: Bearer` (`aim_`, root `SESSIONMUNCH_AUTH_TOKEN`, or external `amk_`) | Machine APIs; never a web session |
+| Deprecated browser compatibility | HTTP Basic root bearer, then HttpOnly `sessionmunch_auth` cookie | GET-only browser routes until any human password or completed bootstrap exists; never machine routes |
 
 The deprecated Basic/cookie path stops immediately when human auth becomes
 active; restart is not required. `/web` SPA HTML is public static; the builtin
@@ -482,7 +482,7 @@ handoffs             purge-session        compact
 api-key              export-okf
 ```
 
-Run `ai-memory --help` for the full tree.
+Run `sessionmunch --help` for the full tree.
 
 `auto-improve-report` is read-only by default; `--stage` creates one pending
 telemetry report page for audit/approval without staging learning-memory edits.
@@ -515,7 +515,7 @@ that touch the relevant area.
 8. **`{provider, model, dim}` denormalised next to every embedding.**
    Warn and ignore stale vectors on mismatch until re-embedding completes.
    (agentmemory #469.)
-9. **Live-process check before direct-disk lifecycle ops.** `ai-memory reset`,
+9. **Live-process check before direct-disk lifecycle ops.** `sessionmunch reset`,
    `restore`, `reindex`, and `uninstall --purge-data` consult `sysinfo`; the
    uninstall guard is conditional on `--purge-data`. `backup` is a thin HTTP
    client instead: the server snapshots SQLite with its online backup API while
@@ -539,7 +539,7 @@ that touch the relevant area.
 ## Configuration (`config.toml`)
 
 Lives at `<data_dir>/config.toml`. All values overridable by env vars
-prefixed `AI_MEMORY_*`.
+prefixed `SESSIONMUNCH_*`.
 
 ```toml
 bind = "127.0.0.1:49374"
@@ -606,14 +606,14 @@ abstract_vectors = false          # fifth RRF stream over page_abstract_embeddin
 
 **LLM provider env** (opt-in):
 ```
-AI_MEMORY_LLM_PROVIDER     anthropic | anthropic-oauth | openai | openai-oauth | copilot |
+SESSIONMUNCH_LLM_PROVIDER     anthropic | anthropic-oauth | openai | openai-oauth | copilot |
                            gemini | openai-compat | opencode
-AI_MEMORY_LLM_MODEL        optional when the provider has a default; e.g. claude-haiku-4-5, gpt-5.4-mini
+SESSIONMUNCH_LLM_MODEL        optional when the provider has a default; e.g. claude-haiku-4-5, gpt-5.4-mini
 ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY / LLM_API_KEY
-AI_MEMORY_LLM_BASE_URL     required for openai-compat (Ollama, vLLM); optional override for
+SESSIONMUNCH_LLM_BASE_URL     required for openai-compat (Ollama, vLLM); optional override for
                            opencode (defaults to the Go endpoint, set
                            https://opencode.ai/zen/v1 for Zen's catalogue).
-                           Applies to any provider: naming ai-memory is how an
+                           Applies to any provider: naming sessionmunch is how an
                            operator says a vendor endpoint is proxied on purpose
 LLM_BASE_URL               the unprefixed cross-tool convention, accepted for
                            openai-compat and opencode only. Providers with a
@@ -621,9 +621,9 @@ LLM_BASE_URL               the unprefixed cross-tool convention, accepted for
                            the OAuth backends, copilot) ignore it and log why —
                            an operator's leftover Ollama URL must not silently
                            rewrite every Gemini request into a 404
-AI_MEMORY_LLM_COMPAT_STRICT true by default; false disables response_format=json_schema
-AI_MEMORY_LLM_TIMEOUT_SECS  per-request timeout for chat providers; 300 by default
-AI_MEMORY_LLM_REASONING_EFFORT  optional reasoning/thinking effort
+SESSIONMUNCH_LLM_COMPAT_STRICT true by default; false disables response_format=json_schema
+SESSIONMUNCH_LLM_TIMEOUT_SECS  per-request timeout for chat providers; 300 by default
+SESSIONMUNCH_LLM_REASONING_EFFORT  optional reasoning/thinking effort
                            (none|minimal|low|medium|high|xhigh|max|ultra|persistent)
                            mapped per provider: OpenAI `reasoning_effort`,
                            OpenRouter `reasoning.effort`, xAI Grok
@@ -631,18 +631,18 @@ AI_MEMORY_LLM_REASONING_EFFORT  optional reasoning/thinking effort
                            Codex `reasoning.effort`. Gemini and Copilot
                            ignore the key. Host-unsupported values are
                            clamped to each provider's published enum.
-AI_MEMORY_LLM_HEADERS      optional extra HTTP headers on every chat request, as
+SESSIONMUNCH_LLM_HEADERS      optional extra HTTP headers on every chat request, as
                            comma-separated `Name=Value` (or `Name: Value`) entries;
-                           e.g. `x-opencode-session=prod-01,x-opencode-client=ai-memory`.
+                           e.g. `x-opencode-session=prod-01,x-opencode-client=sessionmunch`.
                            For gateways that require a caller-identifying header.
-                           Headers ai-memory sets itself (authorization,
+                           Headers sessionmunch sets itself (authorization,
                            content-type, x-api-key, x-goog-api-key,
                            anthropic-version, anthropic-beta, openai-beta,
                            host, content-length) are refused at startup.
                            Values are never logged. A header value cannot
                            contain a comma through the env var — use
                            `llm_headers = [...]` in config.toml for that.
-AI_MEMORY_RERANKER         optional `llm`; reranks project/scopes query candidates
+SESSIONMUNCH_RERANKER         optional `llm`; reranks project/scopes query candidates
 COPILOT_GITHUB_TOKEN       optional GitHub token for copilot
 GITHUB_COPILOT_API_TOKEN   optional pre-minted Copilot API token
 COPILOT_API_URL            optional Copilot API base URL override
@@ -665,7 +665,7 @@ llm_model = "mimo-v2.5-free"
 provider = "openai-compat"          # same wire names as llm_provider
 model = "poolside/laguna-s-2.1-free"
 base_url = "http://127.0.0.1:49375/v1"   # required for openai-compat, as above
-api_key_env = "AI_MEMORY_LOCAL_ROUTER_TOKEN"  # env var *name*; the key itself
+api_key_env = "SESSIONMUNCH_LOCAL_ROUTER_TOKEN"  # env var *name*; the key itself
                                                # never lives in config.toml
 
 [[llm_fallbacks]]
@@ -685,11 +685,11 @@ every profile and resolves its credential once, at startup: a
 missing/empty provider or model, an unknown provider, or a missing
 credential fails startup rather than leaving a latent fallback that only
 fails once the primary is already down. Each candidate carries its own
-30s in-memory circuit (`ai_memory_llm::fallback::CIRCUIT_COOLDOWN`): a
+30s in-memory circuit (`sessionmunch_llm::fallback::CIRCUIT_COOLDOWN`): a
 transient failure opens it, a success closes it, and a restart clears all
 circuit state — there is no durable circuit or forced chain-wide deadline.
 
-`GET /admin/status` (`ai-memory status`) reports an `llm_candidates` list
+`GET /admin/status` (`sessionmunch status`) reports an `llm_candidates` list
 alongside the existing `llm`/`embedding` roles: each candidate's
 provider/model label, whether it answered the most recently completed
 call, its last success/error timestamp, a redacted error class + HTTP
@@ -697,11 +697,11 @@ status (never a response body or credential), and its circuit-open-until
 timestamp. It is empty for a plain single-provider setup; the top-level
 `llm` role fields are unchanged.
 
-Every chat request carries `User-Agent: ai-memory/<version>`
-(`ai_memory_llm::DEFAULT_USER_AGENT`, layered in `build_provider`). `reqwest`
+Every chat request carries `User-Agent: sessionmunch/<version>`
+(`sessionmunch_llm::DEFAULT_USER_AGENT`, layered in `build_provider`). `reqwest`
 sends no user agent unless configured, so provider requests used to arrive
 anonymous — which gateways that require callers to identify themselves report
-as an unknown client. `AI_MEMORY_LLM_HEADERS=user-agent=...` overrides it. The
+as an unknown client. `SESSIONMUNCH_LLM_HEADERS=user-agent=...` overrides it. The
 Copilot provider keeps `GitHubCopilotChat/<version>` instead, the
 editor-plugin agent GitHub's Copilot API expects.
 
@@ -716,10 +716,10 @@ Copilot chat endpoint.
 
 **Embedder env** (opt-in):
 ```
-AI_MEMORY_EMBEDDING_PROVIDER   openai | voyage | google | gemini | openai-compat
-AI_MEMORY_EMBEDDING_MODEL      e.g. text-embedding-3-small, gemini-embedding-001
-AI_MEMORY_EMBEDDING_BASE_URL   optional override; required for openai-compat
-AI_MEMORY_EMBEDDING_DIM        1536 (OpenAI), 1024 (Voyage), 768 (Google);
+SESSIONMUNCH_EMBEDDING_PROVIDER   openai | voyage | google | gemini | openai-compat
+SESSIONMUNCH_EMBEDDING_MODEL      e.g. text-embedding-3-small, gemini-embedding-001
+SESSIONMUNCH_EMBEDDING_BASE_URL   optional override; required for openai-compat
+SESSIONMUNCH_EMBEDDING_DIM        1536 (OpenAI), 1024 (Voyage), 768 (Google);
                                required explicitly for openai-compat
 OPENAI_API_KEY / VOYAGE_API_KEY / GEMINI_API_KEY / GOOGLE_API_KEY
 LLM_API_KEY                    accepted for openai with a custom base URL and as
@@ -758,14 +758,14 @@ under the distinct `provider="openai-compat"` identity.
   future work can add individual merge/supersession/link-fix proposals while
   keeping deletes and semantic rewrites review-gated.
 * **Richer read surfaces for the web UI.** The multi-workspace read-only
-  wiki browser shipped in `ai-memory-web` (`/web` — project list, page
+  wiki browser shipped in `sessionmunch-web` (`/web` — project list, page
   tree, page view, search). It stays read-only by design: the wiki is a
   machine-authored record, and a browser edit surface would break the
   invariant the whole store rests on (#482). Better *reading* — richer
   navigation, diff/history views, graph exploration — is open. See
   [`docs/frontend-api.md`](frontend-api.md#10-known-gaps-and-deliberate-non-goals).
 * **Real LongMemEval-S harness.** The recall-eval framework exists
-  ([`crates/ai-memory-consolidate/tests/recall_eval.rs`](../crates/ai-memory-consolidate/tests/recall_eval.rs));
+  ([`crates/sessionmunch-consolidate/tests/recall_eval.rs`](../crates/sessionmunch-consolidate/tests/recall_eval.rs));
   porting LongMemEval-S itself requires the dataset.
 
 ## Reading order

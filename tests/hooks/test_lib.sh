@@ -17,7 +17,7 @@ TMP=$(mktemp -d)
 ORIG_HOME=${HOME:-}
 HOME="$TMP"
 export HOME
-unset AI_MEMORY_RUN_ID AI_MEMORY_MANAGED_WORKSTREAM_ID AI_MEMORY_MANAGED_WORKSTREAM_NAME
+unset SESSIONMUNCH_RUN_ID SESSIONMUNCH_MANAGED_WORKSTREAM_ID SESSIONMUNCH_MANAGED_WORKSTREAM_NAME
 trap 'rm -rf "$TMP"; HOME=$ORIG_HOME' EXIT
 
 assert_eq() {
@@ -41,64 +41,64 @@ project_strategy = "repo-root"
 # Trailing comment
 EOF
 
-assert_eq "parse workspace"           "movvia"     "$(ai_memory_parse_toml_key "$TMP/sample.toml" workspace)"
-assert_eq "parse project"             "pe-portais" "$(ai_memory_parse_toml_key "$TMP/sample.toml" project)"
-assert_eq "parse project_strategy"    "repo-root"  "$(ai_memory_parse_toml_key "$TMP/sample.toml" project_strategy)"
-assert_eq "absent key returns empty"  ""           "$(ai_memory_parse_toml_key "$TMP/sample.toml" missing)"
-assert_eq "absent file returns empty" ""           "$(ai_memory_parse_toml_key "$TMP/no-such-file.toml" workspace)"
+assert_eq "parse workspace"           "movvia"     "$(sessionmunch_parse_toml_key "$TMP/sample.toml" workspace)"
+assert_eq "parse project"             "pe-portais" "$(sessionmunch_parse_toml_key "$TMP/sample.toml" project)"
+assert_eq "parse project_strategy"    "repo-root"  "$(sessionmunch_parse_toml_key "$TMP/sample.toml" project_strategy)"
+assert_eq "absent key returns empty"  ""           "$(sessionmunch_parse_toml_key "$TMP/sample.toml" missing)"
+assert_eq "absent file returns empty" ""           "$(sessionmunch_parse_toml_key "$TMP/no-such-file.toml" workspace)"
 
 # --- find_marker ------------------------------------------------------
 mkdir -p "$TMP/a/b/c/d"
-printf 'workspace = "deep"\n' >"$TMP/a/.ai-memory.toml"
-assert_eq "walks up to find marker" "$TMP/a/.ai-memory.toml" \
-    "$(ai_memory_find_marker "$TMP/a/b/c/d")"
+printf 'workspace = "deep"\n' >"$TMP/a/.sessionmunch.toml"
+assert_eq "walks up to find marker" "$TMP/a/.sessionmunch.toml" \
+    "$(sessionmunch_find_marker "$TMP/a/b/c/d")"
 assert_eq "no marker returns empty" "" \
-    "$(ai_memory_find_marker "$TMP/nonexistent/path")"
+    "$(sessionmunch_find_marker "$TMP/nonexistent/path")"
 
 # A checkout outside HOME may inherit a marker inside its own git tree, but
 # never one from an unrelated parent. A plain directory outside HOME checks
 # only its exact cwd.
 OUTSIDE_HOME="$TMP/account-home"
 mkdir -p "$OUTSIDE_HOME" "$TMP/outside/repo/src" "$TMP/outside/plain"
-printf 'workspace = "wrong"\n' >"$TMP/outside/.ai-memory.toml"
+printf 'workspace = "wrong"\n' >"$TMP/outside/.sessionmunch.toml"
 mkdir -p "$TMP/outside/repo/.git"
-printf 'workspace = "right"\n' >"$TMP/outside/repo/.ai-memory.toml"
+printf 'workspace = "right"\n' >"$TMP/outside/repo/.sessionmunch.toml"
 HOME="$OUTSIDE_HOME"
 export HOME
 assert_eq "outside HOME finds marker within checkout" \
-    "$TMP/outside/repo/.ai-memory.toml" \
-    "$(ai_memory_find_marker "$TMP/outside/repo/src")"
-rm -f "$TMP/outside/repo/.ai-memory.toml"
+    "$TMP/outside/repo/.sessionmunch.toml" \
+    "$(sessionmunch_find_marker "$TMP/outside/repo/src")"
+rm -f "$TMP/outside/repo/.sessionmunch.toml"
 assert_eq "outside HOME stops at checkout root" "" \
-    "$(ai_memory_find_marker "$TMP/outside/repo/src")"
+    "$(sessionmunch_find_marker "$TMP/outside/repo/src")"
 assert_eq "outside HOME plain dir rejects parent marker" "" \
-    "$(ai_memory_find_marker "$TMP/outside/plain")"
+    "$(sessionmunch_find_marker "$TMP/outside/plain")"
 HOME="$TMP"
 export HOME
 
 # --- extract_cwd ------------------------------------------------------
 PAYLOAD='{"session_id":"x","cwd":"/home/u/foo","tool":"Read"}'
-assert_eq "extract cwd from payload"     "/home/u/foo" "$(ai_memory_extract_cwd "$PAYLOAD")"
-assert_eq "extract cwd from empty json"  ""            "$(ai_memory_extract_cwd '{}')"
+assert_eq "extract cwd from payload"     "/home/u/foo" "$(sessionmunch_extract_cwd "$PAYLOAD")"
+assert_eq "extract cwd from empty json"  ""            "$(sessionmunch_extract_cwd '{}')"
 PAYLOAD_NESTED='{"session_id":"x","cwd":"/home/u/root","tool_input":{"cwd":"/tmp/nested"}}'
-assert_eq "extract cwd prefers first match" "/home/u/root" "$(ai_memory_extract_cwd "$PAYLOAD_NESTED")"
+assert_eq "extract cwd prefers first match" "/home/u/root" "$(sessionmunch_extract_cwd "$PAYLOAD_NESTED")"
 PAYLOAD_AGY='{"conversationId":"x","workspacePaths":["/home/u/agy","/tmp/other"]}'
-assert_eq "extract cwd from antigravity workspacePaths" "/home/u/agy" "$(ai_memory_extract_cwd "$PAYLOAD_AGY")"
+assert_eq "extract cwd from antigravity workspacePaths" "/home/u/agy" "$(sessionmunch_extract_cwd "$PAYLOAD_AGY")"
 PAYLOAD_WINDOWS='{"session_id":"x","cwd":"C:\\dev\\myproject"}'
 assert_eq "extract cwd unescapes Windows JSON path" 'C:\dev\myproject' \
-    "$(ai_memory_extract_cwd "$PAYLOAD_WINDOWS")"
+    "$(sessionmunch_extract_cwd "$PAYLOAD_WINDOWS")"
 # Cursor sends the workspace directory only as `workspace_roots`: its
 # sessionStart omits `cwd` and its tool events send `cwd: ""`. Both must
 # resolve or every Cursor event is filed under the default scratch project.
 PAYLOAD_CURSOR_START='{"session_id":"x","hook_event_name":"sessionStart","cursor_version":"2026.09.02","workspace_roots":["/home/u/cur"]}'
 assert_eq "extract cwd from cursor workspace_roots" "/home/u/cur" \
-    "$(ai_memory_extract_cwd "$PAYLOAD_CURSOR_START")"
+    "$(sessionmunch_extract_cwd "$PAYLOAD_CURSOR_START")"
 PAYLOAD_CURSOR_TOOL='{"session_id":"x","cwd":"","hook_event_name":"postToolUse","workspace_roots":["/home/u/cur"]}'
 assert_eq "extract cwd falls through cursor empty cwd" "/home/u/cur" \
-    "$(ai_memory_extract_cwd "$PAYLOAD_CURSOR_TOOL")"
+    "$(sessionmunch_extract_cwd "$PAYLOAD_CURSOR_TOOL")"
 
 antigravity_initial() {
-    if ai_memory_antigravity_is_initial_invocation "$1"; then
+    if sessionmunch_antigravity_is_initial_invocation "$1"; then
         printf 'yes'
     else
         printf 'no'
@@ -115,14 +115,14 @@ assert_eq "antigravity quoted invocation fails closed" "no" \
 assert_eq "antigravity fractional invocation fails closed" "no" \
     "$(antigravity_initial '{"invocationNum":0.5,"conversationId":"agy"}')"
 assert_eq "extract antigravity conversation id" "agy" \
-    "$(ai_memory_extract_session_id '{"conversationId":"agy"}')"
+    "$(sessionmunch_extract_session_id '{"conversationId":"agy"}')"
 
 FAKE_CURL_BIN="$TMP/fake-curl-bin"
 FAKE_CURL_LOG="$TMP/fake-curl.log"
 mkdir -p "$FAKE_CURL_BIN"
 cat >"$FAKE_CURL_BIN/curl" <<'EOF'
 #!/bin/sh
-printf '%s\n' "$*" >>"$AI_MEMORY_CURL_LOG"
+printf '%s\n' "$*" >>"$SESSIONMUNCH_CURL_LOG"
 case "$*" in
     *'/handoff?'*) printf 'next-session-context' ;;
 esac
@@ -131,16 +131,16 @@ chmod +x "$FAKE_CURL_BIN/curl"
 
 rm -f "$FAKE_CURL_LOG"
 AGY_LATER_OUTPUT=$(printf '%s' '{"invocationNum":2,"conversationId":"agy","workspacePaths":["/work"]}' \
-    | PATH="$FAKE_CURL_BIN:$PATH" AI_MEMORY_CURL_LOG="$FAKE_CURL_LOG" \
-        AI_MEMORY_HOOK_URL='http://memory.test' sh hooks/antigravity-cli/session-start.sh)
+    | PATH="$FAKE_CURL_BIN:$PATH" SESSIONMUNCH_CURL_LOG="$FAKE_CURL_LOG" \
+        SESSIONMUNCH_HOOK_URL='http://memory.test' sh hooks/antigravity-cli/session-start.sh)
 assert_eq "antigravity later invocation returns empty hook output" "{}" "$AGY_LATER_OUTPUT"
 assert_eq "antigravity later invocation makes no HTTP request" "0" \
     "$([ -f "$FAKE_CURL_LOG" ] && wc -l <"$FAKE_CURL_LOG" | tr -d ' ' || printf '0')"
 
 rm -f "$FAKE_CURL_LOG"
 AGY_INITIAL_OUTPUT=$(printf '%s' '{"invocationNum":0,"conversationId":"agy","workspacePaths":["/work"]}' \
-    | PATH="$FAKE_CURL_BIN:$PATH" AI_MEMORY_CURL_LOG="$FAKE_CURL_LOG" \
-        AI_MEMORY_HOOK_URL='http://memory.test' sh hooks/antigravity-cli/session-start.sh)
+    | PATH="$FAKE_CURL_BIN:$PATH" SESSIONMUNCH_CURL_LOG="$FAKE_CURL_LOG" \
+        SESSIONMUNCH_HOOK_URL='http://memory.test' sh hooks/antigravity-cli/session-start.sh)
 assert_eq "antigravity initial invocation injects handoff" \
     '{"injectSteps":[{"ephemeralMessage":"next-session-context"}]}' "$AGY_INITIAL_OUTPUT"
 assert_eq "antigravity initial invocation posts then fetches" "2" \
@@ -148,18 +148,18 @@ assert_eq "antigravity initial invocation posts then fetches" "2" \
 assert_eq "antigravity handoff fetch carries conversation id" "yes" \
     "$(grep -q '/handoff?.*session_id=agy' "$FAKE_CURL_LOG" && printf 'yes' || printf 'no')"
 
-PS_ANTIGRAVITY_STATIC=$(grep -q 'function Test-AiMemoryAntigravityInitialInvocation' hooks/lib/ai-memory-hook.ps1 \
-    && grep -q '\$AntigravityPreInvocationOutput -and -not' hooks/lib/ai-memory-hook.ps1 \
+PS_ANTIGRAVITY_STATIC=$(grep -q 'function Test-SessionMunchAntigravityInitialInvocation' hooks/lib/sessionmunch-hook.ps1 \
+    && grep -q '\$AntigravityPreInvocationOutput -and -not' hooks/lib/sessionmunch-hook.ps1 \
     && printf 'ok' || printf 'missing')
 assert_eq "powershell antigravity hook has invocation guard" "ok" "$PS_ANTIGRAVITY_STATIC"
 
-PS_UTF8_STATIC=$(grep -Fq '$BodyBytes = [Text.Encoding]::UTF8.GetBytes($Payload)' hooks/lib/ai-memory-hook.ps1 \
-    && grep -Fq 'application/json; charset=utf-8' hooks/lib/ai-memory-hook.ps1 \
-    && grep -Fq -- '-Body $BodyBytes' hooks/lib/ai-memory-hook.ps1 \
+PS_UTF8_STATIC=$(grep -Fq '$BodyBytes = [Text.Encoding]::UTF8.GetBytes($Payload)' hooks/lib/sessionmunch-hook.ps1 \
+    && grep -Fq 'application/json; charset=utf-8' hooks/lib/sessionmunch-hook.ps1 \
+    && grep -Fq -- '-Body $BodyBytes' hooks/lib/sessionmunch-hook.ps1 \
     && printf 'ok' || printf 'missing')
 assert_eq "powershell hook posts explicit UTF-8 JSON bytes" "ok" "$PS_UTF8_STATIC"
-PS_HOME_STATIC=$(grep -Fq '$userHome = if ($env:HOME)' hooks/lib/ai-memory-hook.ps1 \
-    && ! grep -Eq '\$home[[:space:]]*=' hooks/lib/ai-memory-hook.ps1 \
+PS_HOME_STATIC=$(grep -Fq '$userHome = if ($env:HOME)' hooks/lib/sessionmunch-hook.ps1 \
+    && ! grep -Eq '\$home[[:space:]]*=' hooks/lib/sessionmunch-hook.ps1 \
     && printf 'ok' || printf 'missing')
 assert_eq "powershell marker helper avoids read-only HOME" "ok" "$PS_HOME_STATIC"
 
@@ -167,62 +167,62 @@ assert_eq "powershell marker helper avoids read-only HOME" "ok" "$PS_HOME_STATIC
 JSON_INPUT='quoted "thing" \ path
 next line'
 assert_eq "json_string escapes text" '"quoted \"thing\" \\ path\nnext line"' \
-    "$(printf '%s' "$JSON_INPUT" | ai_memory_json_string)"
+    "$(printf '%s' "$JSON_INPUT" | sessionmunch_json_string)"
 
 # --- marker_qs --------------------------------------------------------
-QS=$(ai_memory_marker_qs "$TMP/a/b/c")
-assert_eq "marker_qs single key" "&cwd=$(ai_memory_url_encode "$TMP/a/b/c")&workspace=deep" "$QS"
+QS=$(sessionmunch_marker_qs "$TMP/a/b/c")
+assert_eq "marker_qs single key" "&cwd=$(sessionmunch_url_encode "$TMP/a/b/c")&workspace=deep" "$QS"
 
-printf 'workspace = "ws1"\nproject = "p1"\nproject_strategy = "repo-root"\n' >"$TMP/a/b/.ai-memory.toml"
-QS2=$(ai_memory_marker_qs "$TMP/a/b/c")
-assert_eq "closer marker wins" "&cwd=$(ai_memory_url_encode "$TMP/a/b/c")&workspace=ws1&project=p1&project_src=marker&project_strategy=repo-root" "$QS2"
+printf 'workspace = "ws1"\nproject = "p1"\nproject_strategy = "repo-root"\n' >"$TMP/a/b/.sessionmunch.toml"
+QS2=$(sessionmunch_marker_qs "$TMP/a/b/c")
+assert_eq "closer marker wins" "&cwd=$(sessionmunch_url_encode "$TMP/a/b/c")&workspace=ws1&project=p1&project_src=marker&project_strategy=repo-root" "$QS2"
 
-QS3=$(ai_memory_marker_qs "$TMP/nonexistent")
-assert_eq "no marker -> cwd only" "&cwd=$(ai_memory_url_encode "$TMP/nonexistent")" "$QS3"
+QS3=$(sessionmunch_marker_qs "$TMP/nonexistent")
+assert_eq "no marker -> cwd only" "&cwd=$(sessionmunch_url_encode "$TMP/nonexistent")" "$QS3"
 
 # --- capture-only marker transparency (#668) ---------------------------
 # A nested marker whose only content is [capture] must not shadow an outer
-# marker's workspace/project: ai_memory_marker_qs skips it and forwards the
-# OUTER marker's fields, while ai_memory_find_marker (used for [capture]
+# marker's workspace/project: sessionmunch_marker_qs skips it and forwards the
+# OUTER marker's fields, while sessionmunch_find_marker (used for [capture]
 # itself) still resolves the INNER (nearest) marker.
 mkdir -p "$TMP/scope/inner"
-printf 'workspace = "acme"\nproject = "infra"\n' >"$TMP/scope/.ai-memory.toml"
-printf '[capture]\nignore_paths = ["secret/**"]\n' >"$TMP/scope/inner/.ai-memory.toml"
+printf 'workspace = "acme"\nproject = "infra"\n' >"$TMP/scope/.sessionmunch.toml"
+printf '[capture]\nignore_paths = ["secret/**"]\n' >"$TMP/scope/inner/.sessionmunch.toml"
 
 assert_eq "capture-only marker: find_marker still resolves nearest" \
-    "$TMP/scope/inner/.ai-memory.toml" \
-    "$(ai_memory_find_marker "$TMP/scope/inner")"
+    "$TMP/scope/inner/.sessionmunch.toml" \
+    "$(sessionmunch_find_marker "$TMP/scope/inner")"
 assert_eq "capture-only marker: find_settings_marker skips it for the outer" \
-    "$TMP/scope/.ai-memory.toml" \
-    "$(ai_memory_find_settings_marker "$TMP/scope/inner")"
+    "$TMP/scope/.sessionmunch.toml" \
+    "$(sessionmunch_find_settings_marker "$TMP/scope/inner")"
 assert_eq "capture-only marker: marker_qs forwards the OUTER scope" \
-    "&cwd=$(ai_memory_url_encode "$TMP/scope/inner")&workspace=acme&project=infra&project_src=marker" \
-    "$(ai_memory_marker_qs "$TMP/scope/inner")"
+    "&cwd=$(sessionmunch_url_encode "$TMP/scope/inner")&workspace=acme&project=infra&project_src=marker" \
+    "$(sessionmunch_marker_qs "$TMP/scope/inner")"
 
 # A marker declaring [briefing] but no workspace/project is NOT capture-only
 # (it declares a forwarded setting), so it stays a resolution boundary: the
 # outer marker's scope must not leak through it.
-printf '[briefing]\ninject_on_session_start = true\n' >"$TMP/scope/inner/.ai-memory.toml"
+printf '[briefing]\ninject_on_session_start = true\n' >"$TMP/scope/inner/.sessionmunch.toml"
 assert_eq "briefing-only marker is a settings boundary, not transparent" \
-    "" "$(ai_memory_parse_toml_key "$(ai_memory_find_settings_marker "$TMP/scope/inner")" workspace)"
+    "" "$(sessionmunch_parse_toml_key "$(sessionmunch_find_settings_marker "$TMP/scope/inner")" workspace)"
 assert_eq "marker_qs stops at the briefing-only boundary" \
-    "&cwd=$(ai_memory_url_encode "$TMP/scope/inner")" \
-    "$(ai_memory_marker_qs "$TMP/scope/inner")"
+    "&cwd=$(sessionmunch_url_encode "$TMP/scope/inner")" \
+    "$(sessionmunch_marker_qs "$TMP/scope/inner")"
 
 # A capture-only marker with no scope-declaring ancestor: still transparent,
 # and resolution falls back exactly as it does with no marker at all.
 mkdir -p "$TMP/no-outer-scope/inner"
-printf '[capture]\nignore_paths = ["a/**"]\n' >"$TMP/no-outer-scope/inner/.ai-memory.toml"
+printf '[capture]\nignore_paths = ["a/**"]\n' >"$TMP/no-outer-scope/inner/.sessionmunch.toml"
 assert_eq "capture-only marker with no ancestor scope: settings walk finds none" \
-    "" "$(ai_memory_find_settings_marker "$TMP/no-outer-scope/inner")"
+    "" "$(sessionmunch_find_settings_marker "$TMP/no-outer-scope/inner")"
 assert_eq "capture-only marker with no ancestor scope: marker_qs is cwd-only" \
-    "&cwd=$(ai_memory_url_encode "$TMP/no-outer-scope/inner")" \
-    "$(ai_memory_marker_qs "$TMP/no-outer-scope/inner")"
+    "&cwd=$(sessionmunch_url_encode "$TMP/no-outer-scope/inner")" \
+    "$(sessionmunch_marker_qs "$TMP/no-outer-scope/inner")"
 
 # --- repo-root strategy: host-side resolution -------------------------
 # Outside any git repo the helper stays silent (caller keeps basename(cwd)).
 assert_eq "repo_root_project on non-git path is empty" "" \
-    "$(ai_memory_repo_root_project "$TMP/nonexistent")"
+    "$(sessionmunch_repo_root_project "$TMP/nonexistent")"
 
 if command -v git >/dev/null 2>&1; then
     REPO="$TMP/repos/acme-api"
@@ -235,51 +235,51 @@ if command -v git >/dev/null 2>&1; then
     # (not the subdir name) when the marker selects repo-root and pins no
     # explicit project.
     mkdir -p "$REPO/crates/cli"
-    printf 'workspace = "oss"\nproject_strategy = "repo-root"\n' >"$REPO/.ai-memory.toml"
-    QSR=$(ai_memory_marker_qs "$REPO/crates/cli")
+    printf 'workspace = "oss"\nproject_strategy = "repo-root"\n' >"$REPO/.sessionmunch.toml"
+    QSR=$(sessionmunch_marker_qs "$REPO/crates/cli")
     assert_eq "repo-root: subdir resolves to repo basename" \
-        "&cwd=$(ai_memory_url_encode "$REPO/crates/cli")&workspace=oss&project=acme-api&project_src=repo-root&project_strategy=repo-root" \
+        "&cwd=$(sessionmunch_url_encode "$REPO/crates/cli")&workspace=oss&project=acme-api&project_src=repo-root&project_strategy=repo-root" \
         "$QSR"
 
-    rm -f "$REPO/.ai-memory.toml"
-    AI_MEMORY_PROJECT_STRATEGY=repo-root
-    export AI_MEMORY_PROJECT_STRATEGY
-    QSE=$(ai_memory_marker_qs "$REPO/crates/cli")
+    rm -f "$REPO/.sessionmunch.toml"
+    SESSIONMUNCH_PROJECT_STRATEGY=repo-root
+    export SESSIONMUNCH_PROJECT_STRATEGY
+    QSE=$(sessionmunch_marker_qs "$REPO/crates/cli")
     assert_eq "repo-root env: no marker resolves to repo basename" \
-        "&cwd=$(ai_memory_url_encode "$REPO/crates/cli")&project=acme-api&project_src=repo-root&project_strategy=repo-root" \
+        "&cwd=$(sessionmunch_url_encode "$REPO/crates/cli")&project=acme-api&project_src=repo-root&project_strategy=repo-root" \
         "$QSE"
 
     printf 'workspace = "oss"\nproject = "pinned"\nproject_strategy = "basename"\n' \
-        >"$REPO/.ai-memory.toml"
-    QSO=$(ai_memory_marker_qs "$REPO/crates/cli")
+        >"$REPO/.sessionmunch.toml"
+    QSO=$(sessionmunch_marker_qs "$REPO/crates/cli")
     assert_eq "marker project strategy overrides env default" \
-        "&cwd=$(ai_memory_url_encode "$REPO/crates/cli")&workspace=oss&project=pinned&project_src=marker&project_strategy=basename" \
+        "&cwd=$(sessionmunch_url_encode "$REPO/crates/cli")&workspace=oss&project=pinned&project_src=marker&project_strategy=basename" \
         "$QSO"
-    unset AI_MEMORY_PROJECT_STRATEGY
+    unset SESSIONMUNCH_PROJECT_STRATEGY
 
-    printf 'workspace = "oss"\nproject_strategy = "repo-root"\n' >"$REPO/.ai-memory.toml"
+    printf 'workspace = "oss"\nproject_strategy = "repo-root"\n' >"$REPO/.sessionmunch.toml"
 
     # A linked worktree whose directory lives OUTSIDE the main repo tree
     # (a common layout: tools that keep worktrees in a separate directory)
-    # has no .ai-memory.toml ancestor of its own, yet still collapses to the
+    # has no .sessionmunch.toml ancestor of its own, yet still collapses to the
     # MAIN repo basename via the commondir pointer. The strategy comes from a
     # marker placed above the worktrees directory.
     WT="$TMP/worktrees/acme-api/wt-feature"
     mkdir -p "$TMP/worktrees/acme-api"
-    printf 'workspace = "oss"\nproject_strategy = "repo-root"\n' >"$TMP/worktrees/.ai-memory.toml"
+    printf 'workspace = "oss"\nproject_strategy = "repo-root"\n' >"$TMP/worktrees/.sessionmunch.toml"
     if git -C "$REPO" worktree add -q "$WT" >/dev/null 2>&1; then
-        QSW=$(ai_memory_marker_qs "$WT")
+        QSW=$(sessionmunch_marker_qs "$WT")
         assert_eq "repo-root: out-of-tree worktree collapses to main repo" \
-            "&cwd=$(ai_memory_url_encode "$WT")&workspace=oss&project=acme-api&project_src=repo-root&project_strategy=repo-root" \
+            "&cwd=$(sessionmunch_url_encode "$WT")&workspace=oss&project=acme-api&project_src=repo-root&project_strategy=repo-root" \
             "$QSW"
     fi
 
     # An explicit project pin always wins over repo-root resolution.
     printf 'workspace = "oss"\nproject = "pinned"\nproject_strategy = "repo-root"\n' \
-        >"$REPO/.ai-memory.toml"
-    QSP=$(ai_memory_marker_qs "$REPO/crates/cli")
+        >"$REPO/.sessionmunch.toml"
+    QSP=$(sessionmunch_marker_qs "$REPO/crates/cli")
     assert_eq "explicit project pin beats repo-root" \
-        "&cwd=$(ai_memory_url_encode "$REPO/crates/cli")&workspace=oss&project=pinned&project_src=marker&project_strategy=repo-root" \
+        "&cwd=$(sessionmunch_url_encode "$REPO/crates/cli")&workspace=oss&project=pinned&project_src=marker&project_strategy=repo-root" \
         "$QSP"
 
     PSH=""
@@ -290,49 +290,49 @@ if command -v git >/dev/null 2>&1; then
     fi
     if [ -n "$PSH" ]; then
         PS_REPO=$($PSH -NoProfile -ExecutionPolicy Bypass -Command \
-            ". '$PWD/hooks/lib/ai-memory-hook.ps1'; Get-AiMemoryRepoRootProject -Cwd '$REPO/crates/cli'")
+            ". '$PWD/hooks/lib/sessionmunch-hook.ps1'; Get-SessionMunchRepoRootProject -Cwd '$REPO/crates/cli'")
         assert_eq "powershell repo-root helper resolves repo basename" "acme-api" "$PS_REPO"
     else
-        PS_STATIC=$(grep -q 'function Get-AiMemoryRepoRootProject' hooks/lib/ai-memory-hook.ps1 \
-            && grep -q -- '--git-common-dir' hooks/lib/ai-memory-hook.ps1 \
-            && grep -q 'Get-AiMemoryRepoRootProject -Cwd' hooks/lib/ai-memory-hook.ps1 \
+        PS_STATIC=$(grep -q 'function Get-SessionMunchRepoRootProject' hooks/lib/sessionmunch-hook.ps1 \
+            && grep -q -- '--git-common-dir' hooks/lib/sessionmunch-hook.ps1 \
+            && grep -q 'Get-SessionMunchRepoRootProject -Cwd' hooks/lib/sessionmunch-hook.ps1 \
             && printf 'ok' || printf 'missing')
         assert_eq "powershell repo-root helper has static parity" "ok" "$PS_STATIC"
     fi
 fi
 
 # --- url_encode -------------------------------------------------------
-assert_eq "url_encode passes safe slug"   "movvia" "$(ai_memory_url_encode "movvia")"
-assert_eq "url_encode escapes ampersand"  "a%26b"  "$(ai_memory_url_encode "a&b")"
-assert_eq "url_encode escapes equals"     "a%3Db"  "$(ai_memory_url_encode "a=b")"
-assert_eq "url_encode escapes plus"       "a%2Bb"  "$(ai_memory_url_encode "a+b")"
+assert_eq "url_encode passes safe slug"   "movvia" "$(sessionmunch_url_encode "movvia")"
+assert_eq "url_encode escapes ampersand"  "a%26b"  "$(sessionmunch_url_encode "a&b")"
+assert_eq "url_encode escapes equals"     "a%3Db"  "$(sessionmunch_url_encode "a=b")"
+assert_eq "url_encode escapes plus"       "a%2Bb"  "$(sessionmunch_url_encode "a+b")"
 assert_eq "url_encode escapes Windows cwd" "C%3A%5Cdev%5Cmyproject" \
-    "$(ai_memory_url_encode 'C:\dev\myproject')"
-assert_eq "url_encode encodes UTF-8 per byte" "r%C3%A9po" "$(ai_memory_url_encode 'répo')"
+    "$(sessionmunch_url_encode 'C:\dev\myproject')"
+assert_eq "url_encode encodes UTF-8 per byte" "r%C3%A9po" "$(sessionmunch_url_encode 'répo')"
 
 # --- offline spool ----------------------------------------------------
 # The spool dir follows the data dir, which the harness pins inside $TMP.
-AI_MEMORY_DATA_DIR="$TMP/spool-data"
-export AI_MEMORY_DATA_DIR
+SESSIONMUNCH_DATA_DIR="$TMP/spool-data"
+export SESSIONMUNCH_DATA_DIR
 
-MS=$(ai_memory_now_ms)
+MS=$(sessionmunch_now_ms)
 assert_eq "now_ms is 13 digits" "13" "$(printf '%s' "$MS" | wc -c | tr -d ' ')"
 case "$MS" in
     *[!0-9]*) assert_eq "now_ms is all digits" "digits" "$MS" ;;
     *) assert_eq "now_ms is all digits" "digits" "digits" ;;
 esac
 
-# A body carrying every escape ai_memory_json_string emits must survive the
+# A body carrying every escape sessionmunch_json_string emits must survive the
 # write/read round trip byte for byte, or a drained event is corrupted.
 SPOOL_BODY='{"t":"quote \" backslash \\ newline
 tab\ttail"}'
-ai_memory_spool_event "http://127.0.0.1:1/hook?event=stop&agent=cursor" "$SPOOL_BODY"
+sessionmunch_spool_event "http://127.0.0.1:1/hook?event=stop&agent=cursor" "$SPOOL_BODY"
 SPOOL_FILE=$(ls "$TMP/spool-data/hook-spool/"*.json 2>/dev/null | head -n 1)
 assert_eq "spool_event writes one entry" "1" \
     "$(ls "$TMP/spool-data/hook-spool/"*.json 2>/dev/null | wc -l | tr -d ' ')"
-assert_eq "spooled body round-trips" "$SPOOL_BODY" "$(ai_memory_json_field body "$SPOOL_FILE")"
+assert_eq "spooled body round-trips" "$SPOOL_BODY" "$(sessionmunch_json_field body "$SPOOL_FILE")"
 assert_eq "spool_event mints an ingest_key" "yes" \
-    "$(case "$(ai_memory_json_field url "$SPOOL_FILE")" in *ingest_key=sh*) printf yes ;; *) printf no ;; esac)"
+    "$(case "$(sessionmunch_json_field url "$SPOOL_FILE")" in *ingest_key=sh*) printf yes ;; *) printf no ;; esac)"
 assert_eq "spool entry is 0600" "600" \
     "$(ls -l "$SPOOL_FILE" | cut -c2-10 | tr 'rwx-' '4210' | awk '{print substr($0,1,3)+0 substr($0,4,3)+0 substr($0,7,3)+0}' >/dev/null 2>&1; \
        if [ -r "$SPOOL_FILE" ] && [ ! -x "$SPOOL_FILE" ]; then printf '600'; else printf 'other'; fi)"
@@ -341,10 +341,10 @@ assert_eq "spool filename is <ms>-<pid>-<seq>.json" "ok" \
 
 # A `\uXXXX` escape means a richer serializer wrote the entry (the native
 # binary). The shell reader declines it rather than mangling the payload, so
-# `ai-memory hook-drain` still delivers it.
+# `sessionmunch hook-drain` still delivers it.
 printf '%s' '{"url":"http://x/y","body":"{\"a\":\"\u0007\"}","created_ms":1,"auth_mode":"none","attempts":0}' \
     >"$TMP/spool-data/hook-spool/foreign.json"
-ai_memory_json_field body "$TMP/spool-data/hook-spool/foreign.json" >/dev/null 2>&1 \
+sessionmunch_json_field body "$TMP/spool-data/hook-spool/foreign.json" >/dev/null 2>&1 \
     && FOREIGN=read || FOREIGN=declined
 assert_eq "json_field declines a \\u escape" "declined" "$FOREIGN"
 rm -f "$TMP/spool-data/hook-spool/foreign.json"
@@ -352,11 +352,11 @@ rm -f "$TMP/spool-data/hook-spool/foreign.json"
 # An unreachable server must leave the event on disk instead of dropping it.
 rm -f "$TMP/spool-data/hook-spool/"*.json
 printf '%s' '{"e":"unreachable"}' \
-    | ai_memory_post_hook "http://127.0.0.1:1/hook?event=post-tool-use&agent=cursor" >/dev/null 2>&1
+    | sessionmunch_post_hook "http://127.0.0.1:1/hook?event=post-tool-use&agent=cursor" >/dev/null 2>&1
 assert_eq "post_hook spools an undelivered event" "1" \
     "$(ls "$TMP/spool-data/hook-spool/"*.json 2>/dev/null | wc -l | tr -d ' ')"
 
-unset AI_MEMORY_DATA_DIR
+unset SESSIONMUNCH_DATA_DIR
 
 # --- summary ----------------------------------------------------------
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

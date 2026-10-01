@@ -1,32 +1,32 @@
 #!/usr/bin/env bash
-# Curl-based installer for ai-memory's lifecycle-hook scripts.
+# Curl-based installer for sessionmunch's lifecycle-hook scripts.
 #
 # Use when you don't want to clone the repo and don't want to use the
 # docker image to extract the bundle. Downloads a checksum-verified hook
 # archive from a GitHub Release, then installs only the requested agent files.
 #
 # Usage:
-#   ai-memory-install-hooks --agent claude-code
+#   sessionmunch-install-hooks --agent claude-code
 #
 # Options:
 #   --agent <claude-code|codex|command-code|cursor|gemini-cli|kimi-code|kiro-cli|antigravity-cli|grok|opencode|opencode2|openclaw|omp|oh-my-pi|pi>
 #                                                which agent (default: claude-code;
 #                                                generated-plugin agents print hints)
-#   --to <dir>                               install root (default: $HOME/.ai-memory/hooks)
+#   --to <dir>                               install root (default: $HOME/.sessionmunch/hooks)
 #   --ref <release-tag>                      release tag to pull (default: latest)
 #   --repo <owner/repo>                      release repository (default: akitaonrails/ai-memory)
 #
 # After installation, render the matching agent config snippet:
-#   ai-memory install-hooks --agent claude-code --hooks-dir ~/.ai-memory/hooks
+#   sessionmunch install-hooks --agent claude-code --hooks-dir ~/.sessionmunch/hooks
 #
 # If you only have docker:
-#   docker run --rm ai-memory install-hooks --agent claude-code \
-#       --hooks-dir ~/.ai-memory/hooks
+#   docker run --rm sessionmunch install-hooks --agent claude-code \
+#       --hooks-dir ~/.sessionmunch/hooks
 
 set -euo pipefail
 
 AGENT="claude-code"
-TO="$HOME/.ai-memory/hooks"
+TO="$HOME/.sessionmunch/hooks"
 REF="latest"
 REPO="akitaonrails/ai-memory"
 
@@ -66,36 +66,36 @@ fi
 
 if [[ "$AGENT" == "opencode" ]]; then
     echo "OpenCode uses a generated TypeScript plugin, not shell hook scripts."
-    echo "Run: ai-memory install-hooks --agent opencode --apply"
-    echo "Then restart OpenCode so it loads ~/.config/opencode/plugins/ai-memory.ts."
+    echo "Run: sessionmunch install-hooks --agent opencode --apply"
+    echo "Then restart OpenCode so it loads ~/.config/opencode/plugins/sessionmunch.ts."
     exit 0
 fi
 
 if [[ "$AGENT" == "opencode2" ]]; then
     echo "OpenCode 2 uses a generated TypeScript plugin, not shell hook scripts."
-    echo "Run: ai-memory install-hooks --agent opencode2 --apply"
-    echo "Then restart OpenCode 2 so it loads ~/.config/opencode/plugins/ai-memory-opencode2.ts."
+    echo "Run: sessionmunch install-hooks --agent opencode2 --apply"
+    echo "Then restart OpenCode 2 so it loads ~/.config/opencode/plugins/sessionmunch-opencode2.ts."
     exit 0
 fi
 
 if [[ "$AGENT" == "openclaw" ]]; then
     echo "OpenClaw uses a generated native TypeScript plugin, not shell hook scripts."
-    echo "Run: ai-memory install-hooks --agent openclaw --apply"
+    echo "Run: sessionmunch install-hooks --agent openclaw --apply"
     echo "Then restart the OpenClaw gateway if it does not auto-restart after plugin install."
     exit 0
 fi
 
 if [[ "$AGENT" == "omp" || "$AGENT" == "oh-my-pi" ]]; then
     echo "OMP uses a generated TypeScript extension, not shell hook scripts."
-    echo "Run: ai-memory install-hooks --agent omp --apply"
-    echo "Then restart OMP so it loads ~/.omp/agent/extensions/ai-memory.ts."
+    echo "Run: sessionmunch install-hooks --agent omp --apply"
+    echo "Then restart OMP so it loads ~/.omp/agent/extensions/sessionmunch.ts."
     exit 0
 fi
 
 if [[ "$AGENT" == "pi" ]]; then
     echo "Pi uses a generated TypeScript extension, not shell hook scripts."
-    echo "Run: ai-memory install-hooks --agent pi --apply"
-    echo "Then restart Pi so it loads ~/.pi/agent/extensions/ai-memory.ts."
+    echo "Run: sessionmunch install-hooks --agent pi --apply"
+    echo "Then restart Pi so it loads ~/.pi/agent/extensions/sessionmunch.ts."
     echo "MCP tools come through the same generated bridge extension."
     exit 0
 fi
@@ -148,11 +148,11 @@ if [[ "$REF" == "latest" ]]; then
 else
     BASE_URL="https://github.com/$REPO/releases/download/$REF"
 fi
-ARCHIVE="ai-memory-hooks.tar.gz"
+ARCHIVE="sessionmunch-hooks.tar.gz"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-echo "Downloading checksum-verified ai-memory hook bundle from $BASE_URL"
+echo "Downloading checksum-verified sessionmunch hook bundle from $BASE_URL"
 curl -fsSL "$BASE_URL/$ARCHIVE" -o "$TMP/$ARCHIVE"
 curl -fsSL "$BASE_URL/$ARCHIVE.sha256" -o "$TMP/$ARCHIVE.sha256"
 expected_sum="$(awk 'NR == 1 && $1 ~ /^[0-9A-Fa-f]{64}$/ { print tolower($1) }' "$TMP/$ARCHIVE.sha256")"
@@ -168,7 +168,7 @@ if [[ -z "$expected_sum" || "$actual_sum" != "$expected_sum" ]]; then
     echo "hook bundle checksum mismatch; refusing installation" >&2
     exit 1
 fi
-echo "Installing ai-memory hooks for $AGENT into $DEST"
+echo "Installing sessionmunch hooks for $AGENT into $DEST"
 for name in "${SCRIPTS[@]}"; do
     member="hooks/$AGENT/${name}.sh"
     source="$TMP/${name}.sh"
@@ -186,7 +186,7 @@ echo
 echo "Done. Next steps:"
 echo
 echo "  1. Render the config snippet to merge into your agent's settings:"
-echo "       ai-memory install-hooks --agent $AGENT --hooks-dir $TO"
+echo "       sessionmunch install-hooks --agent $AGENT --hooks-dir $TO"
 echo "     (Or via docker if you don't have the binary locally:"
 echo "       docker run --rm $REPO:latest install-hooks --agent $AGENT --hooks-dir $TO)"
 echo

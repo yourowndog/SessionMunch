@@ -1,18 +1,18 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/ai-memory-core",
-    "crates/ai-memory-store",
-    "crates/ai-memory-wiki",
-    "crates/ai-memory-mcp",
-    "crates/ai-memory-hooks",
-    "crates/ai-memory-llm",
-    "crates/ai-memory-consolidate",
-    "crates/ai-memory-web",
-    "crates/ai-memory-cli",
-    "crates/ai-memory-workstream",
+    "crates/sessionmunch-core",
+    "crates/sessionmunch-store",
+    "crates/sessionmunch-wiki",
+    "crates/sessionmunch-mcp",
+    "crates/sessionmunch-hooks",
+    "crates/sessionmunch-llm",
+    "crates/sessionmunch-consolidate",
+    "crates/sessionmunch-web",
+    "crates/sessionmunch-cli",
+    "crates/sessionmunch-workstream",
     # Test-only helpers shared across crates (dev-dependency, never shipped).
-    "crates/ai-memory-test-support",
+    "crates/sessionmunch-test-support",
     # Live A/B harness — not part of the shipped binary, but in
     # the workspace so it shares deps + builds with the rest.
     "evals",
@@ -21,17 +21,17 @@ members = [
 # ships, plus test-support. The evals harness is two more test binaries nobody
 # iterates on; `--workspace` (CI, the pre-push hook, `cargo tf`) still covers it.
 default-members = [
-    "crates/ai-memory-core",
-    "crates/ai-memory-store",
-    "crates/ai-memory-wiki",
-    "crates/ai-memory-mcp",
-    "crates/ai-memory-hooks",
-    "crates/ai-memory-llm",
-    "crates/ai-memory-consolidate",
-    "crates/ai-memory-web",
-    "crates/ai-memory-cli",
-    "crates/ai-memory-workstream",
-    "crates/ai-memory-test-support",
+    "crates/sessionmunch-core",
+    "crates/sessionmunch-store",
+    "crates/sessionmunch-wiki",
+    "crates/sessionmunch-mcp",
+    "crates/sessionmunch-hooks",
+    "crates/sessionmunch-llm",
+    "crates/sessionmunch-consolidate",
+    "crates/sessionmunch-web",
+    "crates/sessionmunch-cli",
+    "crates/sessionmunch-workstream",
+    "crates/sessionmunch-test-support",
 ]
 
 [workspace.package]
@@ -44,16 +44,16 @@ authors = ["Fabio Akita <boss@akitaonrails.com>"]
 
 [workspace.dependencies]
 # Inter-crate dependencies.
-ai-memory-core = { path = "crates/ai-memory-core", version = "2.2.1" }
-ai-memory-store = { path = "crates/ai-memory-store", version = "2.2.1" }
-ai-memory-wiki = { path = "crates/ai-memory-wiki", version = "2.2.1" }
-ai-memory-mcp = { path = "crates/ai-memory-mcp", version = "2.2.1" }
-ai-memory-hooks = { path = "crates/ai-memory-hooks", version = "2.2.1" }
-ai-memory-llm = { path = "crates/ai-memory-llm", version = "2.2.1" }
-ai-memory-consolidate = { path = "crates/ai-memory-consolidate", version = "2.2.1" }
-ai-memory-web = { path = "crates/ai-memory-web", version = "2.2.1" }
-ai-memory-workstream = { path = "crates/ai-memory-workstream", version = "2.2.1" }
-ai-memory-test-support = { path = "crates/ai-memory-test-support", version = "2.1.1" }
+sessionmunch-core = { path = "crates/sessionmunch-core", version = "2.2.1" }
+sessionmunch-store = { path = "crates/sessionmunch-store", version = "2.2.1" }
+sessionmunch-wiki = { path = "crates/sessionmunch-wiki", version = "2.2.1" }
+sessionmunch-mcp = { path = "crates/sessionmunch-mcp", version = "2.2.1" }
+sessionmunch-hooks = { path = "crates/sessionmunch-hooks", version = "2.2.1" }
+sessionmunch-llm = { path = "crates/sessionmunch-llm", version = "2.2.1" }
+sessionmunch-consolidate = { path = "crates/sessionmunch-consolidate", version = "2.2.1" }
+sessionmunch-web = { path = "crates/sessionmunch-web", version = "2.2.1" }
+sessionmunch-workstream = { path = "crates/sessionmunch-workstream", version = "2.2.1" }
+sessionmunch-test-support = { path = "crates/sessionmunch-test-support", version = "2.1.1" }
 
 # (Workspace shared deps follow below)
 
@@ -90,11 +90,11 @@ uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
 # Config & CLI.
 figment = { version = "0.10", features = ["toml", "env"] }
 clap = { version = "4", features = ["derive", "env"] }
-# Shell-completion generator for `ai-memory completions <shell>`. Reads the
+# Shell-completion generator for `sessionmunch completions <shell>`. Reads the
 # same derived `Command` the parser uses, so completions can never drift
 # from the actual CLI surface.
 clap_complete = "4"
-# Raw-mode key reading for `ai-memory show`'s interactive picker. The CLI had
+# Raw-mode key reading for `sessionmunch show`'s interactive picker. The CLI had
 # no terminal crate before this: `anstyle` arrives transitively through clap
 # and only styles text, it cannot read arrow keys. crossterm is the portable
 # option that keeps one code path across Linux, macOS, and Windows consoles

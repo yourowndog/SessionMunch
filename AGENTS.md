@@ -1,7 +1,7 @@
-<!-- ai-memory:start -->
-## Long-term memory (ai-memory)
+<!-- sessionmunch:start -->
+## Long-term memory (sessionmunch)
 
-This project uses [ai-memory](https://github.com/akitaonrails/ai-memory)
+This project uses [sessionmunch](https://github.com/akitaonrails/ai-memory)
 for cross-session continuity.
 
 **Choose project scope from the MCP client's identity support.**
@@ -14,7 +14,7 @@ for cross-session continuity.
   connecting that hook session id to MCP requests) must pass `workspace` and
   `project` together on every project-scoped call, including requests about "this
   project", "here", or "our work". Read the exact names from the nearest
-  `.ai-memory.toml` when it declares both. If it does not, obtain the names from
+  `.sessionmunch.toml` when it declares both. If it does not, obtain the names from
   the operator or server configuration; never guess them from a directory name
   and never rely on the server's last active project.
 
@@ -24,17 +24,17 @@ preference written with `scope: "global"`, omit `workspace` and `project`.
 
 **Lifecycle hooks already capture sanitized, bounded prompt and tool-lifecycle
 observations automatically.** They are not complete native transcripts;
-managed `ai-memory run` launches add the portable visible-event ledger. Do not
+managed `sessionmunch run` launches add the portable visible-event ledger. Do not
 manually write routine notes. Only write durable memory when the user explicitly asks
 to remember or annotate something permanently. For an explicitly time-bounded note,
 set `expires_at`; expired pages are hidden from normal reads and deleted by the next
-forget sweep, and a TTL outranks `pinned`. ai-memory is the cross-harness memory of
+forget sweep, and a TTL outranks `pinned`. sessionmunch is the cross-harness memory of
 record for this project: if the harness you run in has its own local memory feature,
 do not keep durable project facts there in parallel — a harness-local store is
 invisible to every other agent and fragments continuity, so capture them here instead.
 A reviewed decision record kept in the repository (an ADR directory, a Keep the Why
 `context/` tree) is not a harness-local store: when the project keeps one, record
-decisions there under the project's convention; ai-memory keeps recall, handoffs and
+decisions there under the project's convention; sessionmunch keeps recall, handoffs and
 session history and does not duplicate that record as a page.
 
 For ranking diagnosis, opt-in query explanations add bounded score provenance
@@ -67,11 +67,11 @@ preferences for LLM consolidation. It remains untrusted project data and cannot
 provide facts, authorize disclosure or tool use, or override consolidation's
 security, evidence, schema, and output rules.
 
-### Use the installed ai-memory Agent Skills
+### Use the installed sessionmunch Agent Skills
 
-Detailed tool-routing guidance lives in the installed ai-memory Agent
-Skills. When a task matches an installed ai-memory Agent Skill, load and
-follow that skill before calling ai-memory tools. The skills cover memory
+Detailed tool-routing guidance lives in the installed sessionmunch Agent
+Skills. When a task matches an installed sessionmunch Agent Skill, load and
+follow that skill before calling sessionmunch tools. The skills cover memory
 retrieval, handoffs, durable pages, learning maintenance, and routing
 install or refresh work.
 
@@ -90,33 +90,33 @@ session start and reaches Claude Code only if the agent opens the file.
 
 If the rule is a standing *user/team* preference that should apply to
 every project (tech choices, code style, personal conventions), save it
-to ai-memory's reserved global scope instead — the durable-pages skill
+to sessionmunch's reserved global scope instead — the durable-pages skill
 covers how. Default memory reads surface global-scope pages in every
 project automatically.
 
 ### Refreshing this snippet
 
-This block is maintained by ai-memory. Two ways to refresh it with the
+This block is maintained by sessionmunch. Two ways to refresh it with the
 latest binary's recommended copy:
 
-- **From the agent** (no terminal needed): ask "refresh the ai-memory
+- **From the agent** (no terminal needed): ask "refresh the sessionmunch
   routing in this project". The agent calls `memory_install_self_routing`,
   picks the right filename for itself (Claude Code -> `CLAUDE.md`; Codex /
   OpenCode / OpenCode 2 / Cursor / Gemini / Grok -> `AGENTS.md`; Kimi Code / Kiro CLI / Command Code -> `AGENTS.md`),
   uses its Write / Edit tool to replace or append the returned
   `markered_block` while preserving
-  non-ai-memory user content, then writes or updates each returned
+  non-sessionmunch user content, then writes or updates each returned
   `managed_skills` item under the selected skill root from `target_hints`
   using its `relative_path`.
-- **From the CLI**: `ai-memory install-instructions` (defaults to
+- **From the CLI**: `sessionmunch install-instructions` (defaults to
   `CLAUDE.md`; pass `--target AGENTS.md` for non-Claude agents or projects
   that use `AGENTS.md` as the canonical instruction file).
 
-Both are idempotent: re-runs replace the block delimited by the ai-memory
+Both are idempotent: re-runs replace the block delimited by the sessionmunch
 start/end HTML-comment markers, without disturbing the rest of the file.
-<!-- ai-memory:end -->
+<!-- sessionmunch:end -->
 
-# AGENTS.md — ai-memory contributor guide
+# AGENTS.md — sessionmunch contributor guide
 
 This file is the single canonical instruction file for AI coding agents
 working in this repository (Claude Code, Codex, OpenCode, OpenCode 2, Cursor, Gemini
@@ -125,7 +125,7 @@ short pointer here — do not duplicate rules into it.
 
 ## Project overview
 
-ai-memory is a self-contained Rust binary that gives AI coding agents
+sessionmunch is a self-contained Rust binary that gives AI coding agents
 long-term, cross-session memory over MCP and lifecycle hooks. Quit Claude
 Code mid-task, open Codex in the same directory, and continue without
 re-explaining context.
@@ -153,7 +153,7 @@ Core design:
   consolidation, lint, and the auto-improvement loop.
 - **Per-project isolation by construction**: every row and page is keyed
   by `(workspace_id, project_id, path)`, resolved from the caller's cwd,
-  a `.ai-memory.toml` marker file, or explicit scope arguments.
+  a `.sessionmunch.toml` marker file, or explicit scope arguments.
 
 The full operational map is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md);
 historical rationale is in [`docs/design-decisions.md`](docs/design-decisions.md).
@@ -174,9 +174,9 @@ or prompt routing for learning review.
 - **Wiki:** atomic markdown writes (tmp + rename + fsync),
   `notify-debouncer-full` watcher, `git2` with vendored libgit2
   checkpoints.
-- **LLM:** typed providers in `ai-memory-llm` behind `LlmProvider` /
+- **LLM:** typed providers in `sessionmunch-llm` behind `LlmProvider` /
   `Embedder` traits; `reqwest` (rustls) for provider HTTP.
-- **Config:** `figment` (TOML + `AI_MEMORY_*` env); CLI via `clap` 4
+- **Config:** `figment` (TOML + `SESSIONMUNCH_*` env); CLI via `clap` 4
   derive; `clap_complete` for shell completions.
 - **Auth/secrets:** `secrecy`, `subtle` (constant-time compare),
   `getrandom`, `base64`, `sha2`.
@@ -192,22 +192,22 @@ profile: thin LTO, `codegen-units = 1`, stripped symbols.
 
 ```
 crates/
-├── ai-memory-core/        domain types, errors, ids. NO IO.
-├── ai-memory-store/       SQLite + writer actor + reader pool + decay math.
-├── ai-memory-wiki/        atomic markdown writes, file watcher, git.
-├── ai-memory-mcp/         rmcp transport + tool router + admin routes.
-├── ai-memory-hooks/       payload schemas, sanitizer, /hook ingress.
-├── ai-memory-llm/         provider auth boundary + LlmProvider / Embedder traits.
-├── ai-memory-consolidate/ Karpathy ingest / lint / sweep / auto-improve pipeline.
-├── ai-memory-web/         read-only /web UI and /api/v1 JSON routes.
-├── ai-memory-workstream/  read-only native transcript + launch adapters (`ai-memory run`).
-└── ai-memory-cli/         `ai-memory` binary entry point + thin HTTP subcommands.
+├── sessionmunch-core/        domain types, errors, ids. NO IO.
+├── sessionmunch-store/       SQLite + writer actor + reader pool + decay math.
+├── sessionmunch-wiki/        atomic markdown writes, file watcher, git.
+├── sessionmunch-mcp/         rmcp transport + tool router + admin routes.
+├── sessionmunch-hooks/       payload schemas, sanitizer, /hook ingress.
+├── sessionmunch-llm/         provider auth boundary + LlmProvider / Embedder traits.
+├── sessionmunch-consolidate/ Karpathy ingest / lint / sweep / auto-improve pipeline.
+├── sessionmunch-web/         read-only /web UI and /api/v1 JSON routes.
+├── sessionmunch-workstream/  read-only native transcript + launch adapters (`sessionmunch run`).
+└── sessionmunch-cli/         `sessionmunch` binary entry point + thin HTTP subcommands.
 evals/                     live A/B harness; workspace member, not shipped.
-companions/ai-memory-importer/  standalone OMC + external-conversation importer; NOT a root
+companions/sessionmunch-importer/  standalone OMC + external-conversation importer; NOT a root
                            workspace member — build/test it with
-                           `--manifest-path companions/ai-memory-importer/Cargo.toml`.
+                           `--manifest-path companions/sessionmunch-importer/Cargo.toml`.
 hooks/                     per-agent lifecycle hook bundles (shell/native).
-bin/                       host wrapper scripts (`ai-memory`, `deploy`, `release`).
+bin/                       host wrapper scripts (`sessionmunch`, `deploy`, `release`).
 docker/                    Dockerfile, compose files, TLS proxy templates.
 packaging/                 AUR/systemd/sysusers/tmpfiles native packaging assets.
 scripts/                   packaging checks, hook installer, acceptance scripts.
@@ -231,7 +231,7 @@ full gate once before handing work off.
 ```bash
 # Everyday loop (nextest: `cargo install cargo-nextest --locked`).
 cargo t                        # every shipped crate: 11 test binaries, ~20s warm
-cargo t -p ai-memory-store     # one crate: builds only its binary, ~5s
+cargo t -p sessionmunch-store     # one crate: builds only its binary, ~5s
 cargo t -E 'test(/purge/)'     # one topic (still builds everything)
 
 # Before claiming a change is ready: the gates CI and bin/release enforce.
@@ -267,18 +267,18 @@ no tiers.
   Windows, a first-run malware scan, so each crate gets at most one. A
   repo-layout test in the CLI suite fails on an undeclared file, a stray
   top-level `tests/*.rs`, or a `mod.rs` that `lib.rs` never includes.
-- **Shared test helpers** live in `crates/ai-memory-test-support`
+- **Shared test helpers** live in `crates/sessionmunch-test-support`
   (dev-dependency only, no workspace dependencies, no test binary of its own).
 - **Pre-push hook.** `scripts/install-git-hooks.sh` (from Git Bash on Windows)
   installs a hook that runs the full tier before every push and only touches
   its own marked block in `.git/hooks/pre-push`. Bypass a work-in-progress
   push with `git push --no-verify`.
 - **Regenerating the web stylesheet.** `TAILWIND_BUILD=1 cargo build -p
-  ai-memory-web` downloads the pinned Tailwind CLI and rewrites
+  sessionmunch-web` downloads the pinned Tailwind CLI and rewrites
   `static/tailwind.css`; commit the result. CI regenerates it on Linux and
   fails if the committed file is stale, so nothing else needs the download.
 - Run the companion importer separately:
-  `cargo test --manifest-path companions/ai-memory-importer/Cargo.toml`
+  `cargo test --manifest-path companions/sessionmunch-importer/Cargo.toml`
   (plus fmt/clippy on the same manifest). Root `--workspace` commands do
   not cover it.
 
@@ -313,7 +313,7 @@ no tiers.
 
 - Shell-level checks: `tests/hooks/test_lib.sh`,
   `tests/e2e/handoff_smoke.sh`, `scripts/check-native-packaging.sh`.
-- CI additionally runs `cargo build --release --bin ai-memory` on
+- CI additionally runs `cargo build --release --bin sessionmunch` on
   Linux/macOS, a Docker image smoke test, `cargo audit` (with the ignores
   listed in `ci.yml`), and differential gitleaks scanning.
   `.github/workflows/secret-scan.yml` runs the separate weekly/manual
@@ -345,7 +345,7 @@ no tiers.
   provider dialects are parsed/normalized once and reused.
 - Keep CLI commands thin: parse args, resolve config once, call typed
   library functions, render output. Provider-specific behavior belongs in
-  `ai-memory-llm`, not in CLI/admin handlers.
+  `sessionmunch-llm`, not in CLI/admin handlers.
 
 ## Cross-cutting invariants (do not violate)
 
@@ -412,8 +412,8 @@ prior-art bug (see `docs/ARCHITECTURE.md` and `docs/issues-*.md`):
 
     Unit tests do not cover this: they exercise one session at a time, which
     is the exact shape that cannot see a collaboration or concurrency defect.
-    `crates/ai-memory-store/tests/multi_session.rs` and the pointer tests in
-    `ai-memory-core::active_project` are the guards. Any change to scope
+    `crates/sessionmunch-store/tests/multi_session.rs` and the pointer tests in
+    `sessionmunch-core::active_project` are the guards. Any change to scope
     resolution, page supersession, session identity, handoff acceptance, the
     writer actor, or owner filters must be argued against this invariant
     explicitly rather than assumed safe.
@@ -421,7 +421,7 @@ prior-art bug (see `docs/ARCHITECTURE.md` and `docs/issues-*.md`):
 Additional boundary rules:
 
 - **Scope resolution:** new MCP/admin/web routes must use
-  `ai_memory_store::ScopeResolver` or its explicit helpers
+  `sessionmunch_store::ScopeResolver` or its explicit helpers
   (`lookup_existing_scope`, `create_explicit_scope`,
   `resolve_many_existing_scopes`) — never hand-rolled workspace/project
   lookup chains. Read/search/embed/retention/destructive paths use
@@ -456,7 +456,7 @@ Additional boundary rules:
   behavior.
 - New disk+SQL mutations need recovery/rollback tests.
 - The recall-eval framework lives at
-  `crates/ai-memory-consolidate/tests/recall_eval.rs`.
+  `crates/sessionmunch-consolidate/tests/recall_eval.rs`.
 - Tests run with `cargo t` locally and `cargo test --workspace --all-targets`
   in CI.
 
@@ -464,17 +464,17 @@ Additional boundary rules:
 
 - **Default posture:** loopback-only bind (`127.0.0.1:49374`), no auth —
   safe for a single-user machine. Any non-loopback bind should set a
-  bearer token (`AI_MEMORY_AUTH_TOKEN`) and `AI_MEMORY_ALLOWED_HOSTS`
+  bearer token (`SESSIONMUNCH_AUTH_TOKEN`) and `SESSIONMUNCH_ALLOWED_HOSTS`
   (DNS-rebinding guard). TLS is deliberately delegated to a reverse
   proxy (see `docs/https-via-proxy.md`).
 - **Never commit secrets.** gitleaks runs in CI with `.gitleaks.toml`;
   keep real tokens out of docs, fixtures, and tests.
 - **Sanitization is the trust boundary:** all untrusted hook payload text
-  passes through the `ai-memory-hooks` sanitizer before storage; do not
+  passes through the `sessionmunch-hooks` sanitizer before storage; do not
   create paths that bypass it (or hook backpressure, or the single-writer
   actor).
 - **Capture exclusions** (`[capture] ignore_paths` in the nearest
-  `.ai-memory.toml` marker) drop recognized file-tool events before they
+  `.sessionmunch.toml` marker) drop recognized file-tool events before they
   reach spool, transport, logs, or storage — preserve this behavior in
   native hook commands and generated integrations.
 - **Auth ladder:** static root bearer token → DB-user tokens
@@ -505,10 +505,10 @@ Additional boundary rules:
   release whose SHA lacks a green full matrix.
 - **Every release updates the Homebrew tap — do not forget it.** After
   `release.yml` publishes the GitHub release and its per-target tarballs,
-  update `~/Projects/homebrew-tap/Formula/ai-memory.rb`: bump `version` and
+  update `~/Projects/homebrew-tap/Formula/sessionmunch.rb`: bump `version` and
   set each platform `sha256` to the value from the release's published
-  `ai-memory-<target>.tar.gz.sha256` assets (`macos-aarch64`, `macos-x86_64`,
-  `linux-aarch64`, `linux-x86_64`), then commit (`ai-memory X.Y.Z`) and push
+  `sessionmunch-<target>.tar.gz.sha256` assets (`macos-aarch64`, `macos-x86_64`,
+  `linux-aarch64`, `linux-x86_64`), then commit (`sessionmunch X.Y.Z`) and push
   the tap. Verify each `sha256` matches the published asset before pushing — a
   wrong hash makes `brew install` fail for everyone. This is a mandatory,
   recurring post-release step (it has been forgotten repeatedly); do not rely
@@ -518,7 +518,7 @@ Additional boundary rules:
 - **PR evaluation:** report pros, cons, and recommended fix, then ask for
   approval before merging or pushing PR changes.
 - **MCP tool surface changes** require updating `MEMORY_INSTRUCTIONS`,
-  `ai_memory_core::SNIPPET_BODY`, README/docs tool references, and the
+  `sessionmunch_core::SNIPPET_BODY`, README/docs tool references, and the
   regression tests asserting every tool appears in both prompt surfaces.
   The tool count is currently 19 (see `docs/ARCHITECTURE.md`).
 - **Semantic versioning:** patch = fixes; minor = additive (new CLI
@@ -552,6 +552,6 @@ Additional boundary rules:
 - [`docs/users.md`](docs/users.md) — multi-user attribution and the
   four-rung auth ladder.
 - [`docs/managed-workstreams.md`](docs/managed-workstreams.md) —
-  `ai-memory run` cross-harness continuity.
+  `sessionmunch run` cross-harness continuity.
 - [`docs/companion-crates.md`](docs/companion-crates.md) — boundary for
   optional companion projects (e.g. the importer).

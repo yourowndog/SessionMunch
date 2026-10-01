@@ -60,8 +60,8 @@ main() {
   log "Checking shell packaging syntax"
   bash -n packaging/aur/PKGBUILD
   bash -n packaging/aur/PKGBUILD-bin
-  bash -n packaging/aur/ai-memory.install
-  bash -n bin/ai-memory
+  bash -n packaging/aur/sessionmunch.install
+  bash -n bin/sessionmunch
   bash -n scripts/test-native-arch-systemd-distrobox.sh
 
   if command -v makepkg >/dev/null 2>&1 && [ "$(id -u)" != "0" ]; then
@@ -72,7 +72,7 @@ main() {
     log "Skipping makepkg .SRCINFO check (makepkg unavailable or running as root)"
   fi
 
-  TMP_ROOT="$(mktemp -d /tmp/ai-memory-native-root.XXXXXX)"
+  TMP_ROOT="$(mktemp -d /tmp/sessionmunch-native-root.XXXXXX)"
   cleanup() {
     if [ -n "${TMP_ROOT}" ]; then
       rm -rf "${TMP_ROOT}"
@@ -83,26 +83,26 @@ main() {
   log "Checking host-launch wrapper routing"
   local fake_docker fake_native wrapper_log
   fake_docker="${TMP_ROOT}/forbidden-docker"
-  fake_native="${TMP_ROOT}/fake-ai-memory"
+  fake_native="${TMP_ROOT}/fake-sessionmunch"
   wrapper_log="${TMP_ROOT}/wrapper.log"
   printf '%s\n' '#!/usr/bin/env bash' 'exit 97' >"${fake_docker}"
-  printf '%s\n' '#!/usr/bin/env bash' 'printf '\''%s\n'\'' "$*" >>"${AI_MEMORY_WRAPPER_TEST_LOG}"' >"${fake_native}"
+  printf '%s\n' '#!/usr/bin/env bash' 'printf '\''%s\n'\'' "$*" >>"${SESSIONMUNCH_WRAPPER_TEST_LOG}"' >"${fake_native}"
   chmod 0755 "${fake_docker}" "${fake_native}"
-  AI_MEMORY_DOCKER="${fake_docker}" AI_MEMORY_NATIVE_BIN="${fake_native}" \
-    AI_MEMORY_WRAPPER_TEST_LOG="${wrapper_log}" \
-    bin/ai-memory run codex --yolo
-  AI_MEMORY_DOCKER="${fake_docker}" AI_MEMORY_NATIVE_BIN="${fake_native}" \
-    AI_MEMORY_WRAPPER_TEST_LOG="${wrapper_log}" \
-    bin/ai-memory show --json --no-scan
-  AI_MEMORY_DOCKER="${fake_docker}" AI_MEMORY_NATIVE_BIN="${fake_native}" \
-    AI_MEMORY_WRAPPER_TEST_LOG="${wrapper_log}" \
-    bin/ai-memory continue --workspace work --yolo
-  AI_MEMORY_DOCKER="${fake_docker}" AI_MEMORY_NATIVE_BIN="${fake_native}" \
-    AI_MEMORY_WRAPPER_TEST_LOG="${wrapper_log}" \
-    bin/ai-memory workstreams --limit 5 --json
-  AI_MEMORY_DOCKER="${fake_docker}" AI_MEMORY_NATIVE_BIN="${fake_native}" \
-    AI_MEMORY_WRAPPER_TEST_LOG="${wrapper_log}" \
-    bin/ai-memory rename-workstream --from typo-nmae --to refactor-db
+  SESSIONMUNCH_DOCKER="${fake_docker}" SESSIONMUNCH_NATIVE_BIN="${fake_native}" \
+    SESSIONMUNCH_WRAPPER_TEST_LOG="${wrapper_log}" \
+    bin/sessionmunch run codex --yolo
+  SESSIONMUNCH_DOCKER="${fake_docker}" SESSIONMUNCH_NATIVE_BIN="${fake_native}" \
+    SESSIONMUNCH_WRAPPER_TEST_LOG="${wrapper_log}" \
+    bin/sessionmunch show --json --no-scan
+  SESSIONMUNCH_DOCKER="${fake_docker}" SESSIONMUNCH_NATIVE_BIN="${fake_native}" \
+    SESSIONMUNCH_WRAPPER_TEST_LOG="${wrapper_log}" \
+    bin/sessionmunch continue --workspace work --yolo
+  SESSIONMUNCH_DOCKER="${fake_docker}" SESSIONMUNCH_NATIVE_BIN="${fake_native}" \
+    SESSIONMUNCH_WRAPPER_TEST_LOG="${wrapper_log}" \
+    bin/sessionmunch workstreams --limit 5 --json
+  SESSIONMUNCH_DOCKER="${fake_docker}" SESSIONMUNCH_NATIVE_BIN="${fake_native}" \
+    SESSIONMUNCH_WRAPPER_TEST_LOG="${wrapper_log}" \
+    bin/sessionmunch rename-workstream --from typo-nmae --to refactor-db
   assert_contains "${wrapper_log}" "run codex --yolo"
   assert_contains "${wrapper_log}" "show --json --no-scan"
   assert_contains "${wrapper_log}" "continue --workspace work --yolo"
@@ -112,7 +112,7 @@ main() {
   log "Creating temporary alternate root"
   mkdir -p \
     "${TMP_ROOT}/etc" \
-    "${TMP_ROOT}/etc/ai-memory" \
+    "${TMP_ROOT}/etc/sessionmunch" \
     "${TMP_ROOT}/usr/bin" \
     "${TMP_ROOT}/usr/lib/systemd/system" \
     "${TMP_ROOT}/usr/lib/systemd/user" \
@@ -121,16 +121,16 @@ main() {
     "${TMP_ROOT}/var/lib"
   : >"${TMP_ROOT}/etc/passwd"
   : >"${TMP_ROOT}/etc/group"
-  : >"${TMP_ROOT}/usr/bin/ai-memory"
-  chmod 0755 "${TMP_ROOT}/usr/bin/ai-memory"
+  : >"${TMP_ROOT}/usr/bin/sessionmunch"
+  chmod 0755 "${TMP_ROOT}/usr/bin/sessionmunch"
 
-  cp crates/ai-memory-cli/templates/config.default.toml "${TMP_ROOT}/etc/ai-memory/config.toml"
-  cp packaging/env/ai-memory.env "${TMP_ROOT}/etc/ai-memory/env"
-  chmod 0640 "${TMP_ROOT}/etc/ai-memory/env"
-  cp packaging/systemd/ai-memory.service "${TMP_ROOT}/usr/lib/systemd/system/ai-memory.service"
-  cp packaging/systemd/ai-memory-user.service "${TMP_ROOT}/usr/lib/systemd/user/ai-memory.service"
-  cp packaging/sysusers/ai-memory.conf "${TMP_ROOT}/usr/lib/sysusers.d/ai-memory.conf"
-  cp packaging/tmpfiles/ai-memory.conf "${TMP_ROOT}/usr/lib/tmpfiles.d/ai-memory.conf"
+  cp crates/sessionmunch-cli/templates/config.default.toml "${TMP_ROOT}/etc/sessionmunch/config.toml"
+  cp packaging/env/sessionmunch.env "${TMP_ROOT}/etc/sessionmunch/env"
+  chmod 0640 "${TMP_ROOT}/etc/sessionmunch/env"
+  cp packaging/systemd/sessionmunch.service "${TMP_ROOT}/usr/lib/systemd/system/sessionmunch.service"
+  cp packaging/systemd/sessionmunch-user.service "${TMP_ROOT}/usr/lib/systemd/user/sessionmunch.service"
+  cp packaging/sysusers/sessionmunch.conf "${TMP_ROOT}/usr/lib/sysusers.d/sessionmunch.conf"
+  cp packaging/tmpfiles/sessionmunch.conf "${TMP_ROOT}/usr/lib/tmpfiles.d/sessionmunch.conf"
 
   for unit in \
     sysinit.target \
@@ -149,51 +149,51 @@ main() {
   done
 
   log "Checking sysusers in alternate root"
-  systemd-sysusers --root="${TMP_ROOT}" "${TMP_ROOT}/usr/lib/sysusers.d/ai-memory.conf" >/dev/null
-  assert_contains "${TMP_ROOT}/etc/passwd" "ai-memory service user:/var/lib/ai-memory:/usr/bin/nologin"
-  assert_contains "${TMP_ROOT}/etc/group" "ai-memory"
+  systemd-sysusers --root="${TMP_ROOT}" "${TMP_ROOT}/usr/lib/sysusers.d/sessionmunch.conf" >/dev/null
+  assert_contains "${TMP_ROOT}/etc/passwd" "sessionmunch service user:/var/lib/sessionmunch:/usr/bin/nologin"
+  assert_contains "${TMP_ROOT}/etc/group" "sessionmunch"
 
   log "Checking tmpfiles in alternate root"
   if systemd-tmpfiles --help 2>&1 | grep -q -- '--dry-run'; then
-    tmpfiles_output="$(systemd-tmpfiles --root="${TMP_ROOT}" --create --dry-run "${TMP_ROOT}/usr/lib/tmpfiles.d/ai-memory.conf" 2>&1)"
+    tmpfiles_output="$(systemd-tmpfiles --root="${TMP_ROOT}" --create --dry-run "${TMP_ROOT}/usr/lib/tmpfiles.d/sessionmunch.conf" 2>&1)"
     case "${tmpfiles_output}" in
-      *"/var/lib/ai-memory"*) ;;
-      *) fail "tmpfiles dry-run did not plan /var/lib/ai-memory: ${tmpfiles_output}" ;;
+      *"/var/lib/sessionmunch"*) ;;
+      *) fail "tmpfiles dry-run did not plan /var/lib/sessionmunch: ${tmpfiles_output}" ;;
     esac
   elif [ "$(id -u)" = "0" ]; then
-    systemd-tmpfiles --root="${TMP_ROOT}" --create "${TMP_ROOT}/usr/lib/tmpfiles.d/ai-memory.conf" >/dev/null
-    test -d "${TMP_ROOT}/var/lib/ai-memory" || fail "tmpfiles did not create /var/lib/ai-memory in alternate root"
-    test "$(stat -c '%a' "${TMP_ROOT}/var/lib/ai-memory")" = "750" || fail "tmpfiles created /var/lib/ai-memory with unexpected mode"
+    systemd-tmpfiles --root="${TMP_ROOT}" --create "${TMP_ROOT}/usr/lib/tmpfiles.d/sessionmunch.conf" >/dev/null
+    test -d "${TMP_ROOT}/var/lib/sessionmunch" || fail "tmpfiles did not create /var/lib/sessionmunch in alternate root"
+    test "$(stat -c '%a' "${TMP_ROOT}/var/lib/sessionmunch")" = "750" || fail "tmpfiles created /var/lib/sessionmunch with unexpected mode"
   else
-    tmpfiles_output="$(systemd-tmpfiles --root="${TMP_ROOT}" --cat-config "${TMP_ROOT}/usr/lib/tmpfiles.d/ai-memory.conf" 2>&1)"
+    tmpfiles_output="$(systemd-tmpfiles --root="${TMP_ROOT}" --cat-config "${TMP_ROOT}/usr/lib/tmpfiles.d/sessionmunch.conf" 2>&1)"
     case "${tmpfiles_output}" in
-      *"/var/lib/ai-memory"*) ;;
-      *) fail "tmpfiles config parse did not include /var/lib/ai-memory: ${tmpfiles_output}" ;;
+      *"/var/lib/sessionmunch"*) ;;
+      *) fail "tmpfiles config parse did not include /var/lib/sessionmunch: ${tmpfiles_output}" ;;
     esac
   fi
-  assert_contains packaging/tmpfiles/ai-memory.conf "d /var/lib/ai-memory 0750 ai-memory ai-memory -"
+  assert_contains packaging/tmpfiles/sessionmunch.conf "d /var/lib/sessionmunch 0750 sessionmunch sessionmunch -"
 
   log "Checking systemd units in alternate root"
-  systemd-analyze --root="${TMP_ROOT}" verify ai-memory.service
+  systemd-analyze --root="${TMP_ROOT}" verify sessionmunch.service
 
   # systemd-analyze cannot combine --user and --root on some distro versions.
   # Copy the user unit into the system search path under a temporary name to
   # still parse and validate the Service/Install directives with the same fake
-  # /usr/bin/ai-memory executable.
-  cp packaging/systemd/ai-memory-user.service \
-    "${TMP_ROOT}/usr/lib/systemd/system/ai-memory-user-parse-test.service"
-  systemd-analyze --root="${TMP_ROOT}" verify ai-memory-user-parse-test.service
+  # /usr/bin/sessionmunch executable.
+  cp packaging/systemd/sessionmunch-user.service \
+    "${TMP_ROOT}/usr/lib/systemd/system/sessionmunch-user-parse-test.service"
+  systemd-analyze --root="${TMP_ROOT}" verify sessionmunch-user-parse-test.service
 
   log "Checking expected native paths and modes"
-  assert_contains packaging/systemd/ai-memory.service "--data-dir /var/lib/ai-memory"
-  assert_contains packaging/systemd/ai-memory.service "--config /etc/ai-memory/config.toml"
-  assert_contains packaging/systemd/ai-memory.service "EnvironmentFile=-/etc/ai-memory/env"
-  assert_contains packaging/systemd/ai-memory.service "StateDirectory=ai-memory"
-  assert_contains packaging/systemd/ai-memory.service "ReadWritePaths=/var/lib/ai-memory"
-  assert_contains packaging/systemd/ai-memory-user.service "--data-dir %h/.local/share/ai-memory"
-  assert_contains packaging/systemd/ai-memory-user.service "--config %h/.config/ai-memory/config.toml"
-  assert_contains packaging/systemd/ai-memory-user.service "EnvironmentFile=-%h/.config/ai-memory/env"
-  test "$(stat -c '%a' "${TMP_ROOT}/etc/ai-memory/env")" = "640"
+  assert_contains packaging/systemd/sessionmunch.service "--data-dir /var/lib/sessionmunch"
+  assert_contains packaging/systemd/sessionmunch.service "--config /etc/sessionmunch/config.toml"
+  assert_contains packaging/systemd/sessionmunch.service "EnvironmentFile=-/etc/sessionmunch/env"
+  assert_contains packaging/systemd/sessionmunch.service "StateDirectory=sessionmunch"
+  assert_contains packaging/systemd/sessionmunch.service "ReadWritePaths=/var/lib/sessionmunch"
+  assert_contains packaging/systemd/sessionmunch-user.service "--data-dir %h/.local/share/sessionmunch"
+  assert_contains packaging/systemd/sessionmunch-user.service "--config %h/.config/sessionmunch/config.toml"
+  assert_contains packaging/systemd/sessionmunch-user.service "EnvironmentFile=-%h/.config/sessionmunch/env"
+  test "$(stat -c '%a' "${TMP_ROOT}/etc/sessionmunch/env")" = "640"
 
   log "Native packaging checks passed without touching host service paths"
 }

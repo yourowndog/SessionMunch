@@ -12,7 +12,7 @@ This page describes exactly what happens and how to go back.
 
 ## What happens on the first 2.0 start
 
-When `ai-memory serve` starts on a data directory created by 1.x, a
+When `sessionmunch serve` starts on a data directory created by 1.x, a
 one-shot wiki migration runs before the server accepts any traffic:
 
 1. **A full backup is taken first — or nothing happens at all.** The
@@ -20,10 +20,10 @@ one-shot wiki migration runs before the server accepts any traffic:
    compressed to a timestamped archive in your home directory:
 
    ```
-   ~/ai-memory-backup-okf-v0.2-<date>.tar.gz
+   ~/sessionmunch-backup-okf-v0.2-<date>.tar.gz
    ```
 
-   Set `AI_MEMORY_BACKUP_DIR=/somewhere/else` before starting if your
+   Set `SESSIONMUNCH_BACKUP_DIR=/somewhere/else` before starting if your
    home is small; the destination must be outside the data directory.
 The archive is re-opened and verified after writing. **If the backup
     cannot be written or verified, the migration aborts and the server
@@ -71,22 +71,22 @@ Inside a container the home directory is **ephemeral** — it lives in
 the container layer and is destroyed on the next `docker compose up
 -d` recreation, which would silently lose the safety archive. The
 migration detects containers (the official image's
-`AI_MEMORY_IN_CONTAINER`, or `/.dockerenv` / `/run/.containerenv`) and
+`SESSIONMUNCH_IN_CONTAINER`, or `/.dockerenv` / `/run/.containerenv`) and
 defaults the archive to the persistent data volume instead:
 
 ```
-/data/backups/ai-memory-backup-okf-v0.2-<date>.tar.gz
+/data/backups/sessionmunch-backup-okf-v0.2-<date>.tar.gz
 ```
 
 The archive survives redeploys with the volume, and the backups
 directory is excluded from the archive itself. To copy it off-host:
 
 ```bash
-docker cp ai-memory:/data/backups/ai-memory-backup-okf-v0.2-<date>.tar.gz .
+docker cp sessionmunch:/data/backups/sessionmunch-backup-okf-v0.2-<date>.tar.gz .
 # or read it straight from the volume's host path
 ```
 
-`AI_MEMORY_BACKUP_DIR` still wins when set (point it at another
+`SESSIONMUNCH_BACKUP_DIR` still wins when set (point it at another
 mounted volume if you prefer). Deleting the archive — from inside or
 outside the container — clears the homepage notice, same as on a
 workstation.
@@ -106,7 +106,7 @@ the archive file:
 Verify the migration if you like:
 
 ```bash
-ai-memory status                      # server healthy, page counts unchanged
+sessionmunch status                      # server healthy, page counts unchanged
 grep -L "^type:" <data_dir>/wiki/*/*/*/*.md   # no output = all pages typed
 ```
 
@@ -117,18 +117,18 @@ pre-migration state (the archive is taken before both the DB schema and
 the wiki are migrated, #633), so you can start the old 1.x binary again:
 
 ```bash
-# 1. stop the server (docker compose down / systemctl stop ai-memory)
+# 1. stop the server (docker compose down / systemctl stop sessionmunch)
 # 2. move the current data dir aside
 mv <data_dir> <data_dir>.post-migration
 # 3. unpack the archive as the new data dir
 mkdir <data_dir>
-tar -xzf ~/ai-memory-backup-okf-v0.2-<date>.tar.gz -C <data_dir>
+tar -xzf ~/sessionmunch-backup-okf-v0.2-<date>.tar.gz -C <data_dir>
 # 4. start the OLD (1.x) binary against it
 ```
 
 Surgical alternative (keeps post-migration work, reverts only the wiki
 files): the `pre-okf-migration checkpoint` commit in the wiki's git
-history, followed by `ai-memory reindex`.
+history, followed by `sessionmunch reindex`.
 
 ## Downgrade guard
 
@@ -149,10 +149,10 @@ copy to any OKF-aware tool, or export a validated tarball with a fresh
 index:
 
 ```bash
-ai-memory export-okf --project myproject -o myproject-bundle.tar.gz
+sessionmunch export-okf --project myproject -o myproject-bundle.tar.gz
 ```
 
 Importing a foreign bundle needs no command: unpack its concept files
-into a project's wiki directory and the watcher (or `ai-memory
+into a project's wiki directory and the watcher (or `sessionmunch
 reindex`) ingests them; anything missing from their frontmatter is
 filled at write time.

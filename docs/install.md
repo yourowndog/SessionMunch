@@ -12,16 +12,16 @@ path (docker + Claude Code). This page covers everything else:
   (Codex, Command Code, Devin CLI, OpenCode, OMP, Pi, Cursor, Claude Desktop, Gemini CLI, Antigravity CLI, Grok Build CLI, Zero, ZCode, Kimi Code, Kiro CLI, Pool, OpenClaw, VS Code Copilot, Zed)
 - [Installing hooks without docker](#installing-hooks-without-docker)
   (curl-based installer)
-- [Running ai-memory without docker](#running-ai-memory-without-docker)
+- [Running sessionmunch without docker](#running-sessionmunch-without-docker)
   (mise, building from source)
 - [Managed cross-harness workstreams](managed-workstreams.md)
-  (`ai-memory run`, transparent native resume, and argument forwarding)
+  (`sessionmunch run`, transparent native resume, and argument forwarding)
 - [LLM provider tiers + self-hosted Ollama](#llm-provider-tiers)
 - [Common subcommands](#common-subcommands)
 - [Managed routing snippets and Agent Skills](#managed-routing-snippets-and-agent-skills)
 - [Human password bootstrap and recovery](#human-password-bootstrap-and-recovery)
 - [Operating without auth](#operating-without-auth) (local-only)
-- [Keeping ai-memory up to date](#keeping-ai-memory-up-to-date)
+- [Keeping sessionmunch up to date](#keeping-sessionmunch-up-to-date)
 
 > **Shorthand.** Most snippets use `$TOKEN` and `homelab:49374`. If
 > you're following along verbatim:
@@ -34,9 +34,9 @@ path (docker + Claude Code). This page covers everything else:
 The Docker image is published for `linux/amd64` and `linux/arm64`; Apple
 Silicon Macs and ARM64 Linux hosts should not need `--platform linux/amd64`.
 
-> **Podman.** The `bin/ai-memory` wrapper automatically uses rootless Podman
+> **Podman.** The `bin/sessionmunch` wrapper automatically uses rootless Podman
 > when Docker is not installed. It also works through the `podman-docker`
-> `docker` shim; set `AI_MEMORY_DOCKER=podman` to force Podman when both engines
+> `docker` shim; set `SESSIONMUNCH_DOCKER=podman` to force Podman when both engines
 > are installed. The default image name is fully qualified for non-interactive
 > Podman short-name resolution. See
 > [SELinux-enforcing hosts](#selinux-enforcing-hosts) for how it detects the
@@ -46,51 +46,51 @@ Silicon Macs and ARM64 Linux hosts should not need `--platform linux/amd64`.
 
 ## Server on a different machine
 
-When the ai-memory server runs on a LAN box (homelab, headless server)
+When the sessionmunch server runs on a LAN box (homelab, headless server)
 and you use Claude Code / Codex / etc. on a laptop:
 
 ### Server side (the homelab host)
 
 ```bash
-docker run -d --name ai-memory \
+docker run -d --name sessionmunch \
     --restart unless-stopped \
     -p 0.0.0.0:49374:49374 \
-    -v ai-memory-data:/data \
-    -e AI_MEMORY_AUTH_TOKEN="$TOKEN" \
-    -e AI_MEMORY_ALLOWED_HOSTS="<server-ip>,localhost,127.0.0.1" \
-    -e AI_MEMORY_LLM_PROVIDER=anthropic \
+    -v sessionmunch-data:/data \
+    -e SESSIONMUNCH_AUTH_TOKEN="$TOKEN" \
+    -e SESSIONMUNCH_ALLOWED_HOSTS="<server-ip>,localhost,127.0.0.1" \
+    -e SESSIONMUNCH_LLM_PROVIDER=anthropic \
     -e ANTHROPIC_API_KEY=sk-ant-... \
     akitaonrails/ai-memory:latest
 ```
 
 See [Security](../README.md#security) in the README for why
-`AI_MEMORY_AUTH_TOKEN` and `AI_MEMORY_ALLOWED_HOSTS` are both required for
+`SESSIONMUNCH_AUTH_TOKEN` and `SESSIONMUNCH_ALLOWED_HOSTS` are both required for
 normal non-loopback binds. Bearer auth does not encrypt traffic: use the ready
 [Caddy](../docker/compose.tls.caddy.yml) or
 [Cloudflare Tunnel](../docker/compose.tls.cloudflared.yml) templates from the
 [HTTPS reverse-proxy guide](https-via-proxy.md) for LAN or remote access.
 When the proxy serves `/web` over HTTPS, also set
-`AI_MEMORY_AUTH__SECURE_COOKIE=true` in the server environment and close or
+`SESSIONMUNCH_AUTH__SECURE_COOKIE=true` in the server environment and close or
 redirect direct HTTP access to that hostname. Do not set it for direct HTTP:
 browsers then correctly withhold the session cookie.
 
 ### Client side (the laptop)
 
 ```bash
-export AI_MEMORY_SERVER_URL="http://<server-ip>:49374"
-export AI_MEMORY_AUTH_TOKEN="$TOKEN"
+export SESSIONMUNCH_SERVER_URL="http://<server-ip>:49374"
+export SESSIONMUNCH_AUTH_TOKEN="$TOKEN"
 
-ai-memory install-mcp   --client claude-code --apply
-ai-memory install-hooks --agent  claude-code --apply
+sessionmunch install-mcp   --client claude-code --apply
+sessionmunch install-hooks --agent  claude-code --apply
 ```
 
 `--session-aware` is an optional Claude Code MCP mode:
 
 ```bash
-ai-memory install-mcp --client claude-code --session-aware --apply
+sessionmunch install-mcp --client claude-code --session-aware --apply
 ```
 
-It replaces the static HTTP MCP entry with a local ai-memory stdio bridge that
+It replaces the static HTTP MCP entry with a local sessionmunch stdio bridge that
 still connects to the configured remote server and bearer token, while
 forwarding Claude's lifecycle session id. Pair it with
 `[auto_scope] mode = "per_session"` when the same operator runs concurrent
@@ -112,16 +112,16 @@ Docker wrapper forwards the variable for config roots under its existing
 The CLI commands (`bootstrap`, `status`, `search`, `lint`, `auto-improve`,
 `curator`, `pending-writes`, etc.) inherit the two env vars automatically. So do
 `install-mcp`, `install-hooks`, and
-`setup-agent`: with `AI_MEMORY_SERVER_URL` set, `install-mcp` derives the
+`setup-agent`: with `SESSIONMUNCH_SERVER_URL` set, `install-mcp` derives the
 `/mcp` endpoint and `install-hooks` uses the bare server origin.
 
-After upgrading ai-memory, refresh the managed routing package in existing
+After upgrading sessionmunch, refresh the managed routing package in existing
 projects so Claude Code/OpenCode/Codex/Gemini pick up new tool guidance and
-proactive retrieval rules. From an agent, ask "refresh the ai-memory routing in
-this project"; from the terminal, run `ai-memory install-instructions` (or pass
+proactive retrieval rules. From an agent, ask "refresh the sessionmunch routing in
+this project"; from the terminal, run `sessionmunch install-instructions` (or pass
 `--target AGENTS.md` for non-Claude prompt files). The update is idempotent:
-legacy long snippets between `<!-- ai-memory:start -->` /
-`<!-- ai-memory:end -->` are replaced in place with the slim snippet, and
+legacy long snippets between `<!-- sessionmunch:start -->` /
+`<!-- sessionmunch:end -->` are replaced in place with the slim snippet, and
 managed Agent Skills are installed or updated alongside it.
 
 If you install into `AGENTS.md` and the project is also used from Claude Code,
@@ -134,7 +134,7 @@ installed block is absent from context at session start. See
 
 ## Configuring the CLI URL and auth
 
-The `ai-memory` binary is a thin HTTP client. It never opens the wiki
+The `sessionmunch` binary is a thin HTTP client. It never opens the wiki
 or SQLite directly; state-touching commands go through the running
 server, which is the sole writer.
 
@@ -142,15 +142,15 @@ Configuration is two optional environment variables:
 
 | Variable | Default | When to set it |
 |---|---|---|
-| `AI_MEMORY_SERVER_URL` | `http://127.0.0.1:49374` | When the server runs somewhere other than the same machine, such as `http://192.168.0.90:49374`. |
-| `AI_MEMORY_AUTH_TOKEN` | unset | When the server has bearer auth enabled. |
+| `SESSIONMUNCH_SERVER_URL` | `http://127.0.0.1:49374` | When the server runs somewhere other than the same machine, such as `http://192.168.0.90:49374`. |
+| `SESSIONMUNCH_AUTH_TOKEN` | unset | When the server has bearer auth enabled. |
 
 For a single-laptop loopback server, set neither variable. For a
 remote or homelab server, put both in your shell rc or direnv file:
 
 ```bash
-export AI_MEMORY_SERVER_URL="http://192.168.0.90:49374"
-export AI_MEMORY_AUTH_TOKEN="<token>"
+export SESSIONMUNCH_SERVER_URL="http://192.168.0.90:49374"
+export SESSIONMUNCH_AUTH_TOKEN="<token>"
 ```
 
 Explicit `--server-url` and `--auth-token` flags on `install-mcp`,
@@ -159,7 +159,7 @@ useful when you are generating config for a client that talks to a
 different server than your default CLI target.
 
 If you run `install-mcp --apply` first and later run `install-hooks --apply`
-without env vars or flags, hooks reuse the existing ai-memory MCP entry for
+without env vars or flags, hooks reuse the existing sessionmunch MCP entry for
 that agent when possible. This keeps remote MCP config and lifecycle capture
 pointed at the same server instead of falling back to loopback.
 
@@ -181,15 +181,15 @@ git repo root instead — collapsing subdirectories and worktrees — bake the
 strategy into the hooks:
 
 ```bash
-ai-memory install-hooks --apply --agent claude-code --project-strategy repo-root
+sessionmunch install-hooks --apply --agent claude-code --project-strategy repo-root
 ```
 
 `--project-strategy` accepts `basename` (the new-install default; bakes nothing)
 or `repo-root`. Omitting it during a later `--apply` preserves the strategy
-already baked into that agent's ai-memory hooks, including during the wrapper's
+already baked into that agent's sessionmunch hooks, including during the wrapper's
 automatic post-upgrade refresh. Pass `basename` explicitly to remove an
 existing `repo-root` default. This works for every agent and delivery path. A
-per-repo `.ai-memory.toml` marker's own `project_strategy` / `project` still
+per-repo `.sessionmunch.toml` marker's own `project_strategy` / `project` still
 take precedence — see
 [the marker-file reference](marker-file.md#install-wide-default-no-marker).
 
@@ -197,38 +197,42 @@ take precedence — see
 
 ## Arch Linux native packages (AUR)
 
-Use the native packages when you want `/usr/bin/ai-memory` plus systemd units
+Use the native packages when you want `/usr/bin/sessionmunch` plus systemd units
 instead of the Docker wrapper. The package installs the binary and hook sources
 once; each user still stages their agent hook scripts into their own home dir
 with `install-hooks --apply`.
 
+Note that systemd supervision is completely optional and strictly provides boot
+startup, process supervision/restart, and journal logging. It is **not** a capture/record
+hook — recording and ingestion are triggered by client integrations, agent hooks, or direct API calls.
+
 ### Package choice
 
 ```bash
-yay -S ai-memory-bin    # prebuilt Linux x86_64/aarch64 binary, fastest install
-yay -S ai-memory        # builds from source, works on x86_64 and aarch64
+yay -S sessionmunch-bin    # prebuilt Linux x86_64/aarch64 binary, fastest install
+yay -S sessionmunch        # builds from source, works on x86_64 and aarch64
 ```
 
 Both packages install the same runtime layout:
 
 | Path | Purpose |
 |---|---|
-| `/usr/bin/ai-memory` | Native CLI/server binary. |
-| `/usr/share/ai-memory/hooks/` | Packaged hook source bundle used by `install-hooks`. |
-| `/usr/lib/systemd/system/ai-memory.service` | System-wide service unit. |
-| `/usr/lib/systemd/user/ai-memory.service` | Per-user service unit. |
-| `/usr/lib/sysusers.d/ai-memory.conf` | Creates the `ai-memory` system user. |
-| `/usr/lib/tmpfiles.d/ai-memory.conf` | Creates `/var/lib/ai-memory` for the system service. |
-| `/etc/ai-memory/config.toml` | System-service config file, tracked as a pacman backup file. |
-| `/etc/ai-memory/env` | System-service environment/secrets file, tracked as a pacman backup file. |
+| `/usr/bin/sessionmunch` | Native CLI/server binary. |
+| `/usr/share/sessionmunch/hooks/` | Packaged hook source bundle used by `install-hooks`. |
+| `/usr/lib/systemd/system/sessionmunch.service` | System-wide service unit. |
+| `/usr/lib/systemd/user/sessionmunch.service` | Per-user service unit. |
+| `/usr/lib/sysusers.d/sessionmunch.conf` | Creates the `sessionmunch` system user. |
+| `/usr/lib/tmpfiles.d/sessionmunch.conf` | Creates `/var/lib/sessionmunch` for the system service. |
+| `/etc/sessionmunch/config.toml` | System-service config file, tracked as a pacman backup file. |
+| `/etc/sessionmunch/env` | System-service environment/secrets file, tracked as a pacman backup file. |
 
 The binary itself does not guess between system and user mode. The unit file
 chooses explicitly:
 
 | Mode | Data dir | Config | Env/secrets | Requires sudo? |
 |---|---|---|---|---|
-| User service | `~/.local/share/ai-memory` | `~/.config/ai-memory/config.toml` | `~/.config/ai-memory/env` | No |
-| System service | `/var/lib/ai-memory` | `/etc/ai-memory/config.toml` | `/etc/ai-memory/env` | Yes |
+| User service | `~/.local/share/sessionmunch` | `~/.config/sessionmunch/config.toml` | `~/.config/sessionmunch/env` | No |
+| System service | `/var/lib/sessionmunch` | `/etc/sessionmunch/config.toml` | `/etc/sessionmunch/env` | Yes |
 
 Do not run both services on the same bind address. They can coexist on disk, but
 only one can listen on `127.0.0.1:49374` unless you change `bind` in one config.
@@ -239,34 +243,34 @@ Use this on a single-user workstation. It needs no sudo after package install an
 keeps all state in your home directory.
 
 ```bash
-mkdir -p ~/.config/ai-memory ~/.local/share/ai-memory
-ai-memory \
-  --data-dir ~/.local/share/ai-memory \
-  --config ~/.config/ai-memory/config.toml \
+mkdir -p ~/.config/sessionmunch ~/.local/share/sessionmunch
+sessionmunch \
+  --data-dir ~/.local/share/sessionmunch \
+  --config ~/.config/sessionmunch/config.toml \
   init
 ```
 
 Edit provider/auth settings if you want LLM consolidation or bearer auth:
 
 ```bash
-$EDITOR ~/.config/ai-memory/config.toml
-$EDITOR ~/.config/ai-memory/env
+$EDITOR ~/.config/sessionmunch/config.toml
+$EDITOR ~/.config/sessionmunch/env
 ```
 
 For a loopback-only local service, bearer auth is optional. If you want one:
 
 ```bash
-TOKEN=$(ai-memory generate-auth-token)
-printf 'AI_MEMORY_AUTH_TOKEN=%s\n' "$TOKEN" >> ~/.config/ai-memory/env
+TOKEN=$(sessionmunch generate-auth-token)
+printf 'SESSIONMUNCH_AUTH_TOKEN=%s\n' "$TOKEN" >> ~/.config/sessionmunch/env
 ```
 
 Start and inspect the service:
 
 ```bash
 systemctl --user daemon-reload
-systemctl --user enable --now ai-memory.service
-systemctl --user status ai-memory.service
-journalctl --user -u ai-memory.service -f
+systemctl --user enable --now sessionmunch.service
+systemctl --user status sessionmunch.service
+journalctl --user -u sessionmunch.service -f
 ```
 
 If the service should keep running after you log out:
@@ -291,26 +295,26 @@ Make sure the package-created user and state directory exist, then initialize
 the data layout as that service user:
 
 ```bash
-sudo systemd-sysusers /usr/lib/sysusers.d/ai-memory.conf
-sudo systemd-tmpfiles --create /usr/lib/tmpfiles.d/ai-memory.conf
-sudo -u ai-memory ai-memory \
-  --data-dir /var/lib/ai-memory \
-  --config /etc/ai-memory/config.toml \
+sudo systemd-sysusers /usr/lib/sysusers.d/sessionmunch.conf
+sudo systemd-tmpfiles --create /usr/lib/tmpfiles.d/sessionmunch.conf
+sudo -u sessionmunch sessionmunch \
+  --data-dir /var/lib/sessionmunch \
+  --config /etc/sessionmunch/config.toml \
   init
 ```
 
 Edit system config and secrets:
 
 ```bash
-sudoedit /etc/ai-memory/config.toml
-sudoedit /etc/ai-memory/env
+sudoedit /etc/sessionmunch/config.toml
+sudoedit /etc/sessionmunch/env
 ```
 
-The package installs `/etc/ai-memory/env` as root-readable only because it may
+The package installs `/etc/sessionmunch/env` as root-readable only because it may
 hold API keys. Keep that file out of backups or logs that other users can read.
 
 For LAN exposure, set a non-loopback bind and allowed hosts in
-`/etc/ai-memory/config.toml`, and set a bearer token in `/etc/ai-memory/env`:
+`/etc/sessionmunch/config.toml`, and set a bearer token in `/etc/sessionmunch/env`:
 
 ```toml
 bind = "0.0.0.0:49374"
@@ -318,35 +322,35 @@ allowed_hosts = ["homelab", "192.168.0.90", "localhost", "127.0.0.1"]
 ```
 
 ```bash
-TOKEN=$(ai-memory generate-auth-token)
-printf 'AI_MEMORY_AUTH_TOKEN=%s\n' "$TOKEN" | sudo tee -a /etc/ai-memory/env
+TOKEN=$(sessionmunch generate-auth-token)
+printf 'SESSIONMUNCH_AUTH_TOKEN=%s\n' "$TOKEN" | sudo tee -a /etc/sessionmunch/env
 ```
 
 Start and inspect the service:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now ai-memory.service
-sudo systemctl status ai-memory.service
-journalctl -u ai-memory.service -f
+sudo systemctl enable --now sessionmunch.service
+sudo systemctl status sessionmunch.service
+journalctl -u sessionmunch.service -f
 ```
 
 Verify from the host:
 
 ```bash
 curl -sI http://127.0.0.1:49374/handoff
-# 401 Unauthorized when AI_MEMORY_AUTH_TOKEN is set.
+# 401 Unauthorized when SESSIONMUNCH_AUTH_TOKEN is set.
 ```
 
 ### LLM provider login with native services
 
-> **You do not need a paid platform API key.** ai-memory's LLM features
+> **You do not need a paid platform API key.** sessionmunch's LLM features
 > (consolidation, lint, auto-improve) are opt-in, and when you enable them you
 > can authenticate with a **subscription you already pay for** instead of a
 > metered API key: a Claude Pro/Max plan via `anthropic-oauth`
 > (`claude setup-token`), a ChatGPT Plus/Pro/Codex plan via `openai-oauth`
-> (`ai-memory auth login openai-oauth`), or a GitHub Copilot plan via `copilot`
-> (`ai-memory auth login copilot`). See
+> (`sessionmunch auth login openai-oauth`), or a GitHub Copilot plan via `copilot`
+> (`sessionmunch auth login copilot`). See
 > [`docs/llm-providers.md`](llm-providers.md) for the full table. And you can
 > skip an LLM entirely: the default zero-LLM path still captures, searches
 > (FTS), and writes rule-based summaries with no provider at all —
@@ -357,12 +361,12 @@ API-key providers go in the relevant env file:
 
 ```bash
 # User service
-printf 'AI_MEMORY_LLM_PROVIDER=anthropic\nANTHROPIC_API_KEY=sk-ant-...\n' >> ~/.config/ai-memory/env
-systemctl --user restart ai-memory.service
+printf 'SESSIONMUNCH_LLM_PROVIDER=anthropic\nANTHROPIC_API_KEY=sk-ant-...\n' >> ~/.config/sessionmunch/env
+systemctl --user restart sessionmunch.service
 
 # System service
-sudoedit /etc/ai-memory/env
-sudo systemctl restart ai-memory.service
+sudoedit /etc/sessionmunch/env
+sudo systemctl restart sessionmunch.service
 ```
 
 OAuth-style providers write tokens into the selected data dir. Run the login
@@ -370,15 +374,15 @@ with the same `--data-dir` and `--config` pair as the service:
 
 ```bash
 # User service
-ai-memory \
-  --data-dir ~/.local/share/ai-memory \
-  --config ~/.config/ai-memory/config.toml \
+sessionmunch \
+  --data-dir ~/.local/share/sessionmunch \
+  --config ~/.config/sessionmunch/config.toml \
   auth login openai-oauth
 
 # System service
-sudo -u ai-memory ai-memory \
-  --data-dir /var/lib/ai-memory \
-  --config /etc/ai-memory/config.toml \
+sudo -u sessionmunch sessionmunch \
+  --data-dir /var/lib/sessionmunch \
+  --config /etc/sessionmunch/config.toml \
   auth login openai-oauth
 ```
 
@@ -387,21 +391,21 @@ native hook auth against an OIDC issuer, run `auth login oidc-device` in the
 developer's selected data dir instead:
 
 ```bash
-ai-memory auth login oidc-device \
+sessionmunch auth login oidc-device \
   --issuer "https://issuer.example.com/realms/team" \
-  --client-id "ai-memory-cli"
+  --client-id "sessionmunch-cli"
 ```
 
 The stored OIDC access token is also used by thin-client HTTP commands
 (`status`, `search`, `read-page`, `write-page`, `backup`, `embed`, and
-similar) when no static `AI_MEMORY_AUTH_TOKEN` / `[auth].bearer_token` is
+similar) when no static `SESSIONMUNCH_AUTH_TOKEN` / `[auth].bearer_token` is
 configured. Static bearer auth still has precedence. This is for external
-OIDC-aware gateways/bridges; native ai-memory server auth still uses static root
+OIDC-aware gateways/bridges; native sessionmunch server auth still uses static root
 bearer / DB-user tokens, and `/admin/*` remains root-only unless a gateway
-translates accepted OIDC auth into upstream auth that ai-memory accepts.
+translates accepted OIDC auth into upstream auth that sessionmunch accepts.
 
 OIDC/Keycloak `sid` claims describe the login provider's session, not the
-coding-agent session ai-memory uses for `[auto_scope]` isolation. Gateways may
+coding-agent session sessionmunch uses for `[auto_scope]` isolation. Gateways may
 propagate the authenticated user/client/agent headers, but
 `X-Memory-Actor-Session-Id` should only contain a real lifecycle-hook session id
 from a session-aware bridge.
@@ -409,8 +413,8 @@ from a session-aware bridge.
 Restart the service after changing provider settings:
 
 ```bash
-systemctl --user restart ai-memory.service      # user mode
-sudo systemctl restart ai-memory.service        # system mode
+systemctl --user restart sessionmunch.service      # user mode
+sudo systemctl restart sessionmunch.service        # system mode
 ```
 
 ### Wire agent CLIs after native install
@@ -418,28 +422,28 @@ sudo systemctl restart ai-memory.service        # system mode
 For a local loopback server with no bearer token:
 
 ```bash
-ai-memory install-mcp   --client claude-code --apply
-ai-memory install-hooks --agent  claude-code --apply
+sessionmunch install-mcp   --client claude-code --apply
+sessionmunch install-hooks --agent  claude-code --apply
 ```
 
 For concurrent Claude Code sessions, set `[auto_scope] mode = "per_session"` in
 the server config and add `--session-aware` to the `install-mcp` command. This
 works for local and LAN servers; the generated stdio bridge keeps using
-`AI_MEMORY_SERVER_URL` / `--server-url` and `AI_MEMORY_AUTH_TOKEN`.
+`SESSIONMUNCH_SERVER_URL` / `--server-url` and `SESSIONMUNCH_AUTH_TOKEN`.
 
 For a bearer-protected local or LAN server, export the endpoint first. The MCP
 URL includes `/mcp`; the hook URL is the bare origin.
 
 ```bash
-export AI_MEMORY_SERVER_URL="http://127.0.0.1:49374"
-export AI_MEMORY_AUTH_TOKEN="$TOKEN"
+export SESSIONMUNCH_SERVER_URL="http://127.0.0.1:49374"
+export SESSIONMUNCH_AUTH_TOKEN="$TOKEN"
 
-ai-memory install-mcp   --client claude-code --apply
-ai-memory install-hooks --agent  claude-code --apply
+sessionmunch install-mcp   --client claude-code --apply
+sessionmunch install-hooks --agent  claude-code --apply
 ```
 
-`install-hooks` finds packaged hook sources under `/usr/share/ai-memory/hooks`,
-then stages runnable copies under `~/.local/share/ai-memory/hooks/<agent>/` so
+`install-hooks` finds packaged hook sources under `/usr/share/sessionmunch/hooks`,
+then stages runnable copies under `~/.local/share/sessionmunch/hooks/<agent>/` so
 the agent can execute files owned by your user. Re-run `install-hooks --apply`
 after package upgrades to refresh those staged copies.
 
@@ -463,7 +467,7 @@ a script fallback.
 
 ### Capture-policy capability and refresh
 
-`[capture] ignore_paths` is enforced only by native `ai-memory hook` commands
+`[capture] ignore_paths` is enforced only by native `sessionmunch hook` commands
 and generated OpenCode/OMP/Pi/OpenClaw integrations. Local installers select
 native commands where supported; legacy `.sh`/`.ps1` hooks and remote-only or
 Docker script bundles do not enforce it. Re-run `install-hooks --agent <agent>
@@ -473,7 +477,7 @@ capability output reflects the selected integration. See the canonical
 
 Lifecycle observation bodies are bounded separately from the 10 MiB HTTP
 request limit. User prompts and post-compaction summaries retain up to 16 KiB;
-notifications and tool excerpts retain up to 2 KB. Native `ai-memory hook`
+notifications and tool excerpts retain up to 2 KB. Native `sessionmunch hook`
 commands truncate those fields UTF-8-safely before they enter the local spool
 or wire. The server repeats the event-specific caps for every integration,
 including script and generated clients, then applies a 16 KiB backstop after
@@ -486,10 +490,10 @@ leave the rest of Claude Code's lifecycle capture enabled while preventing
 `UserPromptSubmit` text from entering the local spool or wire:
 
 ```bash
-ai-memory install-hooks --agent claude-code --no-capture-prompts --apply
+sessionmunch install-hooks --agent claude-code --no-capture-prompts --apply
 ```
 
-The installer removes only ai-memory's prompt hook and preserves third-party
+The installer removes only sessionmunch's prompt hook and preserves third-party
 hooks registered under the same event. A later bare `install-hooks --apply`
 (including an upgrade refresh) inherits the disabled state. Re-enable prompt
 capture explicitly with `--capture-prompts`. These options are Claude Code-only:
@@ -500,22 +504,22 @@ stream; tool and session-boundary capture continues unchanged.
 
 **Capture only repositories that opt in.** The controls above narrow *what* is
 captured; this one narrows *where*. By default a repository with no
-`.ai-memory.toml` marker is still captured, so a machine that works across many
+`.sessionmunch.toml` marker is still captured, so a machine that works across many
 checkouts captures every new one automatically — forgetting a marker means
 capturing more, not less. Allowlist mode inverts that:
 
 ```bash
-ai-memory install-hooks --apply --capture-mode allowlist
+sessionmunch install-hooks --apply --capture-mode allowlist
 ```
 
 A repository without a marker then emits **no lifecycle event at all** — not a
 trimmed one. The event is dropped in the hook process before it can reach the
 local spool or the wire, so nothing is written to disk for a repository that
-never opted in. Opting a repository in is just placing a `.ai-memory.toml`
+never opted in. Opting a repository in is just placing a `.sessionmunch.toml`
 marker in it, which is the same file that already configures routing and
 `ignore_paths`.
 
-**It is enforced by native `ai-memory hook` commands only** — the same
+**It is enforced by native `sessionmunch hook` commands only** — the same
 boundary that already applies to `[capture] ignore_paths`, and for the same
 reason: the gate runs inside the hook binary, immediately before it spools.
 
@@ -523,7 +527,7 @@ That is what a normal `install-hooks --apply` writes on Linux, macOS and
 Windows, so the usual install is covered. It is the *script* installs that are
 not: the bundled shell/PowerShell hooks POST to the server directly and never
 execute the binary, so nothing reads the mode. In practice that means the
-legacy `posix`/`windows` platform override (`AI_MEMORY_HOOK_PLATFORM`), the
+legacy `posix`/`windows` platform override (`SESSIONMUNCH_HOOK_PLATFORM`), the
 Docker host wrapper, and `setup-agent` snippets, which emit script commands by
 design. `install-hooks --apply` prints the mode and warns when the install it
 is writing cannot enforce it.
@@ -531,7 +535,7 @@ is writing cannot enforce it.
 Within that boundary the mode is not per-agent: it is stored once in the data
 directory and every native hook command reads it, whichever agent invoked it.
 That also means a later bare
-`install-hooks --apply` — including the auto-refresh inside `ai-memory upgrade`
+`install-hooks --apply` — including the auto-refresh inside `sessionmunch upgrade`
 — leaves it alone by construction rather than by re-detecting it. Every
 `--apply` prints the mode in force. Return to the default with
 `--capture-mode denylist`.
@@ -539,8 +543,8 @@ That also means a later bare
 Verify it on any repository without changing anything:
 
 ```bash
-printf '{"cwd":"%s"}' "$PWD" | ai-memory hook --event user-prompt-submit \
-    --agent claude-code --server-url "$AI_MEMORY_SERVER_URL" --check-capture
+printf '{"cwd":"%s"}' "$PWD" | sessionmunch hook --event user-prompt-submit \
+    --agent claude-code --server-url "$SESSIONMUNCH_SERVER_URL" --check-capture
 ```
 
 `--check-capture` inspects policy without spooling, draining, or contacting the
@@ -562,11 +566,11 @@ opt-in** — enable the server first, then the client:
 
 1. **Server:** set `capture_assistant = true` in the live
    `<data_dir>/config.toml` (or the service's configured TOML file), or set
-   `AI_MEMORY_CAPTURE_ASSISTANT=true`, then restart `ai-memory serve`.
+   `SESSIONMUNCH_CAPTURE_ASSISTANT=true`, then restart `sessionmunch serve`.
 2. **Client:** re-install the Claude Code hooks with the flag:
 
    ```bash
-   ai-memory install-hooks --agent claude-code --capture-assistant --apply
+   sessionmunch install-hooks --agent claude-code --capture-assistant --apply
    ```
 
 The client sanitizes (built-in patterns) and truncates the excerpt before it
@@ -583,17 +587,17 @@ is configured) before enabling it.
 Upgrading the binary is sufficient for native Claude Code installs, and pending
 spooled events drain with the raw field stripped as well. Installs that run the
 `.sh`/`.ps1` script fallback (the Docker script bundle or an explicit
-`AI_MEMORY_HOOK_PLATFORM=posix`) cannot sanitize the assistant text, so a `Stop`
+`SESSIONMUNCH_HOOK_PLATFORM=posix`) cannot sanitize the assistant text, so a `Stop`
 payload still carrying the raw field is dropped whole by the script rather than
 POSTed verbatim. The Docker wrapper deliberately keeps script commands because a
 binary path inside its helper container is not valid on the host; running
 `install-hooks` through that wrapper refreshes the scripts but does not convert
-them. To capture assistant text safely, install a native ai-memory client on the
+them. To capture assistant text safely, install a native sessionmunch client on the
 agent host, then use that native executable to run
 `install-hooks --agent claude-code --apply`. Even if the script fallback is
 retained, the server still strips any raw field on receipt before persistence.
 
-Native `ai-memory hook --event ...` commands spool events locally. The POSIX
+Native `sessionmunch hook --event ...` commands spool events locally. The POSIX
 shell bundle spools too, but only on failure: it POSTs first and writes the
 event to the same `<data_dir>/hook-spool/` contract when the server is
 unreachable or answers 5xx, then flushes the backlog behind the next delivery
@@ -621,11 +625,11 @@ agent's environment; no `install-hooks` rerun is needed:
 
 | Env var | Built-in default | Max override | What it caps |
 |---|---:|---:|---|
-| `AI_MEMORY_HOOK_DRAIN_TIMEOUT_MINUTES` | 3 seconds | 60 minutes | each event POST during a drain |
-| `AI_MEMORY_HOOK_HANDOFF_TIMEOUT_MINUTES` | 3 seconds | 60 minutes | the synchronous `session-start` handoff GET |
-| `AI_MEMORY_HOOK_START_BUDGET_MINUTES` | 3 seconds | 60 minutes | total time `session-start` may spend waiting for the drain lock and cleanup draining |
-| `AI_MEMORY_HOOK_BACKGROUND_DRAIN_BUDGET_MINUTES` | 5 minutes | 60 minutes | total time the detached `hook-drain` helper may spend after a background-drain boundary |
-| `AI_MEMORY_HOOK_INCREMENTAL_THRESHOLD` | 32 events | positive integer | spool backlog size that triggers a 250 ms `post-tool-use` catch-up drain |
+| `SESSIONMUNCH_HOOK_DRAIN_TIMEOUT_MINUTES` | 3 seconds | 60 minutes | each event POST during a drain |
+| `SESSIONMUNCH_HOOK_HANDOFF_TIMEOUT_MINUTES` | 3 seconds | 60 minutes | the synchronous `session-start` handoff GET |
+| `SESSIONMUNCH_HOOK_START_BUDGET_MINUTES` | 3 seconds | 60 minutes | total time `session-start` may spend waiting for the drain lock and cleanup draining |
+| `SESSIONMUNCH_HOOK_BACKGROUND_DRAIN_BUDGET_MINUTES` | 5 minutes | 60 minutes | total time the detached `hook-drain` helper may spend after a background-drain boundary |
+| `SESSIONMUNCH_HOOK_INCREMENTAL_THRESHOLD` | 32 events | positive integer | spool backlog size that triggers a 250 ms `post-tool-use` catch-up drain |
 
 Timing values must be positive whole minutes. Missing, empty, non-numeric, or
 zero values fall back to the built-in defaults; values above 60 are clamped. The
@@ -633,9 +637,9 @@ incremental threshold is a positive event count; invalid values fall back to 32.
 
 Server-side hook ingest also has an optional per-source limiter for shared or
 remote installs that need protection from one runaway agent session. Set
-`AI_MEMORY_HOOK_RATE_PER_SEC` on the server to the token refill rate per
+`SESSIONMUNCH_HOOK_RATE_PER_SEC` on the server to the token refill rate per
 actor/session source; `0` or unset disables the limiter. Set
-`AI_MEMORY_HOOK_RATE_BURST` to override the burst size (defaults to the refill
+`SESSIONMUNCH_HOOK_RATE_BURST` to override the burst size (defaults to the refill
 rate, minimum one token when enabled). The limiter is bounded in both key count
 and key bytes, and `/hook/batch` drains can skip over-budget sources while still
 accepting later unrelated sources.
@@ -644,36 +648,36 @@ accepting later unrelated sources.
 
 ```bash
 # User service
-systemctl --user restart ai-memory.service
-systemctl --user stop ai-memory.service
-journalctl --user -u ai-memory.service -n 100
+systemctl --user restart sessionmunch.service
+systemctl --user stop sessionmunch.service
+journalctl --user -u sessionmunch.service -n 100
 
 # System service
-sudo systemctl restart ai-memory.service
-sudo systemctl stop ai-memory.service
-journalctl -u ai-memory.service -n 100
+sudo systemctl restart sessionmunch.service
+sudo systemctl stop sessionmunch.service
+journalctl -u sessionmunch.service -n 100
 ```
 
 Backups still use the same CLI, just point it at the service data dir:
 
 ```bash
 # User service
-ai-memory --data-dir ~/.local/share/ai-memory backup --to ~/ai-memory-backup.tar.gz
+sessionmunch --data-dir ~/.local/share/sessionmunch backup --to ~/sessionmunch-backup.tar.gz
 
 # System service
-sudo -u ai-memory ai-memory --data-dir /var/lib/ai-memory backup --to /var/lib/ai-memory/backup.tar.gz
+sudo -u sessionmunch sessionmunch --data-dir /var/lib/sessionmunch backup --to /var/lib/sessionmunch/backup.tar.gz
 ```
 
 Package removal does not delete data. Stop the service and remove state only
 when you intentionally want to erase memory:
 
 ```bash
-systemctl --user disable --now ai-memory.service
-sudo systemctl disable --now ai-memory.service
+systemctl --user disable --now sessionmunch.service
+sudo systemctl disable --now sessionmunch.service
 
 # Optional destructive cleanup:
-rm -rf ~/.local/share/ai-memory ~/.config/ai-memory
-sudo rm -rf /var/lib/ai-memory /etc/ai-memory
+rm -rf ~/.local/share/sessionmunch ~/.config/sessionmunch
+sudo rm -rf /var/lib/sessionmunch /etc/sessionmunch
 ```
 
 ### Maintainer integration test
@@ -696,7 +700,7 @@ It verifies the AUR metadata shape, builds the current working tree, installs
 the native layout into the disposable Arch container, starts the system service
 with `systemctl`, starts the user-profile command under transient systemd
 supervision, and checks that packaged hook sources under
-`/usr/share/ai-memory/hooks` can be staged by `install-hooks`.
+`/usr/share/sessionmunch/hooks` can be staged by `install-hooks`.
 
 The destructive part of that script refuses to run unless it detects a
 container/distrobox environment.
@@ -704,9 +708,9 @@ container/distrobox environment.
 Useful knobs:
 
 ```bash
-AI_MEMORY_NATIVE_TEST_BOX=ai-memory-native-test scripts/test-native-arch-systemd-distrobox.sh
-AI_MEMORY_NATIVE_TEST_KEEP_BOX=1 scripts/test-native-arch-systemd-distrobox.sh
-AI_MEMORY_NATIVE_TEST_IMAGE=quay.io/toolbx/arch-toolbox:latest scripts/test-native-arch-systemd-distrobox.sh
+SESSIONMUNCH_NATIVE_TEST_BOX=sessionmunch-native-test scripts/test-native-arch-systemd-distrobox.sh
+SESSIONMUNCH_NATIVE_TEST_KEEP_BOX=1 scripts/test-native-arch-systemd-distrobox.sh
+SESSIONMUNCH_NATIVE_TEST_IMAGE=quay.io/toolbx/arch-toolbox:latest scripts/test-native-arch-systemd-distrobox.sh
 ```
 
 ---
@@ -733,7 +737,7 @@ including Pi and Zero, have lifecycle capture paths through `install-hooks`.
 
 > **Hook install pattern.** Local supported profiles default to host-native
 > commands. Claude Code may use its supported Windows exec form (`command` =
-> real `ai-memory.exe`, `args` = argv tokens for `hook --event ...`); other
+> real `sessionmunch.exe`, `args` = argv tokens for `hook --event ...`); other
 > agents use native single command strings according to their hook schema.
 > PowerShell/Git Bash script bundles are compatibility fallbacks and do not
 > enforce capture-policy v1. Remote-only/Docker script installs still use the
@@ -753,16 +757,16 @@ docker run --rm akitaonrails/ai-memory:latest \
     --auth-token "$TOKEN"
 
 # Hooks — extract scripts + render config:
-docker cp ai-memory:/usr/local/share/ai-memory/hooks ~/.ai-memory/
+docker cp sessionmunch:/usr/local/share/sessionmunch/hooks ~/.sessionmunch/
 docker run --rm akitaonrails/ai-memory:latest \
     install-hooks --agent codex \
-        --hooks-dir ~/.ai-memory/hooks \
+        --hooks-dir ~/.sessionmunch/hooks \
         --server-url "http://homelab:49374" \
         --auth-token "$TOKEN"
 ```
 
 Native Codex tool hooks use top-level `tool_name`, `tool_input`, `tool_response`,
-and `tool_use_id` fields (verified against CLI 0.154.0). ai-memory records the
+and `tool_use_id` fields (verified against CLI 0.154.0). sessionmunch records the
 tool family and call ID on `PreToolUse` and `PostToolUse`; recognized tools such
 as `Bash` and `apply_patch` also retain a sanitized response excerpt on
 `PostToolUse`, capped at 2 KB including metadata. Structured JSON responses are
@@ -774,7 +778,7 @@ metadata. `PostToolUse` alone does not prove success, so Codex outcomes remain
 Capture exclusions still run before native spooling. Codex's `apply_patch`
 passes patch text in `tool_input.command`, which does not provide direct file
 paths to the capture policy. With active `ignore_paths`, those events retain
-only metadata; ai-memory does not parse patch or shell text to infer paths.
+only metadata; sessionmunch does not parse patch or shell text to infer paths.
 Tool events are delivered at the normal 32-event catch-up threshold or a
 lifecycle drain boundary, so a small active turn may still have queued events.
 
@@ -785,16 +789,16 @@ the final summary, handoff, and auto-improvement eligibility. See the
 Codex ends a session. For older clients or a missed session-end delivery, run:
 
 ```bash
-ai-memory finalize-session
+sessionmunch finalize-session
 # add --all to close every matching open Codex session in this workspace/project
 # or target one exact concurrent session (mutually exclusive with --all)
-ai-memory finalize-session --session-id <uuid>
+sessionmunch finalize-session --session-id <uuid>
 ```
 
 Antigravity CLI also lacks a true session-end event. Its `Stop` hook marks the
-end of one execution loop, so ai-memory intentionally records it without
+end of one execution loop, so sessionmunch intentionally records it without
 closing the conversation. Its `PreInvocation` hook likewise runs before every
-model call; ai-memory treats only the documented `invocationNum = 0` call as
+model call; sessionmunch treats only the documented `invocationNum = 0` call as
 SessionStart. Later invocations return an empty hook result without capturing
 another start or fetching the single-use handoff, so a handoff created while
 the current conversation winds down remains available to the next session.
@@ -802,7 +806,7 @@ After the final turn, finalize the latest matching Antigravity session
 explicitly:
 
 ```bash
-ai-memory finalize-session --agent antigravity-cli
+sessionmunch finalize-session --agent antigravity-cli
 # add --all only to close every matching open Antigravity session in this scope
 # or add --session-id <uuid> to close one exact concurrent session
 ```
@@ -811,32 +815,32 @@ ai-memory finalize-session --agent antigravity-cli
 
 Devin uses `~/.devin/config.json` for MCP servers and `~/.devin/hooks.v1.json`
 for lifecycle hooks by default. If you prefer one combined Devin config file,
-pass `--config-file ~/.devin/config.json` to `install-hooks`; ai-memory then
+pass `--config-file ~/.devin/config.json` to `install-hooks`; sessionmunch then
 merges the hook entries under that file's `hooks` key.
 
 ```bash
-ai-memory install-mcp --client devin --apply \
+sessionmunch install-mcp --client devin --apply \
     --server-url "http://homelab:49374/mcp" \
     --auth-token "$TOKEN"
 
-ai-memory install-hooks --agent devin --apply \
+sessionmunch install-hooks --agent devin --apply \
     --server-url "http://homelab:49374" \
     --auth-token "$TOKEN"
 
-ai-memory install-skills --agent devin
+sessionmunch install-skills --agent devin
 ```
 
 Devin's hook vocabulary is close to Claude Code's, with two important
 differences:
 
 - Devin emits `PostCompaction` after compaction and includes a `summary` field;
-  ai-memory records it as `post-compaction`.
-- Devin does not expose subagent start/stop hooks, so ai-memory cannot capture
+  sessionmunch records it as `post-compaction`.
+- Devin does not expose subagent start/stop hooks, so sessionmunch cannot capture
   nested subagent boundaries for Devin.
 
 The `SessionStart` hook injects pending handoffs through Devin's
 `hookSpecificOutput.additionalContext`. Real Devin `SessionStart` and
-`PostToolUse` payloads may omit `session_id` and `cwd`; ai-memory now infers cwd
+`PostToolUse` payloads may omit `session_id` and `cwd`; sessionmunch now infers cwd
 from `DEVIN_PROJECT_DIR` or the hook process working directory when the payload
 omits it, and mints/reuses a per-host session id from hook state when necessary,
 so those events are still captured. A payload-provided value always wins.
@@ -848,15 +852,15 @@ Kimi Code keeps MCP servers in `~/.kimi-code/mcp.json` and lifecycle hooks in
 The CLI also accepts `--agent kimi` as an alias. `install-mcp` writes the
 server URL with a `?flavor=moonshot` query because the Moonshot API rejects
 root-level `anyOf`/`oneOf`/`allOf` in tool parameter schemas ("moonshot
-flavored json schema") — the ai-memory server answers flavored requests with
+flavored json schema") — the sessionmunch server answers flavored requests with
 flat schemas, and all other clients keep the upstream shape.
 
 ```bash
-ai-memory install-mcp --client kimi-code --apply \
+sessionmunch install-mcp --client kimi-code --apply \
     --server-url "http://homelab:49374/mcp" \
     --auth-token "$TOKEN"
 
-ai-memory install-hooks --agent kimi-code --apply \
+sessionmunch install-hooks --agent kimi-code --apply \
     --server-url "http://homelab:49374" \
     --auth-token "$TOKEN"
 ```
@@ -867,18 +871,18 @@ provider/model settings the same file holds. Entries cover 10 events —
 `PostToolUseFailure` (Kimi Code reports tool failures separately from
 successful calls; it reuses the post-tool-use handler), `Stop`,
 `SubagentStart`, `SubagentStop`, and `PreCompact` — and default to
-native `ai-memory hook --event … --agent kimi-code` commands on local installs
+native `sessionmunch hook --event … --agent kimi-code` commands on local installs
 (local spool plus batched delivery, capture-policy v1 enforced); the staged
-script bundle under `~/.local/share/ai-memory/hooks/kimi-code/` is the
+script bundle under `~/.local/share/sessionmunch/hooks/kimi-code/` is the
 compatibility fallback (POSTs to `/hook`, spooling a failed delivery for a
 later drain, without capture-policy v1 enforcement). A pending handoff
 is injected at `UserPromptSubmit` through the hook's stdout, which Kimi Code
 appends to the model context as a user message before the turn; Kimi Code
 fires `SessionStart` but discards that hook's stdout, so hooks installed by
 an older release consumed handoffs without delivering them. Existing native
-hook commands invoke the current `ai-memory` binary and pick up the corrected
+hook commands invoke the current `sessionmunch` binary and pick up the corrected
 delivery behavior on upgrade. Re-run
-`ai-memory install-hooks --agent kimi-code --apply` only for a
+`sessionmunch install-hooks --agent kimi-code --apply` only for a
 script-fallback installation so its staged scripts are refreshed.
 
 Kimi Code hook entries accept only `event`, `matcher`, `command`, and
@@ -891,11 +895,11 @@ Command Code keeps user-scope MCP and hook configuration in separate JSON
 files under `~/.commandcode/`. Install both integrations with:
 
 ```bash
-ai-memory install-mcp --client command-code --apply \
+sessionmunch install-mcp --client command-code --apply \
     --server-url "http://homelab:49374/mcp" \
     --auth-token "$TOKEN"
 
-ai-memory install-hooks --agent command-code --apply \
+sessionmunch install-hooks --agent command-code --apply \
     --server-url "http://homelab:49374" \
     --auth-token "$TOKEN"
 ```
@@ -908,7 +912,7 @@ other settings and hook handlers. The hook definitions deliberately omit
 `matcher`: Command Code documents omission as "all tools", while any matcher
 on `SessionStart` or `Stop` prevents that lifecycle hook from firing.
 
-Local installs use the native `ai-memory hook` command, so Command Code's
+Local installs use the native `sessionmunch hook` command, so Command Code's
 native `session_id` and `cwd` are attributed directly;
 recognized `shell_command`, `read_file`, `write_file`, and `edit_file`
 payloads pass through the same bounded capture-exclusion policy as other
@@ -920,18 +924,18 @@ open session after the last turn when you need immediate consolidation and a
 handoff:
 
 ```bash
-ai-memory finalize-session --agent command-code
-ai-memory finalize-session --agent command-code --session-id <uuid>
+sessionmunch finalize-session --agent command-code
+sessionmunch finalize-session --agent command-code --session-id <uuid>
 ```
 
-ai-memory does not install Command Code Mods. Mods run arbitrary unsandboxed
+sessionmunch does not install Command Code Mods. Mods run arbitrary unsandboxed
 code and are not needed for the stable hook or managed-session paths.
 
 Managed sessions are opt-in:
 
 ```bash
-ai-memory run command-code
-ai-memory run command-code --yolo --model <model-id>
+sessionmunch run command-code
+sessionmunch run command-code --yolo --model <model-id>
 ```
 
 The aliases `commandcode`, `cmdc`, and `cmd` select the same adapter. The
@@ -947,14 +951,14 @@ future transcript version fails closed until its schema is audited. Direct
 ### Kiro CLI
 
 Kiro CLI has one MCP surface and two incompatible lifecycle-hook formats.
-ai-memory supports both through explicit installer targets: `kiro-cli` remains
+sessionmunch supports both through explicit installer targets: `kiro-cli` remains
 the v2 target, while `kiro-cli-v3` selects the standalone v3 registration. The
 global MCP file is `$KIRO_HOME/settings/mcp.json`, defaulting to
 `~/.kiro/settings/mcp.json`; pass `--config-file .kiro/settings/mcp.json` for a
 project-scoped entry.
 
 ```bash
-ai-memory install-mcp --client kiro-cli --apply \
+sessionmunch install-mcp --client kiro-cli --apply \
     --server-url "https://memory.example/mcp" \
     --auth-token "$TOKEN"
 ```
@@ -972,15 +976,15 @@ entry above.
 
 ```bash
 # Default v2 engine: merge hooks into every existing global agent config.
-ai-memory install-hooks --agent kiro-cli --apply
+sessionmunch install-hooks --agent kiro-cli --apply
 
 # A project-local v2 agent overrides a same-named global agent. Update the
 # selected local config explicitly instead of assuming the global copy runs.
-ai-memory install-hooks --agent kiro-cli --apply \
+sessionmunch install-hooks --agent kiro-cli --apply \
     --config-file .kiro/agents/<agent-name>.json
 ```
 
-The v2 engine stores camelCase hooks inside agent JSON files. ai-memory updates
+The v2 engine stores camelCase hooks inside agent JSON files. sessionmunch updates
 existing `$KIRO_HOME/agents/*.json` files only; it will not fabricate an agent
 that Kiro never selects. Create and select an agent first when that directory
 is empty. Kiro gives [project-local agents precedence over global agents](https://kiro.dev/docs/cli/custom-agents/configuration-reference/),
@@ -990,7 +994,7 @@ unrelated agent fields, third-party hooks, and each agent's existing
 `--project-strategy` remain intact.
 
 The install registers spawn, user-prompt, pre-tool, post-tool, and stop capture,
-remains fail-open when ai-memory is unavailable, and delivers a pending handoff
+remains fail-open when sessionmunch is unavailable, and delivers a pending handoff
 through successful `agentSpawn` stdout. Verified v2 tool payloads enforce
 `[capture] ignore_paths`; an unrecognized payload shape is stored as bounded
 metadata rather than exposing file content.
@@ -1003,18 +1007,18 @@ standalone registration was acceptance-tested with an interactive Kiro CLI
 
 ```bash
 # Global v3 registration under $KIRO_HOME/hooks (default ~/.kiro/hooks).
-ai-memory install-hooks --agent kiro-cli-v3 --apply
+sessionmunch install-hooks --agent kiro-cli-v3 --apply
 
 # Project-local v3 registration.
-ai-memory install-hooks --agent kiro-cli-v3 --apply \
-    --config-file .kiro/hooks/ai-memory.json
+sessionmunch install-hooks --agent kiro-cli-v3 --apply \
+    --config-file .kiro/hooks/sessionmunch.json
 ```
 
 The v3 installer writes the documented standalone `version: "v1"` schema with
 PascalCase triggers. It preserves third-party entries in a shared file,
 refuses an unsupported schema version or a third-party collision with an
-ai-memory-reserved hook name, and bounds capture-only commands to one second.
-SessionStart gets five seconds so ai-memory's bounded handoff fetch can finish.
+sessionmunch-reserved hook name, and bounds capture-only commands to one second.
+SessionStart gets five seconds so sessionmunch's bounded handoff fetch can finish.
 Both engines use the same sanitized hook-ingress boundary: documented and live
 `tool_name`/`tool_input` file operations honor `[capture] ignore_paths`, while
 unknown file-tool payload shapes degrade to metadata-only capture.
@@ -1024,18 +1028,18 @@ the matching session explicitly; use the exact id when several Kiro sessions
 are open in the same project:
 
 ```bash
-ai-memory finalize-session --agent kiro-cli
-ai-memory finalize-session --agent kiro-cli --session-id <uuid>
+sessionmunch finalize-session --agent kiro-cli
+sessionmunch finalize-session --agent kiro-cli --session-id <uuid>
 ```
 
-`ai-memory uninstall --only hooks --apply --yes` removes only exact ai-memory
+`sessionmunch uninstall --only hooks --apply --yes` removes only exact sessionmunch
 entries from global v2 agents, the current project's `.kiro/agents` directory,
-and ai-memory's global/current-project v3 registration. A purely generated v3
-file is deleted; third-party entries in a shared file remain. `ai-memory run
+and sessionmunch's global/current-project v3 registration. A purely generated v3
+file is deleted; third-party entries in a shared file remain. `sessionmunch run
 kiro` (alias `kiro-cli`) manages the default v2 engine and honors `$KIRO_HOME`;
 add `--v3`, `--mode`, or `--agent-engine v3` for version-safe v3 resume. Once
 linked, a later plain Kiro launch recovers the stored engine transparently, and
-bare `ai-memory run` considers checkout-local sessions from both incompatible
+bare `sessionmunch run` considers checkout-local sessions from both incompatible
 stores. See
 [managed workstreams](managed-workstreams.md#native-adapter-behavior).
 
@@ -1043,15 +1047,15 @@ stores. See
 
 Pool reads lifecycle hooks from a project-scoped `.poolside/settings.yaml` at
 the root of each repository it runs in — there is no user-global hook file for
-ai-memory to merge. `install-hooks --agent pool` (alias `poolside`) therefore
+sessionmunch to merge. `install-hooks --agent pool` (alias `poolside`) therefore
 stages the hook scripts to the stable user-global location and prints a
-ready-to-paste `hooks:` snippet; ai-memory deliberately does not write files
+ready-to-paste `hooks:` snippet; sessionmunch deliberately does not write files
 inside your repositories.
 
 ```bash
 # Stage the scripts and print the snippet to paste into
 # <repo>/.poolside/settings.yaml:
-ai-memory install-hooks --agent pool --apply \
+sessionmunch install-hooks --agent pool --apply \
     --server-url "http://homelab:49374" \
     --auth-token "$TOKEN"
 ```
@@ -1059,7 +1063,7 @@ ai-memory install-hooks --agent pool --apply \
 The snippet wires Pool's five documented events — `SessionStart`,
 `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, and `Stop` (Claude-shaped
 names, snake_case JSON payload on stdin, verified against Poolside CLI
-v1.0.16). Local installs use the native `ai-memory hook` command, so Pool's
+v1.0.16). Local installs use the native `sessionmunch hook` command, so Pool's
 documented `tool_name`/`tool_input` file operations honor `[capture]
 ignore_paths` and unknown file-tool payload shapes degrade to metadata-only
 capture.
@@ -1069,15 +1073,15 @@ turn, close the session explicitly; use the exact id when several Pool
 sessions are open in the same project:
 
 ```bash
-ai-memory finalize-session --agent pool
-ai-memory finalize-session --agent pool --session-id <uuid>
+sessionmunch finalize-session --agent pool
+sessionmunch finalize-session --agent pool --session-id <uuid>
 ```
 
 Pool tolerates hook stdout, but model-visible context injection from
 `SessionStart` stdout is not demonstrated, so the session-start hook captures
 only and never fetches the (single-use) handoff — recover a prior session's
 handoff via the MCP `memory_handoff_accept` tool. No first-party
-`install-mcp` client and no managed workstream (`ai-memory run pool`) are
+`install-mcp` client and no managed workstream (`sessionmunch run pool`) are
 claimed: Pool's native session-store contract is not demonstrated, per
 [managed-harness contributions](managed-harness-contributions.md).
 
@@ -1085,24 +1089,24 @@ claimed: Pool's native session-store contract is not demonstrated, per
 
 ZCode wires lifecycle hooks in the root `hooks` block of
 `~/.zcode/cli/config.json` — the same file that holds its other CLI
-registration. `install-hooks --agent zcode` (alias `zai`) merges ai-memory's
+registration. `install-hooks --agent zcode` (alias `zai`) merges sessionmunch's
 entries into that block around any third-party hooks you already have, and is
-idempotent: re-running strips only ai-memory's own entries (marked by
-`statusMessage: "ai-memory capture"`) and rewrites them in place.
+idempotent: re-running strips only sessionmunch's own entries (marked by
+`statusMessage: "sessionmunch capture"`) and rewrites them in place.
 
 ```bash
-ai-memory install-hooks --agent zcode --apply \
+sessionmunch install-hooks --agent zcode --apply \
     --server-url "http://homelab:49374" \
     --auth-token "$TOKEN"
 
 # Preview the exact hooks block without writing anything:
-ai-memory install-hooks --agent zcode \
+sessionmunch install-hooks --agent zcode \
     --server-url "http://homelab:49374"
 ```
 
-Entries are exec-form `{"type": "process", "command": <ai-memory>, "args":
+Entries are exec-form `{"type": "process", "command": <sessionmunch>, "args":
 […]}` — ZCode spawns them with the event JSON on stdin and no shell, which the
-native `ai-memory hook` command reads directly, so the local spool, bearer
+native `sessionmunch hook` command reads directly, so the local spool, bearer
 auth, and `[capture] ignore_paths` exclusions all apply. Every emitted key is
 from ZCode's documented hook schema (`type`, `command`, `args`, `enabled`,
 `timeoutMs`, `statusMessage`); ZCode drops entries carrying undocumented keys,
@@ -1124,12 +1128,12 @@ finished sessions explicitly; use the exact id when several ZCode sessions are
 open in the same project:
 
 ```bash
-ai-memory finalize-session --agent zcode
-ai-memory finalize-session --agent zcode --session-id <uuid>
+sessionmunch finalize-session --agent zcode
+sessionmunch finalize-session --agent zcode --session-id <uuid>
 ```
 
 No first-party `install-mcp` client and no managed workstream
-(`ai-memory run zcode`) are claimed yet.
+(`sessionmunch run zcode`) are claimed yet.
 
 ### OpenCode
 
@@ -1139,9 +1143,9 @@ docker run --rm akitaonrails/ai-memory:latest \
     --server-url "http://homelab:49374/mcp" \
     --auth-token "$TOKEN"
 
-# Plugin — write to ~/.config/opencode/plugins/ai-memory.ts.
+# Plugin — write to ~/.config/opencode/plugins/sessionmunch.ts.
 # If you have the local wrapper installed, prefer `--apply`:
-ai-memory install-hooks --agent opencode --apply \
+sessionmunch install-hooks --agent opencode --apply \
     --server-url "http://homelab:49374" \
     --auth-token "$TOKEN"
 
@@ -1167,9 +1171,9 @@ docker run --rm akitaonrails/ai-memory:latest \
     --server-url "http://homelab:49374/mcp" \
     --auth-token "$TOKEN"
 
-# Plugin — write to ~/.config/opencode/plugins/ai-memory-opencode2.ts.
+# Plugin — write to ~/.config/opencode/plugins/sessionmunch-opencode2.ts.
 # If you have the local wrapper installed, prefer `--apply`:
-ai-memory install-hooks --agent opencode2 --apply \
+sessionmunch install-hooks --agent opencode2 --apply \
     --server-url "http://homelab:49374" \
     --auth-token "$TOKEN"
 ```
@@ -1179,8 +1183,8 @@ V2 nests servers under `mcp.servers` (no `enabled` field), so the v1
 `~/.config/opencode/opencode.json(c)` file — the beta explicitly supports
 this mixed nesting, so keep both entries and do not "convert" the file by
 removing the v1 one
-(see [Migrate from V1](https://opencode.ai/v2/docs/migrate-v1)). `ai-memory run opencode2`
-resumes the same native sessions as `ai-memory run opencode` through the
+(see [Migrate from V1](https://opencode.ai/v2/docs/migrate-v1)). `sessionmunch run opencode2`
+resumes the same native sessions as `sessionmunch run opencode` through the
 `opencode2` binary. Both plugins share the one auto-loaded dir while the
 beta is side-by-side; a host may warn about its sibling's file (the two
 plugin APIs are incompatible) — that warning is benign, and `uninstall`
@@ -1191,13 +1195,13 @@ removes each file only on its own ownership markers.
 > the beta has migrated its schema in place before, leaving stable
 > `opencode` 1.x broken
 > ([upstream #42260](https://github.com/anomalyco/opencode/issues/42260)).
-> ai-memory only ever opens that database read-only; the migration risk
+> sessionmunch only ever opens that database read-only; the migration risk
 > comes from launching `opencode2` itself, not from this integration.
 >
-> **The beta's background service defaults to port 49374 — ai-memory's own
+> **The beta's background service defaults to port 49374 — sessionmunch's own
 > default.** Running both on defaults crash-loops the opencode2 service
 > (`Managed service port 49374 ... is already in use`). Move one side:
-> `opencode2 service set port <free-port>`, or start ai-memory with
+> `opencode2 service set port <free-port>`, or start sessionmunch with
 > `--bind 127.0.0.1:<free-port>` (and matching `--server-url` installs).
 
 **On a Gemini/Vertex model, serve Gemini-safe schemas.** OpenCode forwards MCP
@@ -1209,13 +1213,13 @@ field. `schemars` renders every optional tool argument as a nullable union
 `tools/list`:
 
 ```
-Unable to submit request because `ai-memory_memory_auto_improve` functionDeclaration
+Unable to submit request because `sessionmunch_memory_auto_improve` functionDeclaration
 `parameters.max_proposals` schema specified other fields alongside any_of.
 When using any_of, it must be the only field set.
 ```
 
 Either set `gemini_safe_schemas = true` in `config.toml`
-(`AI_MEMORY_GEMINI_SAFE_SCHEMAS=true`) on the server, which collapses those
+(`SESSIONMUNCH_GEMINI_SAFE_SCHEMAS=true`) on the server, which collapses those
 unions to `"type": "integer"` plus `nullable: true` for every client, or append
 `?flavor=gemini` to just this client's MCP URL. Runtime validation is unchanged
 either way. Gemini CLI and Antigravity CLI normalize schemas client-side and
@@ -1229,29 +1233,29 @@ docker run --rm akitaonrails/ai-memory:latest \
     --server-url "http://homelab:49374/mcp" \
     --auth-token "$TOKEN"
 
-# Extension — write to ~/.omp/agent/extensions/ai-memory-omp.ts.
+# Extension — write to ~/.omp/agent/extensions/sessionmunch-omp.ts.
 # If you have the local wrapper installed, prefer `--apply`:
-ai-memory install-hooks --agent omp --apply \
+sessionmunch install-hooks --agent omp --apply \
     --server-url "http://homelab:49374" \
     --auth-token "$TOKEN"
 ```
 
 Restart OMP after installing or changing the extension; extensions are
-loaded at startup. The ai-memory CLI accepts `--client omp` (or
+loaded at startup. The sessionmunch CLI accepts `--client omp` (or
 `--client oh-my-pi`) for MCP and `--agent omp` (or `--agent oh-my-pi`)
 for hooks; both target OMP's native `.omp` integration surface.
 
 ### Pi
 
-Pi does not read a native `mcp.json`. ai-memory supports Pi through one
-generated TypeScript extension at `~/.pi/agent/extensions/ai-memory-pi.ts`; the
-same file captures lifecycle events and bridges ai-memory's HTTP MCP tools into
+Pi does not read a native `mcp.json`. sessionmunch supports Pi through one
+generated TypeScript extension at `~/.pi/agent/extensions/sessionmunch-pi.ts`; the
+same file captures lifecycle events and bridges sessionmunch's HTTP MCP tools into
 Pi with `pi.registerTool`. When `PI_CODING_AGENT_DIR` is set (it relocates
 Pi's whole `~/.pi/agent` home), the extension is written to
-`$PI_CODING_AGENT_DIR/extensions/ai-memory-pi.ts` instead.
+`$PI_CODING_AGENT_DIR/extensions/sessionmunch-pi.ts` instead.
 
-The Pi and OMP extensions use distinct filenames (`ai-memory-pi.ts` and
-`ai-memory-omp.ts`) so installing one never overwrites the other. They are
+The Pi and OMP extensions use distinct filenames (`sessionmunch-pi.ts` and
+`sessionmunch-omp.ts`) so installing one never overwrites the other. They are
 not interchangeable — only Pi's bridges MCP tools.
 
 #### OMP profiles
@@ -1261,9 +1265,9 @@ not interchangeable — only Pi's bridges MCP tools.
 the extension lands where that profile loads it:
 
 ```bash
-ai-memory install-hooks --agent omp --profile work --apply
+sessionmunch install-hooks --agent omp --profile work --apply
 # or set it once for the shell:
-OMP_PROFILE=work ai-memory install-hooks --agent omp --apply
+OMP_PROFILE=work sessionmunch install-hooks --agent omp --apply
 ```
 
 `--profile` takes precedence over `OMP_PROFILE`, and `uninstall --profile
@@ -1272,12 +1276,12 @@ when it is set it names the agent directory outright, so no profile
 subdirectory is derived from it.
 
 ```bash
-ai-memory install-hooks --agent pi --apply \
+sessionmunch install-hooks --agent pi --apply \
     --server-url "http://homelab:49374" \
     --auth-token "$TOKEN"
 
 # `install-mcp --client pi` prints this guidance instead of writing mcp.json:
-ai-memory install-mcp --client pi --server-url "http://homelab:49374/mcp"
+sessionmunch install-mcp --client pi --server-url "http://homelab:49374/mcp"
 ```
 
 Restart Pi after installing or changing the extension. OMP / Oh My Pi remains
@@ -1289,10 +1293,10 @@ The `setup-agent` subcommand does the extract + render in one shot
 using a bind mount:
 
 ```bash
-docker run --rm -v "$HOME/.ai-memory:/host" \
+docker run --rm -v "$HOME/.sessionmunch:/host" \
     akitaonrails/ai-memory:latest \
     setup-agent --agent claude-code --to /host/hooks \
-        --host-prefix "$HOME/.ai-memory/hooks" \
+        --host-prefix "$HOME/.sessionmunch/hooks" \
         --server-url "http://homelab:49374" --auth-token "$TOKEN"
 ```
 
@@ -1405,33 +1409,33 @@ for Grok's (and Zero's) no-stdout SessionStart behavior (Antigravity CLI uses `P
 
 ## Installing hooks without docker
 
-If you only need to use ai-memory *from* a machine (i.e. that machine doesn't
+If you only need to use sessionmunch *from* a machine (i.e. that machine doesn't
 run the server), download and verify the release installer. The installer then
 downloads and verifies the release's hook archive before writing any scripts:
 
 ```bash
-installer_base=https://github.com/akitaonrails/ai-memory/releases/latest/download/ai-memory-install-hooks
+installer_base=https://github.com/akitaonrails/ai-memory/releases/latest/download/sessionmunch-install-hooks
 installer_tmp="$(mktemp -d)"
 trap 'rm -rf "$installer_tmp"' EXIT
-curl -fsSL "$installer_base" -o "$installer_tmp/ai-memory-install-hooks"
-curl -fsSL "$installer_base.sha256" -o "$installer_tmp/ai-memory-install-hooks.sha256"
-expected="$(awk 'NR == 1 { print $1 }' "$installer_tmp/ai-memory-install-hooks.sha256")"
+curl -fsSL "$installer_base" -o "$installer_tmp/sessionmunch-install-hooks"
+curl -fsSL "$installer_base.sha256" -o "$installer_tmp/sessionmunch-install-hooks.sha256"
+expected="$(awk 'NR == 1 { print $1 }' "$installer_tmp/sessionmunch-install-hooks.sha256")"
 if command -v sha256sum >/dev/null 2>&1; then
-    actual="$(sha256sum "$installer_tmp/ai-memory-install-hooks" | awk '{ print $1 }')"
+    actual="$(sha256sum "$installer_tmp/sessionmunch-install-hooks" | awk '{ print $1 }')"
 else
-    actual="$(shasum -a 256 "$installer_tmp/ai-memory-install-hooks" | awk '{ print $1 }')"
+    actual="$(shasum -a 256 "$installer_tmp/sessionmunch-install-hooks" | awk '{ print $1 }')"
 fi
 [ -n "$expected" ] && [ "$actual" = "$expected" ] || { echo "installer checksum mismatch" >&2; exit 1; }
-chmod +x "$installer_tmp/ai-memory-install-hooks"
-"$installer_tmp/ai-memory-install-hooks" --agent claude-code
+chmod +x "$installer_tmp/sessionmunch-install-hooks"
+"$installer_tmp/sessionmunch-install-hooks" --agent claude-code
 rm -rf "$installer_tmp"
 trap - EXIT
 
-# Then render the JSON config (still wants `ai-memory` somewhere —
+# Then render the JSON config (still wants `sessionmunch` somewhere —
 # either via docker as a one-shot, or installed locally):
 docker run --rm akitaonrails/ai-memory:latest \
     install-hooks --agent claude-code \
-        --hooks-dir "$HOME/.ai-memory/hooks" \
+        --hooks-dir "$HOME/.sessionmunch/hooks" \
         --server-url "http://homelab:49374" \
         --auth-token "$TOKEN"
 ```
@@ -1446,18 +1450,18 @@ instead. For Pi, the generated extension also provides the MCP bridge.
 The generated TypeScript integrations survive an unreachable server the
 same way the native hooks do: a delivery that fails at the network level
 (or gets a 5xx) is written to `<data_dir>/hook-spool/` in the exact
-format `ai-memory hook-drain` reads, and the plugin drains that backlog
+format `sessionmunch hook-drain` reads, and the plugin drains that backlog
 itself once the server is reachable again — so a day of laptop work off
 the server's network is captured, not silently dropped. Each spooled
 entry carries an idempotency key, so the plugin's own drain and a
 manual `hook-drain` can race without double-ingesting. Note the spool
-lands in the *agent host's* data dir (`AI_MEMORY_DATA_DIR` or the
-platform default), which is where a native `ai-memory` install looks.
+lands in the *agent host's* data dir (`SESSIONMUNCH_DATA_DIR` or the
+platform default), which is where a native `sessionmunch` install looks.
 
 This path is friction-free when:
 - You have curl + bash but not docker
-- You don't need to run a local ai-memory server (you're a client of
-  a homelab/remote ai-memory)
+- You don't need to run a local sessionmunch server (you're a client of
+  a homelab/remote sessionmunch)
 
 ### Hook command paths across a container boundary
 
@@ -1465,15 +1469,15 @@ This path is friction-free when:
 writes their absolute paths into the agent's config. When the CLI runs
 inside a container but the agent runs on the host, those staged paths
 would be container paths the host can't see. Set
-`AI_MEMORY_HOOKS_HOST_ROOT` to the *host* directory that the staged
+`SESSIONMUNCH_HOOKS_HOST_ROOT` to the *host* directory that the staged
 `hooks/` tree is mounted from and the rendered config uses
 `<host-root>/<agent>/…` command paths instead. The bundled docker
-wrappers (`bin/ai-memory`, `bin/ai-memory.ps1`) forward this variable
+wrappers (`bin/sessionmunch`, `bin/sessionmunch.ps1`) forward this variable
 automatically; you only set it by hand for custom container setups.
 
 ---
 
-## Running ai-memory without docker
+## Running sessionmunch without docker
 
 Most users should stick to the docker wrapper from the Quick start. Arch
 Linux users have the [AUR packages](#arch-linux-native-packages-aur). For any
@@ -1486,10 +1490,10 @@ mise use -g github:akitaonrails/ai-memory
 
 This uses [mise's GitHub backend](https://mise.jdx.dev/dev-tools/backends/github.html),
 which downloads the release archive matching your OS/arch
-(`ai-memory-linux-x86_64.tar.gz`, `ai-memory-macos-aarch64.tar.gz`, etc.),
+(`sessionmunch-linux-x86_64.tar.gz`, `sessionmunch-macos-aarch64.tar.gz`, etc.),
 verifies its checksum against the published `.sha256` sidecar, then extracts
-it and puts `ai-memory` on `PATH`. (mise can also check GitHub artifact
-attestation and SLSA provenance where a project publishes them; ai-memory's
+it and puts `sessionmunch` on `PATH`. (mise can also check GitHub artifact
+attestation and SLSA provenance where a project publishes them; sessionmunch's
 release workflow does not emit either today, so only the checksum applies.)
 No dedicated mise plugin or
 registry entry is required — the backend works against any repo whose
@@ -1500,30 +1504,32 @@ so a fresh tag may resolve to the previous version for a day or so; pin an
 exact tag with `mise use -g github:akitaonrails/ai-memory@1.30.0` to bypass
 that.
 
-`cargo install ai-memory` is not available: the crate name is already taken
-by an unrelated project on crates.io, as is `ai-memory-core` (the workspace's
+`cargo install sessionmunch` is not available: the crate name is already taken
+by an unrelated project on crates.io, as is `sessionmunch-core` (the workspace's
 foundational internal crate). Publishing would require renaming at least
 that crate for the registry — a naming decision the project hasn't made yet.
 
-Build from source only when hacking on ai-memory itself or running on a
+Build from source only when hacking on sessionmunch itself or running on a
 platform none of the above covers. On macOS, tagged releases also publish
-native `ai-memory-macos-aarch64.tar.gz` and `ai-memory-macos-x86_64.tar.gz`
+native `sessionmunch-macos-aarch64.tar.gz` and `sessionmunch-macos-x86_64.tar.gz`
 archives when you only need the client CLI.
 
 ```bash
-git clone https://github.com/akitaonrails/ai-memory ~/.ai-memory
-cd ~/.ai-memory
+# Source checkout: the fork carries the SessionMunch line until the v0.1
+# release fixes the canonical repo URL (t_d85c39f4).
+git clone https://github.com/yourowndog/ai-memory ~/.sessionmunch
+cd ~/.sessionmunch
 cargo build --release --workspace
-./target/release/ai-memory init                       # one-time
-./target/release/ai-memory serve --transport http \
+./target/release/sessionmunch init                       # one-time
+./target/release/sessionmunch serve --transport http \
     --bind 127.0.0.1:49374                            # MCP + hook HTTP server
 ```
 
-Data dir defaults to `~/.local/share/ai-memory` on Linux,
-`~/Library/Application Support/ai-memory` on macOS, and the platform
+Data dir defaults to `~/.local/share/sessionmunch` on Linux,
+`~/Library/Application Support/sessionmunch` on macOS, and the platform
 local-data directory on Windows, typically
-`%LOCALAPPDATA%\ai-memory`. Override with `AI_MEMORY_DATA_DIR=/path`.
-To require bearer-token auth, set `AI_MEMORY_AUTH_TOKEN` in the
+`%LOCALAPPDATA%\sessionmunch`. Override with `SESSIONMUNCH_DATA_DIR=/path`.
+To require bearer-token auth, set `SESSIONMUNCH_AUTH_TOKEN` in the
 server's environment.
 
 #### Optional serve flags
@@ -1532,30 +1538,30 @@ The `serve` subcommand also accepts:
 
 | Flag | Env var | What it does |
 |---|---|---|
-| `--enable-web` | `AI_MEMORY_ENABLE_WEB=true` | Mount the read-only web browser + `/api/v1` JSON API. |
-| `--base-path /wiki` | `AI_MEMORY_BASE_PATH` | Host the entire HTTP surface (`/mcp`, `/hook`, `/admin/*`, `/api/v1`, `/web`) under a configurable subpath — useful behind a reverse proxy sharing a hostname. `.` and `..` segments are rejected; unsafe chars cause a fallback to root with a warning. See [`docs/https-via-proxy.md`](https-via-proxy.md#hosting-under-a-subpath). |
-| `--web-slug /web` | `AI_MEMORY_WEB_SLUG` | Where the web UI mounts within the base-path. Default `/web`; set to `/` to mount the UI at the base-path root. |
-| `--web-ui-dir <path>` | `AI_MEMORY_WEB_UI_DIR` | Serve a custom SPA from `<path>` instead of the built-in browser. ai-memory injects `<base href>` and `<meta name="ai-memory-base-path">` so the SPA can build relative URLs and API calls under the configured prefix. |
-| `--cors-allow-origin <origin>` | `AI_MEMORY_CORS_ALLOW_ORIGINS` (CSV) | Allow listed origins to call `/api/v1`. Layer is scoped only to that route — `/mcp`, `/hook`, `/admin`, and `/web` remain origin-locked. |
-| _(config only)_ | `AI_MEMORY_HOOK_RATE_PER_SEC`, `AI_MEMORY_HOOK_RATE_BURST` | Optional per-actor/session hook ingest token bucket. Unset/`0` rate disables it; burst defaults to the rate (minimum one token when enabled). |
+| `--enable-web` | `SESSIONMUNCH_ENABLE_WEB=true` | Mount the read-only web browser + `/api/v1` JSON API. |
+| `--base-path /wiki` | `SESSIONMUNCH_BASE_PATH` | Host the entire HTTP surface (`/mcp`, `/hook`, `/admin/*`, `/api/v1`, `/web`) under a configurable subpath — useful behind a reverse proxy sharing a hostname. `.` and `..` segments are rejected; unsafe chars cause a fallback to root with a warning. See [`docs/https-via-proxy.md`](https-via-proxy.md#hosting-under-a-subpath). |
+| `--web-slug /web` | `SESSIONMUNCH_WEB_SLUG` | Where the web UI mounts within the base-path. Default `/web`; set to `/` to mount the UI at the base-path root. |
+| `--web-ui-dir <path>` | `SESSIONMUNCH_WEB_UI_DIR` | Serve a custom SPA from `<path>` instead of the built-in browser. sessionmunch injects `<base href>` and `<meta name="sessionmunch-base-path">` so the SPA can build relative URLs and API calls under the configured prefix. |
+| `--cors-allow-origin <origin>` | `SESSIONMUNCH_CORS_ALLOW_ORIGINS` (CSV) | Allow listed origins to call `/api/v1`. Layer is scoped only to that route — `/mcp`, `/hook`, `/admin`, and `/web` remain origin-locked. |
+| _(config only)_ | `SESSIONMUNCH_HOOK_RATE_PER_SEC`, `SESSIONMUNCH_HOOK_RATE_BURST` | Optional per-actor/session hook ingest token bucket. Unset/`0` rate disables it; burst defaults to the rate (minimum one token when enabled). |
 
 On macOS, see [`docs/macos.md`](macos.md); use the archive matching your
 architecture: `aarch64` for Apple Silicon, `x86_64` for Intel. On Windows, see
 [`docs/windows.md`](windows.md).
 The short version: run the install commands from the same environment that
 launches the agent. WSL2-launched agents need WSL paths and POSIX `.sh` hooks.
-Native Windows agents can use the tagged `ai-memory-windows-x86_64.zip`, the
+Native Windows agents can use the tagged `sessionmunch-windows-x86_64.zip`, the
 Docker Desktop wrapper, or a source build. Native Claude Code uses Claude exec
-form with a real `ai-memory.exe` by default; the Windows Docker wrapper renders
+form with a real `sessionmunch.exe` by default; the Windows Docker wrapper renders
 other native Windows script-hook agents through encoded PowerShell `.ps1`
 fallback commands.
 
 When run from source, `install-hooks` finds the bundled scripts in
 the repo's `hooks/` automatically. Extracted release archives also
-auto-discover the sibling `hooks/` bundle beside the `ai-memory` binary:
+auto-discover the sibling `hooks/` bundle beside the `sessionmunch` binary:
 
 ```bash
-./target/release/ai-memory install-hooks --agent claude-code --auth-token "$TOKEN"
+./target/release/sessionmunch install-hooks --agent claude-code --auth-token "$TOKEN"
 ```
 
 (No need for `setup-agent` in this case - the scripts already live
@@ -1565,37 +1571,37 @@ at the right host path.)
 
 ## LLM provider tiers
 
-ai-memory works in three intensity tiers:
+sessionmunch works in three intensity tiers:
 
 | Tier | What you get | Env vars | Cost |
 |---|---|---|---|
 | **Zero-LLM** (default) | FTS5 + manually declared entity + graph search, rule-based session summaries, auto-handoffs from prompt + tool-call history | (none) | $0 |
-| **+ LLM consolidation** | LLM rewrites session pages as coherent narratives; PreCompact checkpoints; LLM-driven contradiction lint | `AI_MEMORY_LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` | ~$0.01–0.05 / session |
-| **+ Anthropic via subscription** | Same LLM features using a Claude Pro/Max subscription instead of an API key | `AI_MEMORY_LLM_PROVIDER=anthropic-oauth` + `ANTHROPIC_OAUTH_TOKEN` | Uses your Claude subscription |
-| **+ ChatGPT/Codex OAuth** | Same LLM features using a ChatGPT Pro/Plus login instead of an OpenAI Platform key | `AI_MEMORY_LLM_PROVIDER=openai-oauth` + `ai-memory auth login openai-oauth` | Uses your ChatGPT subscription |
-| **+ GitHub Copilot** | Same LLM features using a GitHub Copilot subscription | `AI_MEMORY_LLM_PROVIDER=copilot` + `ai-memory auth login copilot` or `COPILOT_GITHUB_TOKEN` | Uses your Copilot subscription |
-| **+ LLM reranking** | At most one relevance pass over up to 30 bounded project/scopes search candidates; normal order is preserved on invalid, failed, timed-out, or concurrency-saturated responses | `AI_MEMORY_RERANKER=llm` + any configured LLM provider | One LLM call per eligible query, at most four concurrently |
-| **+ Hybrid retrieval** | Adds vector cosine similarity to FTS5 + entity + graph RRF. Better recall on paraphrased queries | `AI_MEMORY_EMBEDDING_PROVIDER=openai` + `OPENAI_API_KEY` (or `EMBEDDING_API_KEY`) | ~$0.0001 / page on backfill |
+| **+ LLM consolidation** | LLM rewrites session pages as coherent narratives; PreCompact checkpoints; LLM-driven contradiction lint | `SESSIONMUNCH_LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` | ~$0.01–0.05 / session |
+| **+ Anthropic via subscription** | Same LLM features using a Claude Pro/Max subscription instead of an API key | `SESSIONMUNCH_LLM_PROVIDER=anthropic-oauth` + `ANTHROPIC_OAUTH_TOKEN` | Uses your Claude subscription |
+| **+ ChatGPT/Codex OAuth** | Same LLM features using a ChatGPT Pro/Plus login instead of an OpenAI Platform key | `SESSIONMUNCH_LLM_PROVIDER=openai-oauth` + `sessionmunch auth login openai-oauth` | Uses your ChatGPT subscription |
+| **+ GitHub Copilot** | Same LLM features using a GitHub Copilot subscription | `SESSIONMUNCH_LLM_PROVIDER=copilot` + `sessionmunch auth login copilot` or `COPILOT_GITHUB_TOKEN` | Uses your Copilot subscription |
+| **+ LLM reranking** | At most one relevance pass over up to 30 bounded project/scopes search candidates; normal order is preserved on invalid, failed, timed-out, or concurrency-saturated responses | `SESSIONMUNCH_RERANKER=llm` + any configured LLM provider | One LLM call per eligible query, at most four concurrently |
+| **+ Hybrid retrieval** | Adds vector cosine similarity to FTS5 + entity + graph RRF. Better recall on paraphrased queries | `SESSIONMUNCH_EMBEDDING_PROVIDER=openai` + `OPENAI_API_KEY` (or `EMBEDDING_API_KEY`) | ~$0.0001 / page on backfill |
 
 ### Recommended models (chosen as defaults)
 
-If you set only the provider, ai-memory picks a sensible default:
+If you set only the provider, sessionmunch picks a sensible default:
 
 | Setting | Default | Why |
 |---|---|---|
-| `AI_MEMORY_LLM_PROVIDER=anthropic` | `claude-haiku-4-5` | **Recommended default.** Best balance of speed, restraint, and classification quality. Not a reasoning model. Consistently classifies durable project rules as `kind: rule`. |
-| `AI_MEMORY_LLM_PROVIDER=anthropic-oauth` | `claude-sonnet-4-6` | Anthropic via Claude subscription. Run `claude setup-token` once; set `ANTHROPIC_OAUTH_TOKEN` (or `CLAUDE_CODE_OAUTH_TOKEN`). No `ANTHROPIC_API_KEY` needed. Same `/v1/messages` endpoint, Bearer token auth. |
-| `AI_MEMORY_LLM_PROVIDER=openai` | `gpt-5.4-mini` | Cheaper + faster alternative. Same parse reliability; mild over-classification on thin sessions. |
-| `AI_MEMORY_LLM_PROVIDER=openai-oauth` | `gpt-5.5` | ChatGPT/Codex backend. Run `ai-memory auth login openai-oauth` once; ai-memory stores the refresh token in `<data_dir>/auth.json` and refreshes access tokens automatically. Optional `AI_MEMORY_LLM_REASONING_EFFORT` (`none`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`/`ultra`/`persistent`) is mapped to each provider's native reasoning field; omit it to keep the model default. |
-| `AI_MEMORY_LLM_PROVIDER=copilot` | `gpt-5.5` | GitHub Copilot Chat backend. ai-memory stores a GitHub user token in `<data_dir>/auth.json`, exchanges it for a short-lived Copilot API token, and refreshes before expiry. |
-| `AI_MEMORY_LLM_PROVIDER=gemini` | `gemini-3.5-flash` | Google's hosted option with a generous free tier. ai-memory disables Gemini 3.5 Flash's default dynamic thinking so hidden thought tokens do not truncate strict JSON. Set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`). |
-| `AI_MEMORY_LLM_PROVIDER=opencode` | `claude-sonnet-4-6` | [OpenCode](https://opencode.ai) cloud API. Defaults to the **Go** endpoint, `opencode.ai/zen/go/v1` — a cost-optimised model subset. GPT-5.6 Luna uses Go's Responses endpoint; other models use Chat Completions. For **Zen**'s full catalogue, set `AI_MEMORY_LLM_BASE_URL=https://opencode.ai/zen/v1` plus an `AI_MEMORY_LLM_MODEL` from it; the default model id is Go's. Requests identify ai-memory by version and reuse one session header across related attempts. Both endpoints take `OPENCODE_API_KEY` (key from `opencode.ai/auth`). Alias: `opencode-zen` — historical, and it selects Go like the others; the endpoint is chosen by the base URL, not the alias. |
-| `AI_MEMORY_EMBEDDING_PROVIDER=openai` | `text-embedding-3-small` (1536-dim) | 5× cheaper than `-3-large` with marginal recall loss. |
-| `AI_MEMORY_EMBEDDING_PROVIDER=openai` + `AI_MEMORY_EMBEDDING_BASE_URL=https://openrouter.ai/api/v1` | `openai/text-embedding-3-small` via [OpenRouter](https://openrouter.ai) | Uses `EMBEDDING_API_KEY`, else reuses `LLM_API_KEY` or `OPENAI_API_KEY`, with the OpenAI-compatible embedding client. |
-| `AI_MEMORY_EMBEDDING_PROVIDER=openai` + `AI_MEMORY_EMBEDDING_BASE_URL=https://api.orcarouter.ai/v1` | `openai/text-embedding-3-small` via [OrcaRouter](https://www.orcarouter.ai) | Uses `EMBEDDING_API_KEY`, else reuses `LLM_API_KEY`, with the OpenAI-compatible embedding client. |
-| `AI_MEMORY_EMBEDDING_PROVIDER=voyage` | `voyage-3` (1024-dim) | Voyage's current general-purpose recommendation. |
-| `AI_MEMORY_EMBEDDING_PROVIDER=google` / `gemini` | `gemini-embedding-001` (768-dim) | Google-hosted embeddings via `embedContent`. Set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`). |
-| `AI_MEMORY_EMBEDDING_PROVIDER=openai-compat` | no default — set model, dim, and base URL explicitly | Self-hosted engines (Ollama, LM Studio, vLLM). Keyless by default; `EMBEDDING_API_KEY`, else `LLM_API_KEY`, is sent as a bearer token when present (gateways). Example: `AI_MEMORY_EMBEDDING_BASE_URL=http://localhost:11434/v1`, `AI_MEMORY_EMBEDDING_MODEL=nomic-embed-text`, `AI_MEMORY_EMBEDDING_DIM=768`. Switching an existing `openai`+base-URL setup to `openai-compat` changes the stored `{provider, model, dim}` triple — run `ai-memory embed --force` to re-embed. |
+| `SESSIONMUNCH_LLM_PROVIDER=anthropic` | `claude-haiku-4-5` | **Recommended default.** Best balance of speed, restraint, and classification quality. Not a reasoning model. Consistently classifies durable project rules as `kind: rule`. |
+| `SESSIONMUNCH_LLM_PROVIDER=anthropic-oauth` | `claude-sonnet-4-6` | Anthropic via Claude subscription. Run `claude setup-token` once; set `ANTHROPIC_OAUTH_TOKEN` (or `CLAUDE_CODE_OAUTH_TOKEN`). No `ANTHROPIC_API_KEY` needed. Same `/v1/messages` endpoint, Bearer token auth. |
+| `SESSIONMUNCH_LLM_PROVIDER=openai` | `gpt-5.4-mini` | Cheaper + faster alternative. Same parse reliability; mild over-classification on thin sessions. |
+| `SESSIONMUNCH_LLM_PROVIDER=openai-oauth` | `gpt-5.5` | ChatGPT/Codex backend. Run `sessionmunch auth login openai-oauth` once; sessionmunch stores the refresh token in `<data_dir>/auth.json` and refreshes access tokens automatically. Optional `SESSIONMUNCH_LLM_REASONING_EFFORT` (`none`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`/`ultra`/`persistent`) is mapped to each provider's native reasoning field; omit it to keep the model default. |
+| `SESSIONMUNCH_LLM_PROVIDER=copilot` | `gpt-5.5` | GitHub Copilot Chat backend. sessionmunch stores a GitHub user token in `<data_dir>/auth.json`, exchanges it for a short-lived Copilot API token, and refreshes before expiry. |
+| `SESSIONMUNCH_LLM_PROVIDER=gemini` | `gemini-3.5-flash` | Google's hosted option with a generous free tier. sessionmunch disables Gemini 3.5 Flash's default dynamic thinking so hidden thought tokens do not truncate strict JSON. Set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`). |
+| `SESSIONMUNCH_LLM_PROVIDER=opencode` | `claude-sonnet-4-6` | [OpenCode](https://opencode.ai) cloud API. Defaults to the **Go** endpoint, `opencode.ai/zen/go/v1` — a cost-optimised model subset. GPT-5.6 Luna uses Go's Responses endpoint; other models use Chat Completions. For **Zen**'s full catalogue, set `SESSIONMUNCH_LLM_BASE_URL=https://opencode.ai/zen/v1` plus an `SESSIONMUNCH_LLM_MODEL` from it; the default model id is Go's. Requests identify sessionmunch by version and reuse one session header across related attempts. Both endpoints take `OPENCODE_API_KEY` (key from `opencode.ai/auth`). Alias: `opencode-zen` — historical, and it selects Go like the others; the endpoint is chosen by the base URL, not the alias. |
+| `SESSIONMUNCH_EMBEDDING_PROVIDER=openai` | `text-embedding-3-small` (1536-dim) | 5× cheaper than `-3-large` with marginal recall loss. |
+| `SESSIONMUNCH_EMBEDDING_PROVIDER=openai` + `SESSIONMUNCH_EMBEDDING_BASE_URL=https://openrouter.ai/api/v1` | `openai/text-embedding-3-small` via [OpenRouter](https://openrouter.ai) | Uses `EMBEDDING_API_KEY`, else reuses `LLM_API_KEY` or `OPENAI_API_KEY`, with the OpenAI-compatible embedding client. |
+| `SESSIONMUNCH_EMBEDDING_PROVIDER=openai` + `SESSIONMUNCH_EMBEDDING_BASE_URL=https://api.orcarouter.ai/v1` | `openai/text-embedding-3-small` via [OrcaRouter](https://www.orcarouter.ai) | Uses `EMBEDDING_API_KEY`, else reuses `LLM_API_KEY`, with the OpenAI-compatible embedding client. |
+| `SESSIONMUNCH_EMBEDDING_PROVIDER=voyage` | `voyage-3` (1024-dim) | Voyage's current general-purpose recommendation. |
+| `SESSIONMUNCH_EMBEDDING_PROVIDER=google` / `gemini` | `gemini-embedding-001` (768-dim) | Google-hosted embeddings via `embedContent`. Set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`). |
+| `SESSIONMUNCH_EMBEDDING_PROVIDER=openai-compat` | no default — set model, dim, and base URL explicitly | Self-hosted engines (Ollama, LM Studio, vLLM). Keyless by default; `EMBEDDING_API_KEY`, else `LLM_API_KEY`, is sent as a bearer token when present (gateways). Example: `SESSIONMUNCH_EMBEDDING_BASE_URL=http://localhost:11434/v1`, `SESSIONMUNCH_EMBEDDING_MODEL=nomic-embed-text`, `SESSIONMUNCH_EMBEDDING_DIM=768`. Switching an existing `openai`+base-URL setup to `openai-compat` changes the stored `{provider, model, dim}` triple — run `sessionmunch embed --force` to re-embed. |
 
 > **What we don't recommend:** reasoning-mode models (Claude with extended
 > thinking, GPT-o3, Gemini "thinking" variants) — they burn token budget on
@@ -1608,13 +1614,13 @@ If you set only the provider, ai-memory picks a sensible default:
 it when the embedder should authenticate against a different provider than the
 LLM — the `openai` and `openai-compat` embedders otherwise borrow the chat
 model's `OPENAI_API_KEY` or `LLM_API_KEY`, which is then sent to whatever
-`AI_MEMORY_EMBEDDING_BASE_URL` points at and rejected with a 401.
+`SESSIONMUNCH_EMBEDDING_BASE_URL` points at and rejected with a 401.
 
-Precedence for `AI_MEMORY_EMBEDDING_PROVIDER=openai`:
+Precedence for `SESSIONMUNCH_EMBEDDING_PROVIDER=openai`:
 
 1. `EMBEDDING_API_KEY`
 2. `OPENAI_API_KEY`
-3. `LLM_API_KEY`, only when `AI_MEMORY_EMBEDDING_BASE_URL` is set
+3. `LLM_API_KEY`, only when `SESSIONMUNCH_EMBEDDING_BASE_URL` is set
 
 `openai-compat` checks `EMBEDDING_API_KEY`, then `LLM_API_KEY`, and stays
 keyless when neither is set. `voyage` and `google`/`gemini` are unaffected:
@@ -1626,10 +1632,10 @@ resolution is exactly what it was before the variable existed.
 # Chat on api.openai.com — `openai` is the provider that sends
 # `max_completion_tokens`, which gpt-5 / o-series models require and
 # `openai-compat` never emits — with embeddings on another endpoint.
-export AI_MEMORY_LLM_PROVIDER=openai
+export SESSIONMUNCH_LLM_PROVIDER=openai
 export OPENAI_API_KEY=sk-...
-export AI_MEMORY_EMBEDDING_PROVIDER=openai
-export AI_MEMORY_EMBEDDING_BASE_URL=https://openrouter.ai/api/v1
+export SESSIONMUNCH_EMBEDDING_PROVIDER=openai
+export SESSIONMUNCH_EMBEDDING_BASE_URL=https://openrouter.ai/api/v1
 export EMBEDDING_API_KEY=sk-or-v1-...
 ```
 
@@ -1658,41 +1664,41 @@ claude setup-token
 
 # Then export it (the CLI may also write CLAUDE_CODE_OAUTH_TOKEN automatically):
 export ANTHROPIC_OAUTH_TOKEN=<paste token here>
-export AI_MEMORY_LLM_PROVIDER=anthropic-oauth
-ai-memory serve
+export SESSIONMUNCH_LLM_PROVIDER=anthropic-oauth
+sessionmunch serve
 ```
 
 For Docker, pass the token as an env var:
 
 ```bash
-docker run -d --name ai-memory \
+docker run -d --name sessionmunch \
     -p 127.0.0.1:49374:49374 \
-    -v ai-memory-data:/data \
-    -e AI_MEMORY_LLM_PROVIDER=anthropic-oauth \
+    -v sessionmunch-data:/data \
+    -e SESSIONMUNCH_LLM_PROVIDER=anthropic-oauth \
     -e ANTHROPIC_OAUTH_TOKEN=<token> \
     akitaonrails/ai-memory:latest
 ```
 
 Both `ANTHROPIC_OAUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` are accepted;
-ai-memory checks `ANTHROPIC_OAUTH_TOKEN` first. When either variable is exported
+sessionmunch checks `ANTHROPIC_OAUTH_TOKEN` first. When either variable is exported
 on the host, the POSIX and PowerShell Docker wrappers forward its name to
 short-lived helper commands such as `llm-test`; the token value is inherited by
 Docker rather than placed in the wrapper's command line. The long-lived server
 container still needs the provider and token variables in its own environment,
 as in the example above.
 
-For both Anthropic providers, ai-memory omits `temperature` for Claude
+For both Anthropic providers, sessionmunch omits `temperature` for Claude
 4.7 and later models and Claude Mythos Preview because those models reject
 non-default sampling parameters. `llm-test` deliberately starts with the same
 representative 0.2 value as bootstrap and consolidation, then exercises the
 provider's compatibility normalization before sending the request.
 
 > [!TIP]
-> **Pick a small, fast model.** ai-memory's LLM work — session
+> **Pick a small, fast model.** sessionmunch's LLM work — session
 > consolidation, lint, and explore — is summarisation/extraction, not hard
 > reasoning, so a Haiku-class model is plenty: faster, cheaper, and far easier
 > on subscription rate limits than Sonnet/Opus. Set e.g.
-> `AI_MEMORY_LLM_MODEL=claude-haiku-4-5`. Save the high-effort thinking models
+> `SESSIONMUNCH_LLM_MODEL=claude-haiku-4-5`. Save the high-effort thinking models
 > for your actual coding agent.
 
 ### OpenAI OAuth / Codex
@@ -1705,11 +1711,11 @@ For the Docker quick start wrapper, this writes into the same named volume the
 server mounts at `/data`:
 
 ```bash
-ai-memory auth login openai-oauth
-docker run -d --name ai-memory \
+sessionmunch auth login openai-oauth
+docker run -d --name sessionmunch \
     -p 127.0.0.1:49374:49374 \
-    -v ai-memory-data:/data \
-    -e AI_MEMORY_LLM_PROVIDER=openai-oauth \
+    -v sessionmunch-data:/data \
+    -e SESSIONMUNCH_LLM_PROVIDER=openai-oauth \
     akitaonrails/ai-memory:latest
 ```
 
@@ -1717,19 +1723,19 @@ For a remote Docker host, run the login on that host against the same container
 or data volume:
 
 ```bash
-docker exec -it ai-memory ai-memory auth login openai-oauth
+docker exec -it sessionmunch sessionmunch auth login openai-oauth
 ```
 
-Use `ai-memory auth status` to check whether a token is present and
-`ai-memory auth logout openai-oauth` to remove it.
+Use `sessionmunch auth status` to check whether a token is present and
+`sessionmunch auth logout openai-oauth` to remove it.
 
 > [!TIP]
 > **Pick a small, fast model.** Consolidation / lint / explore are
 > summarisation tasks, not hard reasoning — a mini-class model is plenty and
 > is much easier on subscription rate limits. Set e.g.
-> `AI_MEMORY_LLM_MODEL=gpt-5-mini` (the `gpt-5.5` default works but is
+> `SESSIONMUNCH_LLM_MODEL=gpt-5-mini` (the `gpt-5.5` default works but is
 > overkill for this workload). If you stay on a reasoning model, set
-> `AI_MEMORY_LLM_REASONING_EFFORT=none` or `low` so hidden thought tokens
+> `SESSIONMUNCH_LLM_REASONING_EFFORT=none` or `low` so hidden thought tokens
 > do not eat the JSON budget. Reserve high-effort reasoning for your
 > coding agent.
 
@@ -1742,40 +1748,40 @@ GitHub token is never sent to `api.githubcopilot.com`.
 For the Docker quick start wrapper:
 
 ```bash
-ai-memory auth login copilot
-docker run -d --name ai-memory \
+sessionmunch auth login copilot
+docker run -d --name sessionmunch \
     -p 127.0.0.1:49374:49374 \
-    -v ai-memory-data:/data \
-    -e AI_MEMORY_LLM_PROVIDER=copilot \
+    -v sessionmunch-data:/data \
+    -e SESSIONMUNCH_LLM_PROVIDER=copilot \
     akitaonrails/ai-memory:latest
 ```
 
 For a remote Docker host, run the login against the same data volume:
 
 ```bash
-docker exec -it ai-memory ai-memory auth login copilot
+docker exec -it sessionmunch sessionmunch auth login copilot
 ```
 
-Non-interactive deploys can set `COPILOT_GITHUB_TOKEN` instead. ai-memory also
+Non-interactive deploys can set `COPILOT_GITHUB_TOKEN` instead. sessionmunch also
 accepts `GH_TOKEN` and `GITHUB_TOKEN` when running natively; prefer the explicit
 `COPILOT_GITHUB_TOKEN` in Docker so you do not pass a broad token by accident.
 Advanced users with a pre-minted Copilot API token can set
 `GITHUB_COPILOT_API_TOKEN` and optionally `COPILOT_API_URL`.
 
 `auth login copilot` defaults to GitHub Copilot's public device-flow client id.
-Pass `--client-id` or set `AI_MEMORY_COPILOT_CLIENT_ID` if you operate your own
+Pass `--client-id` or set `SESSIONMUNCH_COPILOT_CLIENT_ID` if you operate your own
 OAuth app.
 
 ### OpenAI-compatible providers (Ollama / vLLM / LM Studio / hosted APIs)
 
 ```bash
-docker run -d --name ai-memory \
+docker run -d --name sessionmunch \
     -p 49374:49374 \
-    -v ai-memory-data:/data \
-    -e AI_MEMORY_AUTH_TOKEN="$TOKEN" \
-    -e AI_MEMORY_LLM_PROVIDER=openai-compat \
-    -e AI_MEMORY_LLM_BASE_URL=http://host.docker.internal:11434/v1 \
-    -e AI_MEMORY_LLM_MODEL=qwen2.5-coder:14b \
+    -v sessionmunch-data:/data \
+    -e SESSIONMUNCH_AUTH_TOKEN="$TOKEN" \
+    -e SESSIONMUNCH_LLM_PROVIDER=openai-compat \
+    -e SESSIONMUNCH_LLM_BASE_URL=http://host.docker.internal:11434/v1 \
+    -e SESSIONMUNCH_LLM_MODEL=qwen2.5-coder:14b \
     akitaonrails/ai-memory:latest
 ```
 
@@ -1783,13 +1789,13 @@ There is no safe default model for `openai-compat`; the env var is
 required. For OpenRouter (Kimi, DeepSeek, etc.):
 
 ```bash
--e AI_MEMORY_LLM_PROVIDER=openai-compat
--e AI_MEMORY_LLM_BASE_URL=https://openrouter.ai/api/v1
--e AI_MEMORY_LLM_MODEL=moonshotai/kimi-k2.6
+-e SESSIONMUNCH_LLM_PROVIDER=openai-compat
+-e SESSIONMUNCH_LLM_BASE_URL=https://openrouter.ai/api/v1
+-e SESSIONMUNCH_LLM_MODEL=moonshotai/kimi-k2.6
 -e LLM_API_KEY=sk-or-v1-...
 ```
 
-`AI_MEMORY_LLM_REASONING_EFFORT` is honoured on this path: OpenRouter hosts
+`SESSIONMUNCH_LLM_REASONING_EFFORT` is honoured on this path: OpenRouter hosts
 send `reasoning: { effort, exclude: true }`; `https://api.x.ai` (Grok)
 sends Chat Completions `reasoning_effort` (clamped to `low`/`medium`/`high`/
 `xhigh`, because Grok cannot disable reasoning); other compat endpoints send
@@ -1801,27 +1807,27 @@ models reject it). `ultra` and `persistent` clamp to `max` on OpenAI-style
 hosts. Gemini and Copilot ignore the key.
 
 [Atlas Cloud](https://www.atlascloud.ai/models/qwen/qwen3.5-flash) uses the
-same provider; no Atlas-specific ai-memory provider is needed. Pass its API key
+same provider; no Atlas-specific sessionmunch provider is needed. Pass its API key
 through the generic compatibility credential:
 
 ```bash
--e AI_MEMORY_LLM_PROVIDER=openai-compat
--e AI_MEMORY_LLM_BASE_URL=https://api.atlascloud.ai/v1
--e AI_MEMORY_LLM_MODEL=qwen/qwen3.5-flash
+-e SESSIONMUNCH_LLM_PROVIDER=openai-compat
+-e SESSIONMUNCH_LLM_BASE_URL=https://api.atlascloud.ai/v1
+-e SESSIONMUNCH_LLM_MODEL=qwen/qwen3.5-flash
 -e LLM_API_KEY="$ATLASCLOUD_API_KEY"
 ```
 
-Replace the model with another current Atlas model id when needed. ai-memory
+Replace the model with another current Atlas model id when needed. sessionmunch
 does not select a default for hosted compatibility endpoints.
 
 [OrcaRouter](https://www.orcarouter.ai) uses the same provider; no
-OrcaRouter-specific ai-memory provider is needed. Pass its API key through the
+OrcaRouter-specific sessionmunch provider is needed. Pass its API key through the
 generic compatibility credential:
 
 ```bash
--e AI_MEMORY_LLM_PROVIDER=openai-compat
--e AI_MEMORY_LLM_BASE_URL=https://api.orcarouter.ai/v1
--e AI_MEMORY_LLM_MODEL=openai/gpt-4o
+-e SESSIONMUNCH_LLM_PROVIDER=openai-compat
+-e SESSIONMUNCH_LLM_BASE_URL=https://api.orcarouter.ai/v1
+-e SESSIONMUNCH_LLM_MODEL=openai/gpt-4o
 -e LLM_API_KEY=sk-orca-...
 ```
 
@@ -1832,16 +1838,16 @@ Replace the model with another current OrcaRouter model id (same
 OpenAI-compatible structured calls use the operation's JSON Schema by default:
 
 ```bash
--e AI_MEMORY_LLM_COMPAT_STRICT=true
+-e SESSIONMUNCH_LLM_COMPAT_STRICT=true
 ```
 
 Modern Ollama, vLLM, LM Studio, llama.cpp, and gateway endpoints honour this
-OpenAI-style `response_format=json_schema` request. ai-memory retries with its
+OpenAI-style `response_format=json_schema` request. sessionmunch retries with its
 tolerant parser when an endpoint explicitly rejects the structured-output field
 or returns a malformed response shape. For an incompatible endpoint, opt out:
 
 ```bash
--e AI_MEMORY_LLM_COMPAT_STRICT=false
+-e SESSIONMUNCH_LLM_COMPAT_STRICT=false
 ```
 
 Hosted gateways that stream long completions past the default 300-second
@@ -1849,23 +1855,23 @@ per-request ceiling fail with `http: error sending request`; raise the
 ceiling to match the gateway's worst-case generation time:
 
 ```bash
--e AI_MEMORY_LLM_TIMEOUT_SECS=900
+-e SESSIONMUNCH_LLM_TIMEOUT_SECS=900
 ```
 
 #### Send a caller-identifying header to a gateway that requires one
 
-Every chat request already carries `User-Agent: ai-memory/<version>`, so a
+Every chat request already carries `User-Agent: sessionmunch/<version>`, so a
 gateway can tell what is calling it. Some also require a header of their own
 for request correlation, and reject or throttle traffic without it. Declare
 those once — they are sent on every chat request, whatever the provider:
 
 ```bash
--e AI_MEMORY_LLM_HEADERS=x-opencode-session=prod-01,x-opencode-client=ai-memory
+-e SESSIONMUNCH_LLM_HEADERS=x-opencode-session=prod-01,x-opencode-client=sessionmunch
 ```
 
 Entries are `Name=Value` or `Name: Value`, comma separated. A header *value*
 cannot contain a comma through the env var; use `llm_headers = [...]` in
-`config.toml` when one must. Headers ai-memory sets itself (`authorization`,
+`config.toml` when one must. Headers sessionmunch sets itself (`authorization`,
 `content-type`, `x-api-key`, `x-goog-api-key`, `anthropic-version`,
 `anthropic-beta`, `openai-beta`, `host`, `content-length`) are refused at
 startup rather than duplicated onto the request. An entry for `user-agent`
@@ -1875,8 +1881,8 @@ The `opencode` provider needs no configuration for this: OpenCode asks
 callers for `x-opencode-session`, and that provider already sends one id per
 logical operation — stable across retries and the structured-output
 fallback, so one consolidation pass reads as one operation in OpenCode's
-metrics. Supply the header through `AI_MEMORY_LLM_HEADERS` to override that,
-for instance to tell several ai-memory instances apart under one account.
+metrics. Supply the header through `SESSIONMUNCH_LLM_HEADERS` to override that,
+for instance to tell several sessionmunch instances apart under one account.
 
 #### Match the consolidation budget to a local model's context window
 
@@ -1888,8 +1894,8 @@ the real context window, with additional headroom for tokenizer variance:
 
 ```bash
 # e.g. a model loaded with an 8k context window
--e AI_MEMORY_CONSOLIDATION__MAX_INPUT_TOKENS=6500
--e AI_MEMORY_CONSOLIDATION__MAX_OUTPUT_TOKENS=1000
+-e SESSIONMUNCH_CONSOLIDATION__MAX_INPUT_TOKENS=6500
+-e SESSIONMUNCH_CONSOLIDATION__MAX_OUTPUT_TOKENS=1000
 ```
 
 The double underscore separates the `[consolidation]` section from each key.
@@ -1907,7 +1913,7 @@ those floors.
 
 ## Common subcommands
 
-This is the operational shortlist. Run `ai-memory --help` for the authoritative
+This is the operational shortlist. Run `sessionmunch --help` for the authoritative
 full command tree.
 
 Two ways to invoke a subcommand against the docker deploy:
@@ -1915,9 +1921,9 @@ Two ways to invoke a subcommand against the docker deploy:
 ```bash
 # A) Against the running container (stateful: status, search, backup,
 #    checkpoints, restore-page, audit-contamination, forget-sweep, lint, embed).
-docker exec ai-memory ai-memory status --json
-docker exec ai-memory ai-memory search "karpathy"
-docker exec ai-memory ai-memory backup --to /data/snapshot.tar.gz
+docker exec sessionmunch sessionmunch status --json
+docker exec sessionmunch sessionmunch search "karpathy"
+docker exec sessionmunch sessionmunch backup --to /data/snapshot.tar.gz
 
 # B) One-shot, no running container needed for pure-stdout helpers
 #    (generate-auth-token, completions, install-mcp, install-hooks, setup-agent,
@@ -1959,31 +1965,31 @@ docker run --rm akitaonrails/ai-memory:latest --help     # full subcommand tree
 | `install-mcp --client` | `docker run --rm` | MCP-config snippet per client |
 | `install-hooks --agent` | `docker run --rm` | Hook-config snippet for an existing hooks dir |
 | `setup-agent --agent --to --host-prefix` | `docker run --rm -v` | Extract bundled scripts + print config (one-shot) |
-| `install-instructions [--target] [--print] [--no-skills]` | same host environment used for the agent prompt files | Install or update the slim CLAUDE.md / AGENTS.md routing block and, by default, the managed ai-memory Agent Skills |
-| `install-skills [--scope] [--agent]` | same host environment used for the agent skill dirs | Install or update only the managed ai-memory Agent Skills |
-| `uninstall --apply` | same host environment used for install | Remove only ai-memory-owned hooks, MCP entries, instruction blocks, managed skill files, and generated plugin files after content/marker validation. Use `--mcp-url` for custom MCP endpoints and `--mcp-name` only to narrow removal. |
+| `install-instructions [--target] [--print] [--no-skills]` | same host environment used for the agent prompt files | Install or update the slim CLAUDE.md / AGENTS.md routing block and, by default, the managed sessionmunch Agent Skills |
+| `install-skills [--scope] [--agent]` | same host environment used for the agent skill dirs | Install or update only the managed sessionmunch Agent Skills |
+| `uninstall --apply` | same host environment used for install | Remove only sessionmunch-owned hooks, MCP entries, instruction blocks, managed skill files, and generated plugin files after content/marker validation. Use `--mcp-url` for custom MCP endpoints and `--mcp-name` only to narrow removal. |
 | `llm-test --provider …` | `docker run --rm -e …` | Smoke-test an LLM provider |
 | `completions <shell>` | `docker run --rm` or native binary | Print a bash/zsh/fish/PowerShell/elvish completion script; see [`shell-completions.md`](shell-completions.md) |
 
 ### Managed routing snippets and Agent Skills
 
-ai-memory's routing install is agent-facing prompt packaging. It does not add a
+sessionmunch's routing install is agent-facing prompt packaging. It does not add a
 runtime skill router, and `SKILL.md` files are not durable memory pages. The
 wiki remains the durable source of truth.
 
-`ai-memory install-instructions` now writes two managed prompt artifacts by
+`sessionmunch install-instructions` now writes two managed prompt artifacts by
 default:
 
 1. A slim instruction block in `CLAUDE.md`, `AGENTS.md`, or the file passed with
-   `--target`. The block is bounded by `<!-- ai-memory:start -->` and
-   `<!-- ai-memory:end -->` delimiters that appear alone on their own lines.
-2. Managed ai-memory Agent Skills containing the detailed tool-routing guidance.
+   `--target`. The block is bounded by `<!-- sessionmunch:start -->` and
+   `<!-- sessionmunch:end -->` delimiters that appear alone on their own lines.
+2. Managed sessionmunch Agent Skills containing the detailed tool-routing guidance.
 
-Re-running the command is safe. If a project still has the old long ai-memory
+Re-running the command is safe. If a project still has the old long sessionmunch
 block between line-anchored markers, the refresh replaces that block in place
 with the slim snippet, leaves unrelated instructions before and after it alone,
 and writes a timestamped `.bak-*` backup before changing an existing file.
-Managed skill files contain an ai-memory ownership marker; same-name user skills
+Managed skill files contain an sessionmunch ownership marker; same-name user skills
 without that marker are preserved unless you explicitly force replacement.
 Their embedded payloads use LF line endings on every release platform, so CLI
 installs and `memory_install_self_routing` return the same bytes on Windows,
@@ -2005,12 +2011,12 @@ Use `install-skills` when the instruction block is already right and only the
 Agent Skill files need a refresh:
 
 ```bash
-ai-memory install-skills
-ai-memory install-skills --scope global --agent agents
-ai-memory install-skills --scope global --agent devin
-ai-memory install-skills --scope global --agent grok
-ai-memory install-skills --agent both --print
-ai-memory install-skills --target-dir .custom/skills --force
+sessionmunch install-skills
+sessionmunch install-skills --scope global --agent agents
+sessionmunch install-skills --scope global --agent devin
+sessionmunch install-skills --scope global --agent grok
+sessionmunch install-skills --agent both --print
+sessionmunch install-skills --target-dir .custom/skills --force
 ```
 
 `install-skills` flags:
@@ -2032,13 +2038,13 @@ Default skill target roots:
 
 Each managed skill is written as `<root>/<skill-name>/SKILL.md`.
 
-`ai-memory uninstall --only skills --apply` removes managed skill files only
+`sessionmunch uninstall --only skills --apply` removes managed skill files only
 from the default project/global roots shown above, after validating the
-ai-memory ownership marker. If you installed with `--target-dir` or
+sessionmunch ownership marker. If you installed with `--target-dir` or
 `--skills-target-dir`, clean up that custom root manually.
 
 Data dir inside the container is `/data` (mounted via the compose
-volume). Outside docker, override with `AI_MEMORY_DATA_DIR=/path`.
+volume). Outside docker, override with `SESSIONMUNCH_DATA_DIR=/path`.
 
 Scheduled maintenance is configured in `[maintenance]` in `config.toml`.
 By default, rule-based lint and forget sweep run daily outside hook
@@ -2058,20 +2064,20 @@ remains opt-in and keeps its interval-only behavior (no startup catch-up).
 
 ## Bootstrap mid-project
 
-When you adopt ai-memory in a project that's already been around for
-a while, the wiki starts empty. `ai-memory bootstrap` ingests the
+When you adopt sessionmunch in a project that's already been around for
+a while, the wiki starts empty. `sessionmunch bootstrap` ingests the
 project's existing history into seed pages so the first session has
 warm context.
 
 ```bash
 cd /path/to/project
-ai-memory bootstrap
+sessionmunch bootstrap
 ```
 
 If you installed the Docker wrapper from the quick start and started the
 server on `127.0.0.1:49374`, the wrapper automatically reaches that host
 loopback server from its short-lived helper container. Set
-`AI_MEMORY_SERVER_URL=http://<server>:49374` only when the server is
+`SESSIONMUNCH_SERVER_URL=http://<server>:49374` only when the server is
 remote or uses a custom host/port.
 
 **What gets ingested by default:**
@@ -2088,7 +2094,7 @@ remote or uses a custom host/port.
 
 ```
 --repo-path <PATH>         (default: git rev-parse --show-toplevel)
---workspace <NAME>         (default: the nearest `.ai-memory.toml` marker's
+--workspace <NAME>         (default: the nearest `.sessionmunch.toml` marker's
                             `workspace`, else "default")
 --project <NAME>           (default: the marker's `project` when pinned,
                             else derived from cwd — main repo root's
@@ -2123,7 +2129,7 @@ which sources would actually be sent + how many tokens that
 represents. Output is JSON to stdout.
 
 ```bash
-ai-memory bootstrap --dry-run
+sessionmunch bootstrap --dry-run
 {
   "sources_collected": 117,
   "sources_sent": 22,
@@ -2144,28 +2150,28 @@ outcome.
 **Caveat: LLM-fabricated detail.** A bootstrap run can produce
 plausible-but-wrong pages (the LLM doesn't know your project, it's
 inferring from git history). The wiki is git-versioned precisely so
-this is recoverable: review what landed, `docker exec ai-memory git
+this is recoverable: review what landed, `docker exec sessionmunch git
 -C /data/wiki diff HEAD~1`, and revert if it's off.
 
 ## Logs and read-only sandboxes
 
 The CLI and server write daily-rolling logs to `<data_dir>/logs/`
-(`~/.local/share/ai-memory/logs/` by default). When that location is not
+(`~/.local/share/sessionmunch/logs/` by default). When that location is not
 writable — sandboxes like [ai-jail](https://github.com/akitaonrails/ai-jail)
-mount `$HOME` read-only or as throwaway tmpfs — ai-memory degrades instead
+mount `$HOME` read-only or as throwaway tmpfs — sessionmunch degrades instead
 of failing: it falls back to the OS temp dir, then to stderr-only logging,
 printing the exact path that failed at each step. Commands keep working
 either way. To keep durable file logs (and durable hook spooling) inside a
 sandbox, map the data dir read-write, e.g. `ai-jail --rw-map
-~/.local/share/ai-memory …`.
+~/.local/share/sessionmunch …`.
 
 ## Human password bootstrap and recovery
 
 Human console login is username/password, not a Bearer pasted into the
-browser. Machine APIs keep using `Authorization: Bearer` (`AI_MEMORY_AUTH_TOKEN`
+browser. Machine APIs keep using `Authorization: Bearer` (`SESSIONMUNCH_AUTH_TOKEN`
 or a native `aim_` key). Before human auth activates, deprecated GET-only
 browser compatibility may exchange the root bearer through HTTP Basic for an
-HttpOnly `ai_memory_auth` cookie; activation disables that path immediately.
+HttpOnly `sessionmunch_auth` cookie; activation disables that path immediately.
 The active classes stay isolated: a password only issues a session; a session
 never authenticates `/mcp`/hooks/workstreams; recovery never issues a session;
 an API key never logs into `/auth/login`.
@@ -2180,9 +2186,9 @@ environment — unset it so the plaintext is not kept in process env.
 ```bash
 # At least 12 characters. Must not equal the root bearer, actor-proxy bearer,
 # or recovery token, and must not use an `ams_`/`aim_`/`amk_` prefix.
-export AI_MEMORY_AUTH__INITIAL_ROOT_PASSWORD='choose-a-long-password'
-docker compose up -d   # or: ai-memory serve
-unset AI_MEMORY_AUTH__INITIAL_ROOT_PASSWORD
+export SESSIONMUNCH_AUTH__INITIAL_ROOT_PASSWORD='choose-a-long-password'
+docker compose up -d   # or: sessionmunch serve
+unset SESSIONMUNCH_AUTH__INITIAL_ROOT_PASSWORD
 ```
 
 The first login must change that password (`POST /auth/password` with CSRF).
@@ -2193,15 +2199,15 @@ fails closed and bootstrap is not marked complete.
 
 If the last human root is lost, set a high-entropy recovery secret (at least
 32 characters) and `POST /auth/recovery` with a new password. Success returns
-204, expires the legacy `ai_memory_auth` cookie, revokes that user's sessions,
-and does **not** set `ai_memory_session`. Sign in again with the new password.
+204, expires the legacy `sessionmunch_auth` cookie, revokes that user's sessions,
+and does **not** set `sessionmunch_session`. Sign in again with the new password.
 
 ```bash
-export AI_MEMORY_AUTH__RECOVERY_TOKEN='at-least-32-characters-of-entropy-here'
+export SESSIONMUNCH_AUTH__RECOVERY_TOKEN='at-least-32-characters-of-entropy-here'
 # restart serve so the process picks up the new value
 curl -sS -D - -o /dev/null -X POST http://127.0.0.1:49374/auth/recovery \
   -H 'content-type: application/json' \
-  -d '{"recovery_token":"'"$AI_MEMORY_AUTH__RECOVERY_TOKEN"'","new_password":"brand-new-pass!!","new_password_confirmation":"brand-new-pass!!"}'
+  -d '{"recovery_token":"'"$SESSIONMUNCH_AUTH__RECOVERY_TOKEN"'","new_password":"brand-new-pass!!","new_password_confirmation":"brand-new-pass!!"}'
 ```
 
 Rotate by changing the env var and restarting; the previous token stops
@@ -2213,12 +2219,12 @@ When human mode is on (bootstrap completed, any password hash, or
 initial/recovery secrets configured), `serve` refuses to start unless a
 recoverable root exists (`role=root` with a password and not disabled) or
 recovery is configured. Explicit machine-only remote deploys with
-`AI_MEMORY_AUTH_TOKEN` and no human secrets remain valid. Loopback with
+`SESSIONMUNCH_AUTH_TOKEN` and no human secrets remain valid. Loopback with
 neither Bearer nor human auth stays anonymous.
 
-CIDRs in `AI_MEMORY_AUTH__TRUSTED_PROXY_CIDRS` may supply `X-Forwarded-For`
+CIDRs in `SESSIONMUNCH_AUTH__TRUSTED_PROXY_CIDRS` may supply `X-Forwarded-For`
 for login rate limits; untrusted peers' XFF is ignored. Behind HTTPS, set
-`AI_MEMORY_AUTH__SECURE_COOKIE=true` as noted above.
+`SESSIONMUNCH_AUTH__SECURE_COOKIE=true` as noted above.
 
 ## Operating without auth
 
@@ -2226,9 +2232,9 @@ For local-only / single-machine deploys you can skip the bearer
 token:
 
 ```bash
-docker run -d --name ai-memory \
+docker run -d --name sessionmunch \
     -p 127.0.0.1:49374:49374 \
-    -v ai-memory-data:/data \
+    -v sessionmunch-data:/data \
     akitaonrails/ai-memory:latest
 ```
 
@@ -2237,26 +2243,26 @@ critical pairing - **no bearer token AND loopback only** is the only
 safe combination. The server refuses an unauthenticated LAN bind before it
 accepts requests. `--allow-insecure-no-auth` can override that refusal only
 for an intentional dangerous plain-HTTP deployment; prefer
-`AI_MEMORY_AUTH_TOKEN` or loopback instead.
+`SESSIONMUNCH_AUTH_TOKEN` or loopback instead.
 
 In a *container* that refusal becomes a warning, because the container must
 bind `0.0.0.0` internally for `-p` to work at all and cannot see which host
 address you published to. The `-p` above is therefore doing the real work: it
 is what keeps this container loopback-only. If you change it to publish on a
-LAN address, set `AI_MEMORY_AUTH_TOKEN` as well.
+LAN address, set `SESSIONMUNCH_AUTH_TOKEN` as well.
 
 Then wire up the agent CLI. Both commands default to no auth and
 `http://127.0.0.1:49374` - no extra flags needed for the local case:
 
 ```bash
-ai-memory install-mcp   --client claude-code --apply
-ai-memory install-hooks --agent  claude-code --apply
+sessionmunch install-mcp   --client claude-code --apply
+sessionmunch install-hooks --agent  claude-code --apply
 ```
 
 The installed Docker wrapper runs CLI commands inside a short-lived
 helper container. For local loopback servers, it automatically bridges
-that helper back to the host's `127.0.0.1:49374`, so `ai-memory status`,
-`ai-memory search`, and `ai-memory bootstrap` work with the same default
+that helper back to the host's `127.0.0.1:49374`, so `sessionmunch status`,
+`sessionmunch search`, and `sessionmunch bootstrap` work with the same default
 URL as the generated agent config.
 
 #### SELinux-enforcing hosts
@@ -2269,9 +2275,9 @@ short-lived helper commands that touch host files (`install-*`, `setup-agent`,
 `uninstall`, `backup`, `restore`, and `bootstrap`), it adds `--security-opt
 label=disable`; thin-client commands remain confined when they use the named
 data volume and implicit configuration. An explicit `--config` path or a valid
-host-backed `AI_MEMORY_DATA_DIR` also activates the host-file treatment. This
+host-backed `SESSIONMUNCH_DATA_DIR` also activates the host-file treatment. This
 relaxes SELinux label confinement only for that trusted helper invocation. It
-does not modify the long-lived ai-memory server, which uses an engine-managed
+does not modify the long-lived sessionmunch server, which uses an engine-managed
 named volume.
 
 `bootstrap` is in that list even though it only *reads* host files: an
@@ -2295,14 +2301,14 @@ warns that relabeling system directories such as `/home` can make the host
 inoperable. Docker documents `label=disable` in the
 [`docker run` security options](https://docs.docker.com/reference/cli/docker/container/run/#security-opt).
 
-`ai-memory run`, `ai-memory show`, `ai-memory continue`, `ai-memory resume`,
-`ai-memory workstreams`, and `ai-memory rename-workstream` are the exceptions:
+`sessionmunch run`, `sessionmunch show`, `sessionmunch continue`, `sessionmunch resume`,
+`sessionmunch workstreams`, and `sessionmunch rename-workstream` are the exceptions:
 the current wrapper intercepts them and starts a cached checksum-verified native
 client on the host, where local checkouts, harness executables, and session
-stores exist. It preserves an explicit remote `AI_MEMORY_SERVER_URL`. If one of
+stores exist. It preserves an explicit remote `SESSIONMUNCH_SERVER_URL`. If one of
 these commands logs `data_dir=/data`, cannot find a checkout, or cannot find
 `codex`, `claude`, or another host executable, refresh the stale wrapper with
-`ai-memory upgrade` on that client machine.
+`sessionmunch upgrade` on that client machine.
 
 ### Docker compose alternative
 
@@ -2318,50 +2324,51 @@ the regular Docker path.
 
 ---
 
-## Keeping ai-memory up to date
+## Keeping sessionmunch up to date
 
 The wrapper checks Docker Hub at most once every 24 hours and prints a
 one-line warning when a newer image is available. Upgrade with:
 
 ```bash
-ai-memory upgrade
+sessionmunch upgrade
 ```
 
 The command downloads the wrapper and its SHA-256 checksum from the latest
 GitHub Release, refuses an unverified update, pulls the latest Docker
 image, re-stages hook scripts under
-`~/.local/share/ai-memory/hooks/<agent>/` for configured agents, and
+`~/.local/share/sessionmunch/hooks/<agent>/` for configured agents, and
 prints how to restart the server container so the new binary is used.
-Re-running `install-hooks --apply` remains idempotent: ai-memory
+Re-running `install-hooks --apply` remains idempotent: sessionmunch
 replaces only the hook entries it owns and leaves unrelated hooks alone.
 When a Compose file is found, the wrapper first verifies that its project owns
-the running `ai-memory` container. A standalone container is never handed to an
+the running `sessionmunch` container. A standalone container is never handed to an
 unrelated Compose project just because its file occupies a conventional path;
 the wrapper instead writes the inspected standalone recreation script for
 review, preserving the existing `/data` mount and other runtime options.
 
-Set `AI_MEMORY_NO_VERSION_CHECK=1` to silence the daily check. To pin wrapper
-self-upgrades to a fork or tagged release, set `AI_MEMORY_WRAPPER_URL=<url>`;
+Set `SESSIONMUNCH_NO_VERSION_CHECK=1` to silence the daily check. To pin wrapper
+self-upgrades to a fork or tagged release, set `SESSIONMUNCH_WRAPPER_URL=<url>`;
 the wrapper requires `<url>.sha256` unless
-`AI_MEMORY_WRAPPER_SHA256_URL=<checksum-url>` is also set.
+`SESSIONMUNCH_WRAPPER_SHA256_URL=<checksum-url>` is also set.
 
 When the upgraded server starts, it applies SQLite schema migrations and
 pending wiki-structure migrations automatically. No manual database
 reset or wiki rewrite is required for normal upgrades.
 
-If the server runs on another host, `ai-memory upgrade` refreshes only
+If the server runs on another host, `sessionmunch upgrade` refreshes only
 the local wrapper, local image, and local hook scripts. Redeploy the
 remote server separately with `bin/deploy` or `docker compose pull &&
 docker compose up -d` in that deploy directory.
 
 Inside ai-jail or another bwrap sandbox, the wrapper is usable from the
 sandbox, but run `install-*` commands outside the sandbox because they
-write to `~/.local/share/ai-memory/hooks/`.
+write to `~/.local/share/sessionmunch/hooks/`.
 
 ---
 
 ## See also
 
+- [`docs/models.md`](models.md) - opinionated model guide for embeddings and summarization across hardware tiers
 - [`docs/deploy.md`](deploy.md) - homelab deploy walkthrough
   (`bin/deploy`, cloudflared TLS, env-file management)
 - [`docs/usage.md`](usage.md) - handoffs, proactive querying, web UI, slim
@@ -2369,4 +2376,4 @@ write to `~/.local/share/ai-memory/hooks/`.
 - [`docs/mcp-install.md`](mcp-install.md) - per-client MCP config reference for
   every client in the [README Support Matrix](../README.md#support-matrix)
 - [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) - what's actually
-  running inside ai-memory
+  running inside sessionmunch

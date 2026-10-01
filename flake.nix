@@ -1,7 +1,7 @@
-# Nix flake for ai-memory.
+# Nix flake for sessionmunch.
 #
 # Provides:
-#   nix build              # → result/bin/ai-memory  (native release binary)
+#   nix build              # → result/bin/sessionmunch  (native release binary)
 #   nix run . -- --version # smoke-test without installing
 #   nix develop            # dev shell with Rust 1.95 (pinned)
 #
@@ -13,10 +13,10 @@
 # Tailwind CLI (which a sandboxed Nix build cannot do).
 #
 # `doCheck = false` skips the packaging test suite. Those tests exercise
-# `bin/ai-memory`, a Docker-wrapper shell script that needs `docker` or
+# `bin/sessionmunch`, a Docker-wrapper shell script that needs `docker` or
 # `podman` on PATH — they are host-environment tests, not build tests,
 # and are not Nix's responsibility. Run them manually with
-# `nix develop -c cargo test -p ai-memory-cli --test packaging` if your
+# `nix develop -c cargo test -p sessionmunch-cli --test packaging` if your
 # machine has Docker.
 
 {
@@ -68,7 +68,7 @@
       in
       {
         packages.default = rustPlatform.buildRustPackage {
-          pname = "ai-memory";
+          pname = "sessionmunch";
           version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
 
           src = ./.;
@@ -79,13 +79,13 @@
 
           # Skip the Tailwind CLI download in the sandbox. The build script
           # falls back to the vendored static/tailwind.css committed to the
-          # repo (see crates/ai-memory-web/build.rs).
+          # repo (see crates/sessionmunch-web/build.rs).
           TAILWIND_SKIP = "1";
 
           buildType = "release";
 
           # The packaging test suite (tests/packaging.rs) exercises the
-          # Docker-wrapper shell script `bin/ai-memory` and needs
+          # Docker-wrapper shell script `bin/sessionmunch` and needs
           # docker/podman on PATH — not available in a Nix sandbox. The
           # rest of the workspace test suite (unit tests + integration)
           # does not need them and can be run via `nix develop -c cargo
@@ -94,33 +94,33 @@
 
           # Install the bundled hook scripts alongside the binary,
           # mirroring what the AUR PKGBUILD does. Native binary users
-          # (`ai-memory serve`, `install-hooks`) look up hooks under
+          # (`sessionmunch serve`, `install-hooks`) look up hooks under
           # the binary's share directory at runtime.
           #
-          # `bin/ai-memory` (the Docker-wrapper shell script) is NOT
+          # `bin/sessionmunch` (the Docker-wrapper shell script) is NOT
           # installed — Nix users build the native binary directly and
           # have no need for a Docker wrapper.
           postInstall = ''
-            mkdir -p $out/share/ai-memory
-            cp -a hooks $out/share/ai-memory/
+            mkdir -p $out/share/sessionmunch
+            cp -a hooks $out/share/sessionmunch/
 
-            # Install the default config template so `ai-memory init`
+            # Install the default config template so `sessionmunch init`
             # has a known-good starting point without a network fetch.
-            mkdir -p $out/etc/ai-memory
-            cp crates/ai-memory-cli/templates/config.default.toml \
-               $out/etc/ai-memory/config.default.toml
+            mkdir -p $out/etc/sessionmunch
+            cp crates/sessionmunch-cli/templates/config.default.toml \
+               $out/etc/sessionmunch/config.default.toml
           '';
 
           meta = {
             description = "Long-term memory for AI coding agents";
             homepage = "https://github.com/akitaonrails/ai-memory";
             license = pkgs.lib.licenses.mit;
-            mainProgram = "ai-memory";
+            mainProgram = "sessionmunch";
           };
         };
 
         devShells.default = pkgs.mkShell {
-          name = "ai-memory-dev";
+          name = "sessionmunch-dev";
 
           buildInputs = [
             rust
@@ -133,11 +133,11 @@
 
           shellHook = ''
             echo ""
-            echo "ai-memory dev shell — Rust $(rustc --version)"
+            echo "sessionmunch dev shell — Rust $(rustc --version)"
             echo ""
             echo "  cargo build --workspace          # build"
             echo "  cargo test --workspace           # unit + integration tests"
-            echo "  cargo test -p ai-memory-cli --test packaging  # needs docker"
+            echo "  cargo test -p sessionmunch-cli --test packaging  # needs docker"
             echo ""
           '';
         };

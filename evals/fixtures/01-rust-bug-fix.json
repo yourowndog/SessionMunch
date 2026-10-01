@@ -2,9 +2,9 @@
   "name": "rust-bug-fix",
   "description": "Realistic short session: user fixes a Rust async bug, decides on a pattern, hits one gotcha. Tests whether the model extracts both the decision and the gotcha as separate pages, not just a session log.",
   "observations": [
-    {"kind": "session-start", "title": "session start", "body": "cwd=/mnt/data/Projects/ai-memory, agent=claude-code"},
+    {"kind": "session-start", "title": "session start", "body": "cwd=/mnt/data/Projects/sessionmunch, agent=claude-code"},
     {"kind": "user-prompt", "title": "user prompt", "body": "the writer actor is panicking when the bounded mpsc channel fills up — fix it without unbounding the channel"},
-    {"kind": "pre-tool-use", "title": "Read", "body": "crates/ai-memory-store/src/writer.rs"},
+    {"kind": "pre-tool-use", "title": "Read", "body": "crates/sessionmunch-store/src/writer.rs"},
     {"kind": "post-tool-use", "title": "Read result", "body": "found send() being called from an async context — current code uses try_send and unwraps the Err on full"},
     {"kind": "user-prompt", "title": "user prompt", "body": "yes, replace the try_send unwrap with awaiting send and let backpressure propagate; do not silently drop writes"},
     {"kind": "pre-tool-use", "title": "Edit", "body": "writer.rs: changed try_send().unwrap() to send().await?"},

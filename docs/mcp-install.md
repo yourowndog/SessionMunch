@@ -13,10 +13,10 @@
 > needed for **Claude Desktop** specifically, because its config only
 > supports stdio servers — not because of session state. If you run a
 > client that *requires* MCP session continuity or server-initiated SSE
-> streams, start the server with `ai-memory serve --transport http
+> streams, start the server with `sessionmunch serve --transport http
 > --http-stateful` to restore rmcp's session mode.
 
-This page documents how to register ai-memory as an MCP server with
+This page documents how to register sessionmunch as an MCP server with
 agent CLIs beyond the README quick start.
 
 The hook-capable clients in the [README Support Matrix](../README.md#support-matrix)
@@ -27,7 +27,7 @@ Claude Code may use its supported Windows exec form; other agents use native
 single command strings according to their hook schema. PowerShell/Git Bash
 script bundles are compatibility fallbacks and do not enforce capture-policy
 v1. Grok and Zero capture lifecycle events, but both ignore
-SessionStart stdout, so ai-memory does not auto-inject handoffs for them.
+SessionStart stdout, so sessionmunch does not auto-inject handoffs for them.
 SessionStart handoff injection works only for clients that consume startup-hook
 stdout (or their equivalent context-injection result); Grok and Zero must call
 `memory_handoff_accept` when resuming.
@@ -39,9 +39,9 @@ not. Reinstall/refresh an existing hook or plugin to gain it; see
 [Capture exclusions](marker-file.md#capture-exclusions).
 
 Claude Desktop, VS Code Copilot, Zed, and Muse Code are **MCP-only** here:
-they expose long-term memory to their LLMs via ai-memory's MCP tools
+they expose long-term memory to their LLMs via sessionmunch's MCP tools
 (`memory_query`, `memory_recent`, `memory_handoff_accept`, etc.), but
-they do not auto-capture session events into ai-memory's `/hook`
+they do not auto-capture session events into sessionmunch's `/hook`
 endpoint. The trade-off:
 
 | | What you get | What you don't get |
@@ -56,40 +56,40 @@ For proactive tool use in MCP-capable clients that read project instructions,
 also install the managed routing package from
 [`docs/usage.md`](usage.md#install-the-routing-snippet-and-agent-skills). The
 slim instruction block stays in the agent rules file, while supported Agent
-Skills carry the detailed ai-memory tool-routing guidance.
+Skills carry the detailed sessionmunch tool-routing guidance.
 
 ## Custom lifecycle bridges
 
-Built-in integrations should use `ai-memory install-hooks` rather than
+Built-in integrations should use `sessionmunch install-hooks` rather than
 calling `/hook` directly. For a third-party bridge that has its own
 lifecycle vocabulary, keep the core `event` query param on one of
-ai-memory's canonical events when possible:
+sessionmunch's canonical events when possible:
 
 ### Community-maintained Hermes Agent plugin
 
-ai-memory does not currently ship a first-party Hermes Agent installer,
+sessionmunch does not currently ship a first-party Hermes Agent installer,
 but a community-maintained
-[`ai-memory-hermes-plugin`](https://github.com/MrLuciano/ai-memory-hermes-plugin)
+[`sessionmunch-hermes-plugin`](https://github.com/MrLuciano/sessionmunch-hermes-plugin)
 is available. Treat it as a third-party bridge: verify the plugin's
-documented Hermes and ai-memory version matrix, install/update/uninstall
+documented Hermes and sessionmunch version matrix, install/update/uninstall
 behavior, platform coverage, and secret handling before enabling it on a
-live ai-memory server. In particular, bearer tokens and endpoint settings
+live sessionmunch server. In particular, bearer tokens and endpoint settings
 should stay in environment or local config references rather than generated
 plugin source files.
 
 The hook router does recognize `agent=hermes` as a concrete session kind and
 accepts Hermes' documented shell-hook `tool_name` / `tool_input` envelope for
 tool-family metadata and capture-exclusion enforcement. A custom bridge should
-map `on_session_start`, `post_tool_call`, and `on_session_end` to ai-memory's
+map `on_session_start`, `post_tool_call`, and `on_session_end` to sessionmunch's
 canonical `session-start`, `post-tool-use`, and `session-end` event names while
 forwarding the original JSON object. This protocol recognition does not install
 or trust a third-party plugin. Hermes ignores session-start hook stdout, so it
 cannot consume an automatic handoff there; use MCP `memory_handoff_accept`.
 
 The same lifecycle guidance below applies to Hermes or any other external
-bridge: map known events onto ai-memory's canonical hook events where
+bridge: map known events onto sessionmunch's canonical hook events where
 possible, and use extension metadata for source-specific events instead of
-expanding ai-memory's stored event enum for one client.
+expanding sessionmunch's stored event enum for one client.
 
 ```bash
 curl -X POST \
@@ -99,7 +99,7 @@ curl -X POST \
 ```
 
 If the source event has no canonical equivalent, opt in to extension
-metadata instead of asking ai-memory to expand its stored event enum:
+metadata instead of asking sessionmunch to expand its stored event enum:
 
 ```bash
 curl -X POST \
@@ -109,7 +109,7 @@ curl -X POST \
 ```
 
 With `extension=<namespace>`, unknown events are still stored as the
-canonical `other` observation kind, but ai-memory also preserves the
+canonical `other` observation kind, but sessionmunch also preserves the
 validated source event. You may pass `source_event=<name>` explicitly;
 otherwise an unknown `event` value becomes the source event. Both tokens
 must be ASCII letters, digits, `.`, `_`, `-`, or `:`; namespaces are
@@ -120,7 +120,7 @@ metadata.
 > **One-shot tip:** every snippet below is also reachable from the
 > CLI:
 > ```bash
-> ai-memory install-mcp --client gemini-cli   # or cursor / claude-desktop / openclaw / omp / pi / antigravity-cli / grok / kimi-code / kiro-cli / command-code / swival / devin / zero / zcode / vscode-copilot / zed / muse
+> sessionmunch install-mcp --client gemini-cli   # or cursor / claude-desktop / openclaw / omp / pi / antigravity-cli / grok / kimi-code / kiro-cli / command-code / swival / devin / zero / zcode / vscode-copilot / zed / muse
 > ```
 
 ---
@@ -133,21 +133,21 @@ bridge supported for concurrent sessions.
 The default registration remains a static HTTP entry:
 
 ```bash
-ai-memory install-mcp --client claude-code --apply
+sessionmunch install-mcp --client claude-code --apply
 ```
 
 Static HTTP config cannot attach the current lifecycle-hook session id, so
 `[auto_scope] mode = "per_session"` cannot isolate two concurrent Claude Code
-sessions through that entry. Opt into ai-memory's local stdio bridge instead:
+sessions through that entry. Opt into sessionmunch's local stdio bridge instead:
 
 ```bash
-ai-memory install-mcp --client claude-code --session-aware --apply
+sessionmunch install-mcp --client claude-code --session-aware --apply
 ```
 
-The generated entry runs `ai-memory mcp-bridge`, connects to the same configured
+The generated entry runs `sessionmunch mcp-bridge`, connects to the same configured
 local or remote `/mcp` endpoint, preserves bearer authentication, and adds
 `X-Memory-Actor-Session-Id: <CLAUDE_CODE_SESSION_ID>` to every upstream request.
-It supports ai-memory's default stateless HTTP mode and opt-in stateful mode.
+It supports sessionmunch's default stateless HTTP mode and opt-in stateful mode.
 The command fails closed if Claude did not supply a session id rather than
 silently falling back to the shared single slot.
 
@@ -174,7 +174,7 @@ native HTTP or generated bridge paths.
 ## Cursor
 
 **Status:** ✅ MCP supported. ✅ Lifecycle hooks supported via
-`ai-memory install-hooks --agent cursor --apply`.
+`sessionmunch install-hooks --agent cursor --apply`.
 
 **Config file:**
 - Per-project: `.cursor/mcp.json` in the workspace root.
@@ -183,7 +183,7 @@ native HTTP or generated bridge paths.
 ```json
 {
   "mcpServers": {
-    "ai-memory": {
+    "sessionmunch": {
       "url": "http://127.0.0.1:49374/mcp"
     }
   }
@@ -194,7 +194,7 @@ native HTTP or generated bridge paths.
 - Cursor uses the `url` key for HTTP/SSE transports. Stdio uses
   `command` + `args` instead.
 - Cursor hooks live in `~/.cursor/hooks.json` or `.cursor/hooks.json`.
-  ai-memory maps `sessionStart`, `sessionEnd`, `beforeSubmitPrompt`,
+  sessionmunch maps `sessionStart`, `sessionEnd`, `beforeSubmitPrompt`,
   `preToolUse`, `postToolUse`, `postToolUseFailure`, `preCompact`, and
   `stop` to the shared capture path.
 - Cursor watches `hooks.json` on save. For MCP config changes, restart
@@ -207,15 +207,15 @@ native HTTP or generated bridge paths.
 
 **Status:** ✅ MCP supported (workspace-default). ❌ No lifecycle hooks
 (Copilot's agent mode does not expose `PreToolUse` / `PostToolUse` /
-`SessionStart` yet, so ai-memory's automatic capture is not active in
+`SessionStart` yet, so sessionmunch's automatic capture is not active in
 VS Code — call `memory_query`, `memory_write_page`, etc. from chat).
 
 **Config file:**
 - Workspace (recommended): `.vscode/mcp.json` in the repo root. Matches
-  ai-memory's per-cwd auto-scoping.
+  sessionmunch's per-cwd auto-scoping.
 - User profile: run **MCP: Open User Configuration** in VS Code and use
   the `mcp.json` file it opens. The exact path is platform- and
-  profile-specific; pass it to `--config-file` if you want ai-memory to
+  profile-specific; pass it to `--config-file` if you want sessionmunch to
   write that file directly.
 
 **Schema (verified against VS Code's MCP reference):** top-level key is
@@ -225,7 +225,7 @@ VS Code — call `memory_query`, `memory_write_page`, etc. from chat).
 ```json
 {
   "servers": {
-    "ai-memory": {
+    "sessionmunch": {
       "type": "http",
       "url": "http://127.0.0.1:49374/mcp"
     }
@@ -238,7 +238,7 @@ VS Code — call `memory_query`, `memory_write_page`, etc. from chat).
 ```json
 {
   "servers": {
-    "ai-memory": {
+    "sessionmunch": {
       "type": "http",
       "url": "http://127.0.0.1:49374/mcp",
       "headers": {
@@ -253,13 +253,13 @@ VS Code — call `memory_query`, `memory_write_page`, etc. from chat).
 
 ```bash
 # Print the snippet:
-ai-memory install-mcp --client vscode-copilot
+sessionmunch install-mcp --client vscode-copilot
 
 # Or write .vscode/mcp.json in the current workspace directly:
-ai-memory install-mcp --client vscode-copilot --apply
+sessionmunch install-mcp --client vscode-copilot --apply
 
 # Or write the user-profile mcp.json opened by VS Code directly:
-ai-memory install-mcp --client vscode-copilot \
+sessionmunch install-mcp --client vscode-copilot \
   --config-file /path/to/vscode-profile/mcp.json --apply
 ```
 
@@ -305,7 +305,7 @@ The server map is the top-level `context_servers` key. Remote servers use a
 ```json
 {
   "context_servers": {
-    "ai-memory": {
+    "sessionmunch": {
       "url": "http://127.0.0.1:49374/mcp",
       "headers": {
         "Authorization": "Bearer <token>"
@@ -318,17 +318,17 @@ The server map is the top-level `context_servers` key. Remote servers use a
 Print or apply the configuration with:
 
 ```bash
-ai-memory install-mcp --client zed
-ai-memory install-mcp --client zed --apply \
+sessionmunch install-mcp --client zed
+sessionmunch install-mcp --client zed --apply \
   --server-url "http://homelab:49374/mcp" \
   --auth-token "$TOKEN"
 ```
 
 `--apply` preserves JSONC comments, trailing commas, unrelated Zed settings,
-and other context servers. Zed can call ai-memory's MCP tools, but it does not
+and other context servers. Zed can call sessionmunch's MCP tools, but it does not
 expose compatible session or tool lifecycle hooks. Automatic capture,
 automatic handoff injection, and
-`ai-memory run` continuity are therefore not available; ask the agent to call
+`sessionmunch run` continuity are therefore not available; ask the agent to call
 `memory_handoff_begin` before leaving and `memory_handoff_accept` when
 resuming when you need manual continuity.
 
@@ -354,7 +354,7 @@ casing: `mcpServers`, which most other clients use, is ignored here.
 {
   "schema_version": 1,
   "mcp_servers": {
-    "ai-memory": {
+    "sessionmunch": {
       "transport": "streamable_http",
       "url": "http://127.0.0.1:49374/mcp",
       "headers": {
@@ -370,8 +370,8 @@ casing: `mcpServers`, which most other clients use, is ignored here.
 Print or apply the configuration with:
 
 ```bash
-ai-memory install-mcp --client muse
-ai-memory install-mcp --client muse --apply \
+sessionmunch install-mcp --client muse
+sessionmunch install-mcp --client muse --apply \
   --server-url "http://homelab:49374/mcp" \
   --auth-token "$TOKEN"
 ```
@@ -383,7 +383,7 @@ Two details of Muse's schema are worth knowing before hand-editing the file:
   adds the key when it is missing and never rewrites an existing value, so a
   future schema is not silently downgraded.
 - **`mode` defaults to `required`**, and a required server that fails to start
-  aborts the whole Muse run. ai-memory writes `"mode": "optional"` explicitly
+  aborts the whole Muse run. sessionmunch writes `"mode": "optional"` explicitly
   so an unreachable memory server costs you recall rather than the session.
 
 A non-default `framing` value is rejected on `streamable_http`, so the
@@ -391,8 +391,8 @@ generated entry omits the key.
 
 **Skills:** no extra step is needed. Muse Code loads user skills from
 `$XDG_CONFIG_HOME/muse/skills` and `~/.agents/skills`, and
-`ai-memory install-skills` already writes the cross-client `~/.agents/skills`
-root, so the ai-memory routing skills are visible to Muse. Confirm with
+`sessionmunch install-skills` already writes the cross-client `~/.agents/skills`
+root, so the sessionmunch routing skills are visible to Muse. Confirm with
 `muse skills list`.
 
 Muse Code documents a lifecycle hook surface, but the output contract of its
@@ -423,14 +423,14 @@ Sources: <https://dev.meta.ai/docs/muse-code/configuration>,
   (terminal) instead.
 
 **Important:** Claude Desktop's JSON config supports stdio MCP
-servers only. To talk to ai-memory's HTTP endpoint, bridge through
+servers only. To talk to sessionmunch's HTTP endpoint, bridge through
 the community [`mcp-remote`](https://www.npmjs.com/package/mcp-remote)
 stdio shim. Requires Node.js installed on the same machine.
 
 ```json
 {
   "mcpServers": {
-    "ai-memory": {
+    "sessionmunch": {
       "command": "npx",
       "args": ["-y", "mcp-remote", "http://127.0.0.1:49374/mcp"]
     }
@@ -442,7 +442,7 @@ stdio shim. Requires Node.js installed on the same machine.
 - After editing the config, **fully quit and relaunch** Claude
   Desktop. "Check for Updates…" is not enough.
 - Claude Desktop also has account-level remote custom connectors and
-  `.mcpb` desktop extensions. The ai-memory CLI manages the local
+  `.mcpb` desktop extensions. The sessionmunch CLI manages the local
   JSON-config path because it works with localhost/LAN servers and does
   not require publishing an HTTPS connector.
 - Claude Desktop exposes MCP tools but no lifecycle hooks, so automatic
@@ -458,7 +458,7 @@ stdio shim. Requires Node.js installed on the same machine.
   `AppData\Local\Packages\Claude_<id>\LocalCache\Roaming\` tree that an
   unpackaged process such as this CLI must address directly.
   `install-mcp --client claude-desktop --apply` detects this and writes
-  to the packaged location automatically. On an older ai-memory build,
+  to the packaged location automatically. On an older sessionmunch build,
   pass `--config-file` pointed at the `LocalCache` path directly.
 - Sources: <https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop>,
   <https://support.claude.com/en/articles/11175166-how-to-connect-remote-mcp-integrations-to-claude>,
@@ -469,7 +469,7 @@ stdio shim. Requires Node.js installed on the same machine.
 ## Gemini CLI
 
 **Status:** ✅ MCP supported. ✅ Lifecycle hooks supported via
-`ai-memory install-hooks --agent gemini-cli --apply`.
+`sessionmunch install-hooks --agent gemini-cli --apply`.
 
 **Config file:**
 - User: `~/.gemini/settings.json`
@@ -481,7 +481,7 @@ endpoints. The `timeout` is in milliseconds.
 ```json
 {
   "mcpServers": {
-    "ai-memory": {
+    "sessionmunch": {
       "httpUrl": "http://127.0.0.1:49374/mcp",
       "timeout": 5000
     }
@@ -492,12 +492,12 @@ endpoints. The `timeout` is in milliseconds.
 **Hooks:**
 
 ```bash
-ai-memory install-hooks --agent gemini-cli --apply
+sessionmunch install-hooks --agent gemini-cli --apply
 ```
 
 Gemini CLI's lifecycle event names differ from Claude Code's, so use
 `install-hooks --agent gemini-cli` rather than copying another agent's
-settings. ai-memory maps Gemini's `SessionStart`, `SessionEnd`,
+settings. sessionmunch maps Gemini's `SessionStart`, `SessionEnd`,
 `BeforeTool`, `AfterTool`, and `PreCompress` events to the shared hook
 capture path; `SessionStart` also fetches pending handoffs.
 
@@ -513,7 +513,7 @@ capture path; `SessionStart` also fetches pending handoffs.
 ## Antigravity CLI (`agy`)
 
 **Status:** ✅ MCP supported. ✅ Lifecycle hooks supported via
-`ai-memory install-hooks --agent antigravity-cli --apply`.
+`sessionmunch install-hooks --agent antigravity-cli --apply`.
 
 **Config file (MCP):** `~/.gemini/config/mcp_config.json`
 
@@ -524,7 +524,7 @@ parallel subagent support. It uses a separate `mcp_config.json`
 
 ```bash
 # Merge the MCP entry into the Antigravity config:
-ai-memory install-mcp --client antigravity-cli --apply
+sessionmunch install-mcp --client antigravity-cli --apply
 ```
 
 The rendered snippet writes to `mcp_config.json` under `mcpServers`:
@@ -532,7 +532,7 @@ The rendered snippet writes to `mcp_config.json` under `mcpServers`:
 ```json
 {
   "mcpServers": {
-    "ai-memory": {
+    "sessionmunch": {
       "serverUrl": "http://127.0.0.1:49374/mcp",
       "timeout": 5000
     }
@@ -549,18 +549,18 @@ lifecycle events (`PreInvocation`, `Stop`) use flat shape.
 
 ```bash
 # One-shot via CLI:
-ai-memory install-hooks --agent antigravity-cli --apply
+sessionmunch install-hooks --agent antigravity-cli --apply
 ```
 
 The rendered hooks config looks like:
 
 ```json
 {
-  "ai-memory": {
+  "sessionmunch": {
     "PreInvocation": [
       {
         "type": "command",
-        "command": "AI_MEMORY_HOOK_URL=http://127.0.0.1:49374 /path/to/session-start.sh"
+        "command": "SESSIONMUNCH_HOOK_URL=http://127.0.0.1:49374 /path/to/session-start.sh"
       }
     ],
     "PreToolUse": [
@@ -569,7 +569,7 @@ The rendered hooks config looks like:
         "hooks": [
           {
             "type": "command",
-            "command": "AI_MEMORY_HOOK_URL=http://127.0.0.1:49374 /path/to/pre-tool-use.sh"
+            "command": "SESSIONMUNCH_HOOK_URL=http://127.0.0.1:49374 /path/to/pre-tool-use.sh"
           }
         ]
       }
@@ -580,7 +580,7 @@ The rendered hooks config looks like:
         "hooks": [
           {
             "type": "command",
-            "command": "AI_MEMORY_HOOK_URL=http://127.0.0.1:49374 /path/to/post-tool-use.sh"
+            "command": "SESSIONMUNCH_HOOK_URL=http://127.0.0.1:49374 /path/to/post-tool-use.sh"
           }
         ]
       }
@@ -588,7 +588,7 @@ The rendered hooks config looks like:
     "Stop": [
       {
         "type": "command",
-        "command": "AI_MEMORY_HOOK_URL=http://127.0.0.1:49374 /path/to/stop.sh"
+        "command": "SESSIONMUNCH_HOOK_URL=http://127.0.0.1:49374 /path/to/stop.sh"
       }
     ]
   }
@@ -601,7 +601,7 @@ The rendered hooks config looks like:
 - MCP and hooks use separate files: MCP belongs in
   `~/.gemini/config/mcp_config.json`, while hooks belong in
   `~/.gemini/config/hooks.json`.
-- Hook scripts are staged under `~/.local/share/ai-memory/hooks/antigravity-cli/`.
+- Hook scripts are staged under `~/.local/share/sessionmunch/hooks/antigravity-cli/`.
 - Native Windows Docker-wrapper installs render hook entries as
   `powershell.exe ... -EncodedCommand <payload>` so Antigravity's outer command
   runner cannot expand the inner `$env:` setup. The child also forces text
@@ -610,13 +610,13 @@ The rendered hooks config looks like:
   `install-hooks --agent antigravity-cli --apply` after upgrading to refresh
   existing entries.
 - The `PreInvocation` event fires before each model call (not just at
-  session start). ai-memory uses it as the closest equivalent to Gemini
+  session start). sessionmunch uses it as the closest equivalent to Gemini
   CLI's `SessionStart`; when a pending handoff exists, the hook injects
   it via Antigravity's `injectSteps[].ephemeralMessage` output.
 - Antigravity CLI does not expose a true session-end hook. `Stop` records a
   stop observation only because it marks the end of one execution loop, not
   the conversation. After the final turn, run
-  `ai-memory finalize-session --agent antigravity-cli` to close the session and,
+  `sessionmunch finalize-session --agent antigravity-cli` to close the session and,
   when it contains substantive events, create the final summary and automatic
   handoff and queue opt-in SessionEnd consolidation.
 - `memory_handoff_begin` always creates an explicit manual handoff with no
@@ -629,7 +629,7 @@ The rendered hooks config looks like:
   session itself must end and produce an attributed automatic handoff.
 - The built-in `/web` route displays compiled wiki pages, not raw session or
   observation rows. To verify hook capture, compare the `sessions` and
-  `observations` counts from `ai-memory status` before and after a prompt.
+  `observations` counts from `sessionmunch status` before and after a prompt.
 - Source: <https://antigravity.google/docs/hooks>
 
 ---
@@ -641,7 +641,7 @@ Zero manages MCP servers in `~/.config/zero/config.json`
 `mcp.servers` map, with native HTTP transport + bearer headers:
 
 ```bash
-ai-memory install-mcp --client zero --apply \
+sessionmunch install-mcp --client zero --apply \
     --server-url "http://homelab:49374/mcp" --auth-token "$TOKEN"
 ```
 
@@ -651,7 +651,7 @@ which merges:
 {
   "mcp": {
     "servers": {
-      "ai-memory": {
+      "sessionmunch": {
         "type": "http",
         "url": "http://homelab:49374/mcp",
         "headers": { "Authorization": "Bearer <token>" }
@@ -661,12 +661,12 @@ which merges:
 }
 ```
 
-Lifecycle capture is separate and script-free: `ai-memory install-hooks
---agent zero --apply` merges exec-form entries (the native `ai-memory hook`
+Lifecycle capture is separate and script-free: `sessionmunch install-hooks
+--agent zero --apply` merges exec-form entries (the native `sessionmunch hook`
 command + args, JSON payload on stdin — no shell) into
 `~/.config/zero/hooks.json`, covering `sessionStart`/`sessionEnd`/
 `beforeTool`/`afterTool` plus `specialistStart`/`specialistStop` (mapped to
-ai-memory's subagent events). Zero discards `sessionStart` hook stdout, so
+sessionmunch's subagent events). Zero discards `sessionStart` hook stdout, so
 capture and session-end handoff *creation* work, but handoff *injection*
 does not — ask Zero to call `memory_handoff_accept` at the start of a
 resumed session.
@@ -675,7 +675,7 @@ resumed session.
 
 **Status:** MCP supported. Lifecycle hooks are not installed by this command;
 they are tracked in issue #512, so until then capture is not active and
-ai-memory only sees the sessions where an agent calls its MCP tools.
+sessionmunch only sees the sessions where an agent calls its MCP tools.
 
 **Config file:** ZCode keeps its user-scope config at
 `~/.zcode/cli/config.json`, with servers under the nested `mcp.servers` map
@@ -684,7 +684,7 @@ ai-memory only sees the sessions where an agent calls its MCP tools.
 `--config-file` to target one of them explicitly.
 
 ```bash
-ai-memory install-mcp --client zcode --apply \
+sessionmunch install-mcp --client zcode --apply \
     --server-url "http://homelab:49374/mcp" --auth-token "$TOKEN"
 ```
 
@@ -694,7 +694,7 @@ which merges:
 {
   "mcp": {
     "servers": {
-      "ai-memory": {
+      "sessionmunch": {
         "type": "http",
         "url": "http://homelab:49374/mcp",
         "headers": { "Authorization": "Bearer <token>" }
@@ -723,7 +723,7 @@ ancestor, matching Swival's own project-root discovery. Pass `--config-file`
 only to target a different MCP JSON file.
 
 ```bash
-ai-memory install-mcp --client swival --apply \
+sessionmunch install-mcp --client swival --apply \
   --server-url "http://homelab:49374/mcp" \
   --auth-token "$TOKEN"
 ```
@@ -733,7 +733,7 @@ which merges into `.swival/mcp.json`:
 ```json
 {
   "mcpServers": {
-    "ai-memory": {
+    "sessionmunch": {
       "type": "http",
       "url": "http://homelab:49374/mcp",
       "headers": { "Authorization": "Bearer <token>" }
@@ -742,13 +742,13 @@ which merges into `.swival/mcp.json`:
 }
 ```
 
-`uninstall --only mcp --apply --yes` removes the matching ai-memory entry from
+`uninstall --only mcp --apply --yes` removes the matching sessionmunch entry from
 that file and preserves all unrelated MCP servers.
 
 ## Grok Build CLI
 
 **Status:** ✅ MCP supported. ✅ Lifecycle hooks supported via
-`ai-memory install-hooks --agent grok --apply`. ❌ No automatic handoff
+`sessionmunch install-hooks --agent grok --apply`. ❌ No automatic handoff
 injection (Grok ignores SessionStart stdout — same policy as Zero).
 
 **Config file:** `install-mcp --client grok --apply` writes the user config at
@@ -758,18 +758,18 @@ infer a project config location. Provide the MCP URL and token explicitly for
 that lane, and remove a custom config entry manually when uninstalling.
 
 ```bash
-ai-memory install-mcp --client grok --apply \
+sessionmunch install-mcp --client grok --apply \
     --server-url "http://homelab:49374/mcp" --auth-token "$TOKEN"
 ```
 
 which merges:
 
 ```toml
-[mcp_servers.ai-memory]
+[mcp_servers.sessionmunch]
 url = "http://homelab:49374/mcp"
 enabled = true
 
-[mcp_servers.ai-memory.headers]
+[mcp_servers.sessionmunch.headers]
 Authorization = "Bearer <token>"
 ```
 
@@ -777,19 +777,19 @@ Authorization = "Bearer <token>"
 - Grok uses `[mcp_servers.<name>.headers]`; Codex uses `http_headers`.
 - `enabled = true` is the documented per-server toggle.
 - String fields support `${VAR}` expansion, so you can write
-  `Authorization = "Bearer ${AI_MEMORY_AUTH_TOKEN}"` instead of embedding
+  `Authorization = "Bearer ${SESSIONMUNCH_AUTH_TOKEN}"` instead of embedding
   the token.
-- CLI alternative: `grok mcp add --transport http ai-memory <url>` (plus
+- CLI alternative: `grok mcp add --transport http sessionmunch <url>` (plus
   `--header` for bearer auth).
 
-Lifecycle capture is separate: `ai-memory install-hooks --agent grok
---apply` writes `$GROK_HOME/hooks/ai-memory.json` (default
-`~/.grok/hooks/ai-memory.json`; Grok discovers every
+Lifecycle capture is separate: `sessionmunch install-hooks --agent grok
+--apply` writes `$GROK_HOME/hooks/sessionmunch.json` (default
+`~/.grok/hooks/sessionmunch.json`; Grok discovers every
 `$GROK_HOME/hooks/*.json`, so third-party hook files stay untouched). Events
 mirror Claude Code's vocabulary (`SessionStart`, `UserPromptSubmit`,
 `PreToolUse`, `PostToolUse`, `PreCompact`, `Stop`, `SessionEnd`,
 `SubagentStart`, `SubagentStop`) with a Grok-specific script bundle /
-native `ai-memory hook --event … --agent grok` commands. Session-end
+native `sessionmunch hook --event … --agent grok` commands. Session-end
 handoff *creation* works; handoff *injection* does not — ask Grok to
 call `memory_handoff_accept` (or install the managed routing skills under
 `.grok/skills` / `$GROK_HOME/skills` (default `~/.grok/skills`)) at the start
@@ -804,7 +804,7 @@ the supported path for uninstall isolation and hooks URL inference.
 Devin manages MCP servers in `~/.devin/config.json` under `mcpServers`:
 
 ```bash
-ai-memory install-mcp --client devin --apply \
+sessionmunch install-mcp --client devin --apply \
     --server-url "http://homelab:49374/mcp" --auth-token "$TOKEN"
 ```
 
@@ -813,7 +813,7 @@ which merges:
 ```json
 {
   "mcpServers": {
-    "ai-memory": {
+    "sessionmunch": {
       "url": "http://homelab:49374/mcp",
       "transport": "http",
       "headers": { "Authorization": "Bearer <token>" }
@@ -825,13 +825,13 @@ which merges:
 Lifecycle capture is separate:
 
 ```bash
-ai-memory install-hooks --agent devin --apply \
+sessionmunch install-hooks --agent devin --apply \
     --server-url "http://homelab:49374" --auth-token "$TOKEN"
 ```
 
 By default this writes `~/.devin/hooks.v1.json`, whose root object is the
 event map. If you want the hook entries inside `~/.devin/config.json` instead,
-pass that path with `--config-file`; ai-memory then merges them under the
+pass that path with `--config-file`; sessionmunch then merges them under the
 `hooks` key.
 
 Devin's supported lifecycle events are `SessionStart`, `UserPromptSubmit`,
@@ -853,7 +853,7 @@ fill both in:
 - **session id** — when the payload has none, the hook mints one at
   `SessionStart`, stores it in a single per-host slot
   (`<data-dir>/hook-state/devin-session-id`), reuses it for every later
-  event, and clears it at `SessionEnd`. Set `AI_MEMORY_SESSION_ID` in the
+  event, and clears it at `SessionEnd`. Set `SESSIONMUNCH_SESSION_ID` in the
   hook environment to pin an externally managed run id instead. Because the
   slot is per host+agent, two Devin sessions running *concurrently* on the
   same machine share it — the newest `SessionStart` wins and earlier
@@ -864,7 +864,7 @@ fill both in:
 ## Kimi Code
 
 **Status:** ✅ MCP supported. ✅ Lifecycle hooks supported via
-`ai-memory install-hooks --agent kimi-code --apply`.
+`sessionmunch install-hooks --agent kimi-code --apply`.
 
 **Config file (MCP):** `~/.kimi-code/mcp.json`
 (`$KIMI_CODE_HOME/mcp.json` when `KIMI_CODE_HOME` is set).
@@ -874,7 +874,7 @@ Kimi Code treats any `mcpServers` entry with a `url` field and no
 transport key:
 
 ```bash
-ai-memory install-mcp --client kimi-code --apply \
+sessionmunch install-mcp --client kimi-code --apply \
     --server-url "http://homelab:49374/mcp" --auth-token "$TOKEN"
 ```
 
@@ -883,7 +883,7 @@ which merges:
 ```json
 {
   "mcpServers": {
-    "ai-memory": {
+    "sessionmunch": {
       "url": "http://homelab:49374/mcp?flavor=moonshot",
       "headers": { "Authorization": "Bearer <token>" }
     }
@@ -896,25 +896,25 @@ re-runs don't duplicate it). The Moonshot API validates tool parameter
 schemas against a restricted dialect ("moonshot flavored json schema") that
 rejects root-level `anyOf`/`oneOf`/`allOf` combinators — including the
 `anyOf` on `memory_read_page` — and fails the whole session with a 400 at
-`tools/list`. The ai-memory server answers requests carrying this flavor
+`tools/list`. The sessionmunch server answers requests carrying this flavor
 with flat schemas; every other client keeps receiving the upstream schemas
 unchanged.
 
-> **Do not register ai-memory with Kimi's own `mcp add`.** Kimi Code's
+> **Do not register sessionmunch with Kimi's own `mcp add`.** Kimi Code's
 > documented command —
 >
 > ```bash
-> kimi mcp add --transport http ai-memory http://127.0.0.1:49374/mcp
+> kimi mcp add --transport http sessionmunch http://127.0.0.1:49374/mcp
 > ```
 >
 > writes the plain URL, with no `?flavor=moonshot`. The server then serves
 > the upstream schemas, Moonshot rejects `memory_read_page`'s root-level
 > `anyOf`, and **every model turn fails with a 400** — including turns that
 > use no tools at all, because tool schemas ship with each request. Use
-> `ai-memory install-mcp --client kimi-code --apply` instead, which writes
+> `sessionmunch install-mcp --client kimi-code --apply` instead, which writes
 > the flavored URL for you.
 >
-> The failure is unusually hard to attribute: `kimi mcp test ai-memory`
+> The failure is unusually hard to attribute: `kimi mcp test sessionmunch`
 > **passes**, because it only lists tools and never sends them upstream. The
 > server looks healthy while every real turn dies.
 >
@@ -922,7 +922,7 @@ unchanged.
 > the server-side floor and leave the client entry alone:
 >
 > ```bash
-> AI_MEMORY_STRIP_ROOT_COMBINATORS=true   # or `strip_root_combinators = true`
+> SESSIONMUNCH_STRIP_ROOT_COMBINATORS=true   # or `strip_root_combinators = true`
 > ```
 >
 > That serves the restricted dialect on every `tools/list` regardless of the
@@ -933,10 +933,10 @@ unchanged.
 **Config file (hooks):** `~/.kimi-code/config.toml` (same `$KIMI_CODE_HOME`
 base). Kimi Code stores hooks as `[[hooks]]` array entries in the same TOML
 file that holds its provider/model settings; `install-hooks` merges
-ai-memory's entries and preserves everything else:
+sessionmunch's entries and preserves everything else:
 
 ```bash
-ai-memory install-hooks --agent kimi-code --apply \
+sessionmunch install-hooks --agent kimi-code --apply \
     --server-url "http://homelab:49374" --auth-token "$TOKEN"
 ```
 
@@ -945,9 +945,9 @@ The installed entries cover 10 events — `SessionStart`, `SessionEnd`,
 (Kimi Code fires `PostToolUse` on successful calls only), `Stop`,
 `SubagentStart`, `SubagentStop`, and `PreCompact` — with a Kimi Code-specific
 script bundle /
-native `ai-memory hook --event … --agent kimi-code` commands (native is the
+native `sessionmunch hook --event … --agent kimi-code` commands (native is the
 default for local installs; the staged scripts under
-`~/.local/share/ai-memory/hooks/kimi-code/` are the compatibility fallback).
+`~/.local/share/sessionmunch/hooks/kimi-code/` are the compatibility fallback).
 Capture is fire-and-forget; a pending handoff is injected at
 `UserPromptSubmit` via the hook's stdout (Kimi Code discards `SessionStart`
 stdout but prepends successful user-prompt hook output to the turn).
@@ -976,9 +976,9 @@ workstreams and experimental Mods are not installed.
 `~/.commandcode/settings.json` for lifecycle hooks.
 
 ```bash
-ai-memory install-mcp --client command-code --apply \
+sessionmunch install-mcp --client command-code --apply \
     --server-url "http://homelab:49374/mcp" --auth-token "$TOKEN"
-ai-memory install-hooks --agent command-code --apply \
+sessionmunch install-hooks --agent command-code --apply \
     --server-url "http://homelab:49374" --auth-token "$TOKEN"
 ```
 
@@ -987,7 +987,7 @@ The MCP installer writes the documented user-scope remote shape:
 ```json
 {
   "mcpServers": {
-    "ai-memory": {
+    "sessionmunch": {
       "transport": "http",
       "enabled": true,
       "url": "http://homelab:49374/mcp",
@@ -1005,9 +1005,9 @@ spool events locally, enforce capture exclusions for the documented tool
 envelope, and inject pending handoffs with
 `hookSpecificOutput.additionalContext` at `SessionStart`.
 
-`Stop` is only a turn boundary. Run `ai-memory finalize-session --agent
+`Stop` is only a turn boundary. Run `sessionmunch finalize-session --agent
 command-code` after the final turn (or add `--session-id <uuid>` when several
-sessions share the project). ai-memory does not generate a Mod: that API is
+sessions share the project). sessionmunch does not generate a Mod: that API is
 experimental and unsandboxed. Command Code officially documents its
 project-scoped append-only JSONL location, native resume selectors, `--yolo`,
 and Windows aliases, but not the JSONL record schema. A managed adapter remains
@@ -1033,7 +1033,7 @@ their own documented, fixture-tested payload and store contracts.
 you intentionally want Kiro's lower-scope project configuration instead.
 
 ```bash
-ai-memory install-mcp --client kiro-cli --apply \
+sessionmunch install-mcp --client kiro-cli --apply \
     --server-url "https://memory.example/mcp" --auth-token "$TOKEN"
 ```
 
@@ -1043,7 +1043,7 @@ servers, and merges this entry idempotently:
 ```json
 {
   "mcpServers": {
-    "ai-memory": {
+    "sessionmunch": {
       "url": "https://memory.example/mcp?flavor=bedrock",
       "headers": { "Authorization": "Bearer <token>" }
     }
@@ -1062,23 +1062,23 @@ Kiro permits remote MCP URLs over HTTPS. Plain HTTP is accepted only for
 non-loopback HTTP URL before writing the config. See
 [HTTPS via reverse proxy](https-via-proxy.md) for a homelab deployment.
 
-ai-memory supports both documented Kiro hook registration formats through
+sessionmunch supports both documented Kiro hook registration formats through
 explicit engine targets:
 
 ```bash
 # v2: update every existing global agent definition.
-ai-memory install-hooks --agent kiro-cli --apply
+sessionmunch install-hooks --agent kiro-cli --apply
 
 # v2 project-local agent: target the active definition explicitly.
-ai-memory install-hooks --agent kiro-cli --apply \
+sessionmunch install-hooks --agent kiro-cli --apply \
     --config-file .kiro/agents/<agent-name>.json
 
 # v3: standalone global registration.
-ai-memory install-hooks --agent kiro-cli-v3 --apply
+sessionmunch install-hooks --agent kiro-cli-v3 --apply
 
 # v3 project-local registration.
-ai-memory install-hooks --agent kiro-cli-v3 --apply \
-    --config-file .kiro/hooks/ai-memory.json
+sessionmunch install-hooks --agent kiro-cli-v3 --apply \
+    --config-file .kiro/hooks/sessionmunch.json
 ```
 
 The standalone format was acceptance-tested with an interactive Kiro CLI
@@ -1091,10 +1091,10 @@ agents, so `--config-file` is required when the active definition lives under
 through `agentSpawn` stdout, and honors `$KIRO_HOME`. The v3 installer writes
 the standalone `v1` file with PascalCase triggers, preserves third-party
 entries, and shares the same fail-open sanitizer and capture-exclusion
-boundary. `ai-memory run kiro` (alias `kiro-cli`) manages the default v2
+boundary. `sessionmunch run kiro` (alias `kiro-cli`) manages the default v2
 engine; add `--v3`, `--mode`, or `--agent-engine v3` for the incompatible v3
 store. Once linked, later plain Kiro launches recover that engine
-transparently, and bare `ai-memory run` considers checkout-local sessions from
+transparently, and bare `sessionmunch run` considers checkout-local sessions from
 both engines without cross-resuming them.
 
 Sources: <https://kiro.dev/docs/mcp/configuration/>,
@@ -1106,19 +1106,19 @@ Sources: <https://kiro.dev/docs/mcp/configuration/>,
 ## OpenClaw
 
 **Status:** ✅ MCP supported. ✅ Lifecycle hooks supported via a native
-OpenClaw plugin generated by `ai-memory install-hooks --agent openclaw --apply`.
+OpenClaw plugin generated by `sessionmunch install-hooks --agent openclaw --apply`.
 
 **Config file:** `~/.openclaw/config.json` (the OpenClaw docs reference
 this path indirectly; verify with your `openclaw config show`).
 
 OpenClaw distinguishes transports explicitly. Use
-`"transport": "streamable-http"` for ai-memory's HTTP endpoint.
+`"transport": "streamable-http"` for sessionmunch's HTTP endpoint.
 
 ```json
 {
   "mcp": {
     "servers": {
-      "ai-memory": {
+      "sessionmunch": {
         "url": "http://127.0.0.1:49374/mcp",
         "transport": "streamable-http"
       }
@@ -1129,7 +1129,7 @@ OpenClaw distinguishes transports explicitly. Use
 
 **Gotchas:**
 - `install-hooks --agent openclaw --apply` writes a local plugin package
-  under ai-memory's data dir, then runs `openclaw plugins install --link
+  under sessionmunch's data dir, then runs `openclaw plugins install --link
   <dir> --force` when the `openclaw` CLI is on `PATH`. If the CLI is not
   available, it prints the exact install command.
 - The plugin registers OpenClaw `session_start`, `session_end`,
@@ -1148,7 +1148,7 @@ OpenClaw distinguishes transports explicitly. Use
 
 **Status:** ✅ MCP supported via `install-mcp --client omp` (or
 `--client oh-my-pi`). ✅ Lifecycle capture supported via
-`ai-memory install-hooks --agent omp --apply` (or `--agent oh-my-pi`).
+`sessionmunch install-hooks --agent omp --apply` (or `--agent oh-my-pi`).
 
 **Config file:**
 - User: `~/.omp/agent/mcp.json`
@@ -1161,7 +1161,7 @@ real `pi` is recognized separately and uses the generated bridge extension below
 ```json
 {
   "mcpServers": {
-    "ai-memory": {
+    "sessionmunch": {
       "type": "http",
       "url": "http://127.0.0.1:49374/mcp",
       "enabled": true
@@ -1173,15 +1173,15 @@ real `pi` is recognized separately and uses the generated bridge extension below
 **Lifecycle extension:**
 
 ```bash
-ai-memory install-hooks --agent omp --apply
-# or: ai-memory install-hooks --agent oh-my-pi --apply
+sessionmunch install-hooks --agent omp --apply
+# or: sessionmunch install-hooks --agent oh-my-pi --apply
 ```
 
-This writes `~/.omp/agent/extensions/ai-memory-omp.ts`, which OMP discovers
+This writes `~/.omp/agent/extensions/sessionmunch-omp.ts`, which OMP discovers
 as a direct TypeScript extension on startup. Restart `omp` after
 installing or changing the file. When `PI_CODING_AGENT_DIR` is set
 (it relocates OMP's whole `~/.omp/agent` home), the extension is written
-to `$PI_CODING_AGENT_DIR/extensions/ai-memory-omp.ts` instead, and
+to `$PI_CODING_AGENT_DIR/extensions/sessionmunch-omp.ts` instead, and
 `--profile <name>` (or `OMP_PROFILE`) targets
 `~/.omp/profiles/<name>/agent/extensions/` — note `PI_CODING_AGENT_DIR`
 takes precedence over a profile, since it names the agent directory
@@ -1198,22 +1198,22 @@ profile.
 - OMP extensions are TypeScript modules, not shell hooks; stdout is not
   used for context injection.
 - The extension uses OMP lifecycle events for prompt/tool capture and
-  `before_agent_start` to inject pending ai-memory handoffs.
+  `before_agent_start` to inject pending sessionmunch handoffs.
 
 ## Pi
 
 **Status:** ✅ MCP and lifecycle capture supported via generated bridge
 extension. Pi has no native `mcp.json`; use `install-hooks --agent pi --apply`
-to write `~/.pi/agent/extensions/ai-memory-pi.ts`. When `PI_CODING_AGENT_DIR`
+to write `~/.pi/agent/extensions/sessionmunch-pi.ts`. When `PI_CODING_AGENT_DIR`
 is set (it relocates Pi's whole `~/.pi/agent` home), the extension is
-written to `$PI_CODING_AGENT_DIR/extensions/ai-memory-pi.ts` instead.
+written to `$PI_CODING_AGENT_DIR/extensions/sessionmunch-pi.ts` instead.
 
 ```bash
-ai-memory install-hooks --agent pi --apply
+sessionmunch install-hooks --agent pi --apply
 ```
 
 The generated extension posts lifecycle events to `/hook`, fetches pending
-handoffs in `before_agent_start`, initializes ai-memory's HTTP `/mcp` endpoint,
+handoffs in `before_agent_start`, initializes sessionmunch's HTTP `/mcp` endpoint,
 lists tools, and registers each one with `pi.registerTool`. `install-mcp
 --client pi` intentionally prints this bridge guidance instead of writing an
 ignored `~/.pi/agent/mcp.json`.
@@ -1226,7 +1226,7 @@ OMP / Oh My Pi remains separate: use `--client omp` / `--agent omp` (or
 ## Schema dialects for strict upstreams
 
 Some model APIs validate MCP tool parameter schemas against a narrower dialect
-than JSON Schema and reject the whole `tools/list` with a 400. ai-memory can
+than JSON Schema and reject the whole `tools/list` with a 400. sessionmunch can
 serve a relaxed dialect per request, via a `?flavor=` query on the MCP URL, or
 server-wide via config for clients that cannot carry one. Runtime argument
 validation is identical in every dialect — only the advertised schema changes.
@@ -1253,7 +1253,7 @@ that forwards this untouched produces `any_of` with `description` next to it and
 Vertex refuses the request:
 
 ```
-Unable to submit request because `ai-memory_memory_auto_improve` functionDeclaration
+Unable to submit request because `sessionmunch_memory_auto_improve` functionDeclaration
 `parameters.max_proposals` schema specified other fields alongside any_of.
 When using any_of, it must be the only field set.
 ```
@@ -1268,7 +1268,7 @@ provider-agnostic, so the right lever there is the server-side key.
 
 ```bash
 # server-wide, for clients that cannot carry a query marker
-AI_MEMORY_GEMINI_SAFE_SCHEMAS=true ai-memory serve
+SESSIONMUNCH_GEMINI_SAFE_SCHEMAS=true sessionmunch serve
 # or `gemini_safe_schemas = true` in config.toml
 
 # or per client, by hand in its MCP config
@@ -1296,7 +1296,7 @@ same: ask the model to list its available MCP tools, or to call
 
 ```
 You: List the MCP tools you can call. Use one of them to check
-     ai-memory's status.
+     sessionmunch's status.
 
 Model (any client): I can call: memory_query, memory_recent,
      memory_status, memory_briefing, memory_explore,
@@ -1323,18 +1323,18 @@ isn't being picked up. Check:
 
 1. **Is the server running?** `curl http://127.0.0.1:49374/mcp` should
    return a JSON-RPC error (not a connection refused). If refused,
-   start ai-memory: `docker start ai-memory` or
-   `ai-memory serve --transport http`.
+   start sessionmunch: `docker start sessionmunch` or
+   `sessionmunch serve --transport http`.
 2. **Did the client reload the config?** Claude Desktop and OMP need a
    restart. Cursor watches hooks but usually needs MCP reload/toggle.
    OpenClaw plugin changes need a Gateway restart unless it auto-restarted.
-3. **Are you on the right port?** ai-memory's default is **49374**
+3. **Are you on the right port?** sessionmunch's default is **49374**
    (`0xC0DE` in hex). If you remapped, update the URL in every
    client's config.
 
 If the model sees the tools but they all error, the server is
 probably running in a different data dir than expected. Check
-`docker logs ai-memory` or `ai-memory status --json` for the data
+`docker logs sessionmunch` or `sessionmunch status --json` for the data
 dir on disk.
 
 ---
@@ -1343,11 +1343,11 @@ dir on disk.
 
 The cross-agent handoff feature (the "headline" pitch in the README)
 requires both sides - the agent that *ends* a session, and the agent
-that *starts* the next one - to play nicely with ai-memory:
+that *starts* the next one - to play nicely with sessionmunch:
 
 | Side | What's needed | Covered by |
 |---|---|---|
-| **Ending side** | The agent must create a handoff through a true session-end hook, the manual finalizer, or `memory_handoff_begin`. | Built-in automatically for Claude Code, Codex (native `SessionEnd`, Codex CLI 0.145.0+), Devin CLI, Cursor, Gemini CLI, Grok Build CLI, Zero, Kimi Code, OpenClaw, OpenCode, OpenCode 2 beta, and OMP. Antigravity CLI, both Kiro CLI engines, and Command Code have no reliable true session-end event; run `ai-memory finalize-session` with the corresponding `--agent` after the final turn (also the fallback on Codex older than 0.145.0). MCP-only clients such as Swival must call `memory_handoff_begin` explicitly. |
+| **Ending side** | The agent must create a handoff through a true session-end hook, the manual finalizer, or `memory_handoff_begin`. | Built-in automatically for Claude Code, Codex (native `SessionEnd`, Codex CLI 0.145.0+), Devin CLI, Cursor, Gemini CLI, Grok Build CLI, Zero, Kimi Code, OpenClaw, OpenCode, OpenCode 2 beta, and OMP. Antigravity CLI, both Kiro CLI engines, and Command Code have no reliable true session-end event; run `sessionmunch finalize-session` with the corresponding `--agent` after the final turn (also the fallback on Codex older than 0.145.0). MCP-only clients such as Swival must call `memory_handoff_begin` explicitly. |
 | **Starting side** | Either (a) the session-start/plugin path injects the handoff via `/handoff`, OR (b) the model inspects with `memory_handoff_list` then claims with `memory_handoff_accept` (`handoff_id` from the list). | (a) is built-in for Claude Code / Codex / Devin CLI / Cursor / Gemini CLI / Antigravity CLI / Kimi Code / both Kiro CLI engines / Command Code / OpenClaw / OpenCode / OpenCode 2 beta / OMP. It requires a client that consumes startup-hook stdout or an equivalent context-injection result. Grok and Zero discard SessionStart stdout; Swival is MCP-only. Use (b) for those clients. (b) works for any MCP-capable client if you nudge the model - see [the managed routing package](usage.md#install-the-routing-snippet-and-agent-skills). |
 
 OpenCode uses its official `session.deleted` plugin event for true session-end
@@ -1360,7 +1360,7 @@ primary close path.
 
 Codex and Antigravity `Stop` events are not session ends. Codex's hook install
 registers native `SessionEnd` for CLI 0.145.0 and later; Antigravity still needs
-explicit finalization. `ai-memory finalize-session` defaults to Codex for older
+explicit finalization. `sessionmunch finalize-session` defaults to Codex for older
 clients or a missed native end, while `--agent antigravity-cli` selects
 Antigravity. The command finds the latest matching open session for the current
 workspace/project and posts a synthetic `session-end` event through the same
@@ -1376,5 +1376,5 @@ So a typical mixed workflow looks like:
 - **Claude Desktop → Claude Code.** Claude Desktop doesn't write a
   handoff (no hooks). To resume in Claude Code, you'd have had to
   call `memory_handoff_begin` manually in Claude Desktop before
-  quitting. ai-memory's wiki content via `memory_query` is still
+  quitting. sessionmunch's wiki content via `memory_query` is still
   available either way.

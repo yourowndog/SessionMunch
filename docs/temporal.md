@@ -15,7 +15,7 @@ validity — "valid-time" stays reserved for the deferred Phase B.
 ## Honest scope
 
 - **Ingestion time only.** `valid_from` / `superseded_at` (link grain)
-  and `valid_from` / `valid_to` (page grain) record when ai-memory
+  and `valid_from` / `valid_to` (page grain) record when sessionmunch
   *learned* and *replaced* a fact, not when it was true in the world. A
   world-time split (Graphiti's `valid_at`/`invalid_at` extracted by an
   LLM) is deliberately out of scope: it requires trusting an LLM to

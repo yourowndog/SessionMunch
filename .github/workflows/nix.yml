@@ -2,7 +2,7 @@ name: nix
 
 # Builds the flake so the Nix packaging cannot rot unnoticed.
 #
-# ai-memory does not otherwise test on Nix, so without this job `flake.nix`
+# sessionmunch does not otherwise test on Nix, so without this job `flake.nix`
 # is source nobody executes: it can break through a dependency bump, a
 # toolchain change, or a new build script and stay green because no other
 # job touches it.
@@ -52,4 +52,4 @@ jobs:
       - run: nix build --print-build-logs
       # The binary is what the flake promises. Run it, so a package that
       # builds but cannot execute still fails.
-      - run: ./result/bin/ai-memory --version
+      - run: ./result/bin/sessionmunch --version

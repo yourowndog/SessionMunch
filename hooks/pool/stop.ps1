@@ -1,3 +1,3 @@
-. "$PSScriptRoot\..\lib\ai-memory-hook.ps1"
-Invoke-AiMemoryHook -Event "stop" -Agent "pool"
+. "$PSScriptRoot\..\lib\sessionmunch-hook.ps1"
+Invoke-SessionMunchHook -Event "stop" -Agent "pool"
 exit 0

@@ -1,11 +1,11 @@
-//! `ai-memory-eval` — offline evaluation harnesses for ai-memory.
+//! `sessionmunch-eval` — offline evaluation harnesses for sessionmunch.
 //!
 //! Two subcommands:
 //!
 //! - `ab` — live A/B comparison of two LLM providers on the production
 //!   consolidation prompt (see [`ab`] and `evals/README.md`).
 //! - `retrieval` — LongMemEval retrieval benchmark driven end-to-end
-//!   through a real `ai-memory serve` subprocess: hook-shaped ingestion,
+//!   through a real `sessionmunch serve` subprocess: hook-shaped ingestion,
 //!   real search stack, R@k / hit@k per question category (see
 //!   [`retrieval`] and `docs/benchmarks/`).
 
@@ -17,8 +17,8 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "ai-memory-eval",
-    about = "Evaluation harnesses for ai-memory (LLM A/B + retrieval benchmark)"
+    name = "sessionmunch-eval",
+    about = "Evaluation harnesses for sessionmunch (LLM A/B + retrieval benchmark)"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -27,7 +27,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Live A/B harness comparing two LLM providers on the ai-memory
+    /// Live A/B harness comparing two LLM providers on the sessionmunch
     /// consolidation prompt.
     Ab(Box<ab::AbArgs>),
     /// LongMemEval retrieval benchmark through the real server stack.
@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "ai_memory_eval=info,warn".into()),
+                .unwrap_or_else(|_| "sessionmunch_eval=info,warn".into()),
         )
         .init();
 

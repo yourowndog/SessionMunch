@@ -35,9 +35,9 @@ pub struct RetrievalArgs {
     #[arg(long)]
     fetch: bool,
 
-    /// `ai-memory` server binary to benchmark. Build it first:
-    /// `cargo build --release -p ai-memory-cli`.
-    #[arg(long, default_value = "target/release/ai-memory")]
+    /// `sessionmunch` server binary to benchmark. Build it first:
+    /// `cargo build --release -p sessionmunch-cli`.
+    #[arg(long, default_value = "target/release/sessionmunch")]
     server_bin: PathBuf,
 
     /// Score only the first N questions (deterministic prefix) — smoke
@@ -95,7 +95,7 @@ pub async fn run(args: RetrievalArgs) -> Result<()> {
 
     if !args.server_bin.exists() {
         bail!(
-            "server binary {} not found — run `cargo build --release -p ai-memory-cli` first",
+            "server binary {} not found — run `cargo build --release -p sessionmunch-cli` first",
             args.server_bin.display()
         );
     }
@@ -103,9 +103,9 @@ pub async fn run(args: RetrievalArgs) -> Result<()> {
         "none" => (server::EvalEmbeddings::None, "zero-llm", None),
         "local" => {
             let root = PathBuf::from("evals/models");
-            if !ai_memory_llm::model_present(&root) {
+            if !sessionmunch_llm::model_present(&root) {
                 tracing::info!("fetching the local embedding model into evals/models (~87 MB)");
-                ai_memory_llm::fetch_model(&root).await?;
+                sessionmunch_llm::fetch_model(&root).await?;
             }
             (
                 server::EvalEmbeddings::Local,

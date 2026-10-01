@@ -8,35 +8,35 @@
 
   ```bash
   cd /path/to/project
-  ai-memory run claude
+  sessionmunch run claude
 
   # Quit Claude Code, then continue the same workstream in Codex.
-  ai-memory run codex --yolo
+  sessionmunch run codex --yolo
 
   # Continue in Command Code, preserving its own exact native session.
-  ai-memory run command-code
+  sessionmunch run command-code
 
   # Later, omit the name to resume the newest usable managed session here.
-  ai-memory run
+  sessionmunch run
 
   # Start a new Codex session in the same workstream, keeping portable history.
-  ai-memory run --fresh codex
+  sessionmunch run --fresh codex
 
   # Kiro defaults to v2; select its incompatible v3 engine explicitly once.
-  ai-memory run kiro --v3
+  sessionmunch run kiro --v3
 
   # List the workstreams that can be selected from this checkout.
-  ai-memory workstreams
+  sessionmunch workstreams
 
   # Fix a name you regret; the ledger and the current selection stay put.
-  ai-memory rename-workstream --from typo-nmae --to refactor-db
+  sessionmunch rename-workstream --from typo-nmae --to refactor-db
 
   # Pick a managed workstream from any linked local checkout, then resume it.
-  ai-memory resume
+  sessionmunch resume
 
   # List open cross-agent handoffs, oldest first, with the id
   # `memory_handoff_cancel` needs to clear a stale one.
-  ai-memory handoffs
+  sessionmunch handoffs
   ```
 
 - **"Pick the project instead of remembering where it lives."** Start from a
@@ -44,13 +44,13 @@
   managed harness:
 
   ```bash
-  ai-memory show
+  sessionmunch show
 
   # Machine-readable discovery without launching anything.
-  ai-memory show --json
+  sessionmunch show --json
   ```
 
-  Each successful `ai-memory run` saves a client-local checkout link keyed by
+  Each successful `sessionmunch run` saves a client-local checkout link keyed by
   the configured server plus workspace/project. `show` joins those links with
   the server's public activity and page-count metadata. A fast, bounded depth-1
   scan of the current directory also finds new checkouts carrying a project
@@ -59,9 +59,9 @@
   exposes a checkout path, so two client machines can safely use different
   local paths for the same project on a remote homeserver.
 
-  The list always leads with **`+ New project`**: type a name and ai-memory
+  The list always leads with **`+ New project`**: type a name and sessionmunch
   validates a portable directory name, stages the new checkout privately, pins
-  its workspace and project in `.ai-memory.toml`, and installs the routing block
+  its workspace and project in `.sessionmunch.toml`, and installs the routing block
   and managed Agent Skills for the chosen agent. The final directory appears
   only after every setup step succeeds, then `show` launches from it.
 
@@ -79,7 +79,7 @@
   newer cross-harness history. After a normal quit, the next launch waits
   briefly if the previous launcher is still finalizing; handled failures release
   the workstream immediately. If a linked native transcript was deleted,
-  ai-memory detects the orphan before launch and starts fresh; `--fresh` forces
+  sessionmunch detects the orphan before launch and starts fresh; `--fresh` forces
   that recovery for one harness. Managed mode currently covers Claude Code,
   Codex, OpenCode, OpenCode 2 beta, Pi, Crush, Kimi Code, Command Code, Kiro CLI v2/v3, OMP,
   Grok Build CLI, and Antigravity CLI; direct harness launches remain unchanged. See
@@ -88,12 +88,12 @@
   type and no list to read:
 
   ```bash
-  ai-memory continue
+  sessionmunch continue
   ```
 
   It picks the checkout whose managed launch is most recent, revalidates the
   path and its resolved scope, then continues there exactly as bare
-  `ai-memory run` would. A link whose directory moved, was replaced, now
+  `sessionmunch run` would. A link whose directory moved, was replaced, now
   resolves to a different project, or has a corrupt ordering timestamp is
   reported on stderr and skipped, so a resume never quietly lands in the wrong
   project. `--workspace` narrows the search; `--yolo` and `--fresh` are
@@ -102,8 +102,8 @@
   one of the recent workstreams from your valid client-local managed checkouts:
 
   ```bash
-  ai-memory resume
-  ai-memory resume --workspace work
+  sessionmunch resume
+  sessionmunch resume --workspace work
   ```
 
   The picker shows the workstream name, project scope, activity, and linked
@@ -112,7 +112,7 @@
   session discovery; the other choices are supported harnesses currently found
   in `PATH`. Enter launches the displayed combination. The checkout is
   revalidated first, while the server continues to receive fingerprints rather
-  than a local path. Use `ai-memory workstreams` when you are already in a
+  than a local path. Use `sessionmunch workstreams` when you are already in a
   checkout and only want the read-only list.
 - **"Quit at 4 PM, pick up at 9 AM in a different agent."** The
   classic. SessionStart hook in the next supported hook client prepends a
@@ -123,7 +123,7 @@
 - **"What did we decide about X six weeks ago?"** Use `memory_query X` from
   the agent for FTS5 fused with entity matches and linked-page expansion (plus
   vector similarity when an embedder is configured). For a quick terminal-only
-  FTS5 lookup, use `ai-memory search X`; that admin command does not run the
+  FTS5 lookup, use `sessionmunch search X`; that admin command does not run the
   hybrid streams. Pages are
   LLM-consolidated, so the hit is a coherent decision page, not a raw
   chat log. Pass `explain: true` to see why each hit ranked where it
@@ -135,7 +135,7 @@
   gotcha - tell the agent "save a permanent note that we standardised
   on Postgres for X" or "annotate this as a project rule" and it calls
   `memory_write_page` to write a durable, git-versioned wiki page. From
-  a terminal it's `ai-memory write-page --path decisions/0007-db.md
+  a terminal it's `sessionmunch write-page --path decisions/0007-db.md
   --body $'# Standardised on Postgres\n\n...' --pinned`. `--pinned`
   exempts it from the decay sweep; the H1 on the first line of
   `--body` becomes the page title (omit `--title` — it's still
@@ -161,13 +161,13 @@
   (pass `include_expired: true` to `memory_query` to still see it) and
   the next forget sweep hard-deletes the file and its rows. A TTL beats
   a pin; `memory_lint` warns about pinned+expiring combos.
-- **"This new project has months of history before ai-memory."**
-  `cd /path/to/my-project && ai-memory bootstrap` collects
+- **"This new project has months of history before sessionmunch."**
+  `cd /path/to/my-project && sessionmunch bootstrap` collects
   `git log`, README, `docs/`, module headers, project rules and
   one-shot-summarises them into seed wiki pages. Future sessions
   build on top.
 - **"What durable lesson did that session teach?"**
-  When an LLM provider is configured, ai-memory runs a background
+  When an LLM provider is configured, sessionmunch runs a background
   auto-improvement scheduler for newly completed sessions in every project. It
   records proposed wiki edits in the pending-writes audit trail, then approves
   them immediately through the normal wiki write path by default. Scheduler ticks
@@ -175,12 +175,12 @@
   the next tick is delayed until the current one finishes. Scheduling and
   approval are separate: set `[auto_improve.scheduler] enabled = false` to stop
   automatic review, or set `[auto_improve] require_approval = true` to keep both
-  scheduled and manual proposals pending for human review. `ai-memory
+  scheduled and manual proposals pending for human review. `sessionmunch
   auto-improve --session-id <uuid>` and MCP `memory_auto_improve` remain
   available for manual catch-up or targeted reruns. When its `session_id` is
   omitted, the MCP tool selects the newest completed session without a
   persisted auto-improvement run, so repeated calls advance past short
-  preflight-skipped sessions; an explicit ID reruns that session. `ai-memory
+  preflight-skipped sessions; an explicit ID reruns that session. `sessionmunch
   auto-improve-report --workspace <w> --project <p>` returns a read-only
   telemetry report for recent auto-improvement outcomes without staging or
   creating proposals; add `--stage` to create one pending report page for
@@ -196,17 +196,17 @@
   automatically on upgrade, then records per-session claims so failed scheduled
   reviews do not retry forever; use manual auto-improve for old sessions or
   failed scheduled sessions you want to catch up. Older configs may still contain
-  an `[auto_improve] mode = ...` line; current ai-memory ignores that legacy key,
+  an `[auto_improve] mode = ...` line; current sessionmunch ignores that legacy key,
   so you can remove it when convenient.
 - **"What housekeeping should I consider?"**
-  `ai-memory curator` runs a no-LLM, rule-based maintenance report over cold
+  `sessionmunch curator` runs a no-LLM, rule-based maintenance report over cold
   episodic pages, stale slots, duplicate exact normalized titles, and dangling
   cross-project links. It is report-only unless `--stage` is passed; staging
   queues one report page for approval and still performs no maintenance actions
   itself. Shared servers can opt into `[decay] breadth_weight` to give pages
   reinforced by several identified operators a retention bonus; the default
   `0.0` leaves existing retention scores unchanged.
-- **"Run one ai-memory for the whole household."** Stand the server
+- **"Run one sessionmunch for the whole household."** Stand the server
   up on a homelab box at `0.0.0.0:49374` with a bearer token; every
   laptop/desktop talks to it. Per-cwd routing keeps each project's
   pages cleanly separated; the `/web` UI is reachable from a
@@ -216,12 +216,12 @@
   password when human auth is on. Per-project tree view,
   rendered markdown, supersession chain visible per page.
 - **"Undo one bad page edit without rolling back the whole server."**
-  `ai-memory checkpoints` shows recent wiki commits, then
-  `ai-memory restore-page --path notes/foo.md --from <rev>` restores that one
+  `sessionmunch checkpoints` shows recent wiki commits, then
+  `sessionmunch restore-page --path notes/foo.md --from <rev>` restores that one
   markdown file and reindexes it into SQLite. Full `backup` / `restore` is
   still the answer for DB-only state such as sessions, observations, handoffs,
   users, audit rows, and embeddings.
 - **"Drop an experiment, keep the rest."**
-  `ai-memory purge-project --project experimental --confirm`.
+  `sessionmunch purge-project --project experimental --confirm`.
   Atomic: that project's DB rows cascade away, its wiki subdir gets
   `rm -rf`'d, every sibling project is untouched by construction.

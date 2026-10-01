@@ -1,6 +1,6 @@
 # Lifecycle operations
 
-Reference for the destructive / state-touching ai-memory commands.
+Reference for the destructive / state-touching sessionmunch commands.
 Read this before running anything that mutates wiki + db, especially
 on a homelab box where mistakes are harder to undo.
 
@@ -19,8 +19,8 @@ on a homelab box where mistakes are harder to undo.
 | `backup --to` | ✅ yes | no | n/a | Streams a gzipped tarball from the server's online `sqlite3 .backup` plus the wiki tree. Safe alongside the live writer. |
 | `checkpoints` | ✅ yes | no | n/a | Lists recent wiki git checkpoints. Read-only. |
 | `restore-page --path --from` | ✅ yes | overwrites one markdown page version | yes (restore another checkpoint) | Restores one page from wiki git history, reindexes it into SQLite, and writes a post-restore checkpoint. Does not restore DB-only state. |
-| `restore --from <tarball>` | ❌ **stop the server first** | overwrites the data dir | no (without prior backup) | Refuses if any sibling `ai-memory` process is alive (sysinfo guard). |
-| `reset --confirm` | ❌ **stop the server first** | yes, all data | no | Refuses if any sibling `ai-memory` process is alive (sysinfo guard). |
+| `restore --from <tarball>` | ❌ **stop the server first** | overwrites the data dir | no (without prior backup) | Refuses if any sibling `sessionmunch` process is alive (sysinfo guard). |
+| `reset --confirm` | ❌ **stop the server first** | yes, all data | no | Refuses if any sibling `sessionmunch` process is alive (sysinfo guard). |
 | `reindex` | ❌ **stop the server first** | no wiki wipe; requires a clean DB | only with prior DB backup | Rebuilds pages/links/FTS from `wiki/` using `_meta.md` manifests. Refuses if SQLite already has rows so stale DB-only state cannot survive silently. |
 
 State-touching commands route through the HTTP admin API except `reset`,
@@ -35,7 +35,7 @@ fundamentally cannot run while another process holds the SQLite WAL writer. See
 session is gone from the API, from `status` counts and from search.
 
 ```bash
-ai-memory purge-session \
+sessionmunch purge-session \
   --workspace default --project my-app \
   --session-id 0199f3d2-1c4e-7a10-9f3b-2b0c5d8e7a11 \
   --confirm
@@ -68,7 +68,7 @@ guarantee that the content is unrecoverable, because it is not.
 
 ### The same is true of `purge-project` and `delete-workspace`
 
-Every row above applies unchanged to `ai-memory purge-project --compact` and to
+Every row above applies unchanged to `sessionmunch purge-project --compact` and to
 `POST /admin/delete-workspace` with `{"compact": true}`. The table is a
 property of *any* SQLite delete, not of one command: rows go, bytes stay in
 free pages until the file is rewritten.
@@ -165,10 +165,10 @@ so a clean SQLite DB can be rebuilt from the UUID-keyed wiki tree alone.
 ### `purge-project`
 
 ```bash
-ai-memory purge-project --workspace default --project my-project --confirm
+sessionmunch purge-project --workspace default --project my-project --confirm
 
 # …and to reclaim the freed bytes as well (slow; rewrites the whole database):
-ai-memory purge-project --workspace default --project my-project --confirm --compact
+sessionmunch purge-project --workspace default --project my-project --confirm --compact
 ```
 
 Like `purge-session`, this is a logical delete unless `--compact` is given —
@@ -230,7 +230,7 @@ Why this is safe with the server running:
 ### `rename-project`
 
 ```bash
-ai-memory rename-project --workspace default --from old-name --to new-name
+sessionmunch rename-project --workspace default --from old-name --to new-name
 ```
 
 What happens:
@@ -318,7 +318,7 @@ Failure modes:
 ### `move-project`
 
 ```bash
-ai-memory move-project --from-workspace default --project my-project \
+sessionmunch move-project --from-workspace default --project my-project \
   --to-workspace other-workspace --confirm
 ```
 
@@ -414,7 +414,7 @@ at the same path):
 - **`duplicate`** — keep both: the source page lands at
   `<stem>-from-<src_workspace_slug>.md`, then `-2`, `-3`, … on
   further collisions. The `-from-` literal is the `DEDUP_FROM_TOKEN`
-  constant in `crates/ai-memory-mcp/src/admin.rs`; if you ever
+  constant in `crates/sessionmunch-mcp/src/admin.rs`; if you ever
   change one, change the other. Wikilinks pointing at the original
   path are not rewritten, so the lossless `true-move` path remains
   the way to preserve paths and links.
@@ -434,7 +434,7 @@ mirror). The `true-move` path has no such loss.
 > to.** Lifecycle hooks stamp a bounded observation on every supported tool-lifecycle event into the
 > session's project. If you move that very project mid-session, the next
 > hook re-creates the source (`scratch`-style) under the old workspace.
-> Before moving a live project, point the repo's `.ai-memory.toml` at the
+> Before moving a live project, point the repo's `.sessionmunch.toml` at the
 > **destination** workspace first, so new hook events already land there
 > and the move is a clean no-contention operation.
 
@@ -461,11 +461,11 @@ Failure modes:
 
 ```bash
 # One session, page and history included (dry run: no --confirm)
-ai-memory move-session 0192b6a1-4c2e-7d3f-8a5b-1234567890ab --to NAS_general
+sessionmunch move-session 0192b6a1-4c2e-7d3f-8a5b-1234567890ab --to NAS_general
 # Apply
-ai-memory move-session 0192b6a1-4c2e-7d3f-8a5b-1234567890ab --to NAS_general --confirm
+sessionmunch move-session 0192b6a1-4c2e-7d3f-8a5b-1234567890ab --to NAS_general --confirm
 # Every session of a stray project, into another workspace, page regenerated later
-ai-memory move-session --from-project tmp --to NAS_general --to-workspace home \
+sessionmunch move-session --from-project tmp --to NAS_general --to-workspace home \
   --pages regenerate --confirm
 ```
 
@@ -516,7 +516,7 @@ The audit row (`op = move_session`) carries the operator when the request
 was attributed. What does NOT move: `sessions.cwd` (historical truth; the
 response carries `cwd_warning` when its basename is not the destination
 project, since new sessions started there still resolve by basename unless a
-`.ai-memory.toml` marker pins the project), other pages written during the
+`.sessionmunch.toml` marker pins the project), other pages written during the
 session (decisions, gotchas: pages are not tracked per session), handoffs the
 session *accepted*, and `auto_improve_proposals` (they have no `session_id`;
 they target pages in the scope they were staged in). `entities` and
@@ -613,14 +613,14 @@ before confirming.
 ### `checkpoints`
 
 ```bash
-ai-memory checkpoints
+sessionmunch checkpoints
 ```
 
 Lists recent wiki git commits, newest first. The short OID is enough for
 `restore-page`, but the JSON output includes the full OID:
 
 ```bash
-ai-memory checkpoints --json
+sessionmunch checkpoints --json
 ```
 
 What it is for:
@@ -636,7 +636,7 @@ Fresh empty installs still have no commit until there is content to save.
 ### `restore-page`
 
 ```bash
-ai-memory restore-page --workspace default --project my-project \
+sessionmunch restore-page --workspace default --project my-project \
   --path notes/foo.md --from <checkpoint>
 ```
 
@@ -670,7 +670,7 @@ What it does not recover:
 ### `backup`
 
 ```bash
-ai-memory backup --to /tmp/ai-memory-backup.tar.gz
+sessionmunch backup --to /tmp/sessionmunch-backup.tar.gz
 ```
 
 What happens on the server:
@@ -683,17 +683,17 @@ What happens on the server:
 
 CLI writes the response body to `--to`. For a homelab user
 this is the standard "snapshot before doing something dangerous"
-move - `ai-memory backup` first, then proceed.
+move - `sessionmunch backup` first, then proceed.
 
 Restoring a backup follows the inverse:
 
 ```bash
 # Stop the server first.
-docker compose -f ~/deploy/ai-memory/docker-compose.yml down
+docker compose -f ~/deploy/sessionmunch/docker-compose.yml down
 # Restore (sysinfo refuses if the container is still running).
-ai-memory restore --from /tmp/ai-memory-backup.tar.gz --data-dir /var/opt/docker/utils/ai-memory/data --force
+sessionmunch restore --from /tmp/sessionmunch-backup.tar.gz --data-dir /var/opt/docker/utils/sessionmunch/data --force
 # Start back up.
-docker compose -f ~/deploy/ai-memory/docker-compose.yml up -d
+docker compose -f ~/deploy/sessionmunch/docker-compose.yml up -d
 ```
 
 The `--data-dir` flag points the CLI at the host-side path of the
@@ -703,10 +703,10 @@ HTTP admin API).
 ### `restore`
 
 ```bash
-ai-memory restore --from <tarball> --data-dir <path> --force
+sessionmunch restore --from <tarball> --data-dir <path> --force
 ```
 
-Direct-disk operation. Refuses if any other `ai-memory` process is
+Direct-disk operation. Refuses if any other `sessionmunch` process is
 alive (uses `sysinfo` to scan the process table).
 
 Order of operations:
@@ -718,7 +718,7 @@ Order of operations:
 
 Failure modes:
 
-- **Server still running** → exits with "another ai-memory process is
+- **Server still running** → exits with "another sessionmunch process is
   alive (pid X); stop it before restoring" - same wording as `reset`.
 - **`--confirm` omitted** → exits with usage hint.
 - **Data dir not empty + no `--force`** → exits with "data dir not
@@ -727,10 +727,10 @@ Failure modes:
 ### `reset`
 
 ```bash
-ai-memory reset --confirm
+sessionmunch reset --confirm
 ```
 
-Direct-disk operation. Refuses if any sibling `ai-memory` process is
+Direct-disk operation. Refuses if any sibling `sessionmunch` process is
 alive. Removes the contents of `wiki/`, `db/`, and `raw/` under the
 configured data dir. `config.toml` is preserved.
 
@@ -741,21 +741,21 @@ data dir.
 
 For a docker deploy where the data lives in a host-path bind mount,
 you can also just `rm -rf <host-path>/*` after stopping the
-container - but `ai-memory reset` is the cross-platform path that
+container - but `sessionmunch reset` is the cross-platform path that
 works whether the data dir is local, bind-mounted, or in a named
 volume.
 
 ### `reindex`
 
 ```bash
-ai-memory reindex --data-dir <path>
+sessionmunch reindex --data-dir <path>
 ```
 
 If reindex reports a missing scope `_meta.md`, the error includes its exact
 path. Restore the original DB, start and stop the current server once so its
 startup backfill writes missing manifests, then retry against a clean DB.
 
-Direct-disk lifecycle operation. Refuses if any sibling `ai-memory` process is
+Direct-disk lifecycle operation. Refuses if any sibling `sessionmunch` process is
 alive, and also refuses if SQLite already contains rows. `reindex` is a
 rebuild-from-files path, not an in-place dirty-index repair.
 
@@ -765,8 +765,8 @@ SQLite migration lineage:
 1. Stop the server or container.
 2. Take a backup of the current data directory.
 3. Move or remove `<data-dir>/db/memory.sqlite` and its WAL/SHM siblings.
-4. Run `ai-memory reindex --data-dir <data-dir>`.
-5. Run `ai-memory embed` after restart if you need embeddings rebuilt.
+4. Run `sessionmunch reindex --data-dir <data-dir>`.
+5. Run `sessionmunch embed` after restart if you need embeddings rebuilt.
 
 What is rebuilt:
 
@@ -796,42 +796,42 @@ For a docker / bind-mount deploy where data lives on the host:
 
 ```bash
 ssh homelab
-cd ~/deploy/ai-memory
+cd ~/deploy/sessionmunch
 docker compose down
-sudo rm -rf /var/opt/docker/utils/ai-memory/data/*
+sudo rm -rf /var/opt/docker/utils/sessionmunch/data/*
 docker compose up -d
 ```
 
 Or via the CLI from any machine (slower but portable):
 
 ```bash
-docker stop ai-memory   # so sysinfo guard passes
-ai-memory reset --confirm   # against the same data dir
-docker start ai-memory
+docker stop sessionmunch   # so sysinfo guard passes
+sessionmunch reset --confirm   # against the same data dir
+docker start sessionmunch
 ```
 
 ### "Snapshot before risky op"
 
 ```bash
-ai-memory backup --to "/tmp/ai-memory-$(date +%Y%m%d-%H%M).tar.gz"
+sessionmunch backup --to "/tmp/sessionmunch-$(date +%Y%m%d-%H%M).tar.gz"
 # … do the risky thing …
 # … oh no something broke …
 docker compose down
-ai-memory restore --from /tmp/ai-memory-2026-05-23-1530.tar.gz --force
+sessionmunch restore --from /tmp/sessionmunch-2026-05-23-1530.tar.gz --force
 docker compose up -d
 ```
 
 ### "Drop one experimental project, keep everything else"
 
 ```bash
-ai-memory purge-project --project experimental --confirm
-# Sibling projects (ai-memory, distrobox-gaming, …) untouched.
+sessionmunch purge-project --project experimental --confirm
+# Sibling projects (sessionmunch, distrobox-gaming, …) untouched.
 ```
 
 ### "Rename a project after moving its directory"
 
 ```bash
-ai-memory rename-project --from old --to new
+sessionmunch rename-project --from old --to new
 # Future sessions in /path/to/new will append to the same project
 # (the hook router stamps by basename(cwd) = "new"); past
 # observations stay under that project too because the project_id
@@ -841,11 +841,11 @@ ai-memory rename-project --from old --to new
 ### "Reattach a session captured under the wrong project"
 
 ```bash
-ai-memory move-session <session-id> --to my-project          # dry run
-ai-memory move-session <session-id> --to my-project --confirm
+sessionmunch move-session <session-id> --to my-project          # dry run
+sessionmunch move-session <session-id> --to my-project --confirm
 # Or empty a stray project into the right one, then drop the husk:
-ai-memory move-session --from-project tmp --to my-project --confirm
-ai-memory purge-project --project tmp --confirm
+sessionmunch move-session --from-project tmp --to my-project --confirm
+sessionmunch purge-project --project tmp --confirm
 ```
 
 ## Why this matters: the flat-wiki incident

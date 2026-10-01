@@ -4,7 +4,7 @@
   "observations": [
     {"kind": "user-prompt", "title": "user prompt", "body": "the test suite passes locally but fails in CI — different ordering?"},
     {"kind": "pre-tool-use", "title": "cargo test --workspace", "body": "test results in CI: integration test 'multi_writer_serialisation' fails — relies on the writer being a singleton across tests, but parallel runners start two"},
-    {"kind": "user-prompt", "title": "user prompt", "body": "ah, parallel test runners each spin up their own ai-memory instance; the global locking assumption doesn't hold cross-process"},
+    {"kind": "user-prompt", "title": "user prompt", "body": "ah, parallel test runners each spin up their own sessionmunch instance; the global locking assumption doesn't hold cross-process"},
     {"kind": "pre-tool-use", "title": "Edit", "body": "tests now use #[serial_test::serial] and a per-test temp data dir"},
     {"kind": "post-tool-use", "title": "cargo test --workspace", "body": "all green, including CI"},
     {"kind": "user-prompt", "title": "user prompt", "body": "ok, two things to remember: (1) integration tests against the store must NEVER mock the database — last quarter we ate a 3-day mock/prod divergence bug; (2) any test touching the writer needs the per-test temp data dir helper, or document why not"},

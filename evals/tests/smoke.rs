@@ -2,11 +2,11 @@
 //! `writer_throughput` pattern: `#[ignore]`d, run deliberately).
 //!
 //! Requirements, both intentionally not provisioned by the test:
-//! - `target/release/ai-memory` (`cargo build --release -p ai-memory-cli`)
+//! - `target/release/sessionmunch` (`cargo build --release -p sessionmunch-cli`)
 //! - `evals/datasets/longmemeval_s.json` (run once with `--fetch`)
 //!
 //! ```bash
-//! cargo test -p ai-memory-eval --test smoke -- --ignored
+//! cargo test -p sessionmunch-eval --test smoke -- --ignored
 //! ```
 
 use std::path::PathBuf;
@@ -16,19 +16,19 @@ use std::process::Command;
 #[ignore = "needs the release server binary and the downloaded dataset"]
 fn the_harness_scores_a_tiny_sample_end_to_end() {
     let repo_root: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let server_bin = repo_root.join("target/release/ai-memory");
+    let server_bin = repo_root.join("target/release/sessionmunch");
     assert!(
         server_bin.exists(),
-        "build the server first: cargo build --release -p ai-memory-cli"
+        "build the server first: cargo build --release -p sessionmunch-cli"
     );
     let dataset = repo_root.join("evals/datasets/longmemeval_s.json");
     assert!(
         dataset.exists(),
-        "fetch the dataset first: cargo run -p ai-memory-eval -- retrieval --fetch --sample 1"
+        "fetch the dataset first: cargo run -p sessionmunch-eval -- retrieval --fetch --sample 1"
     );
 
     let out = tempfile::tempdir().unwrap();
-    let status = Command::new(env!("CARGO_BIN_EXE_ai-memory-eval"))
+    let status = Command::new(env!("CARGO_BIN_EXE_sessionmunch-eval"))
         .current_dir(&repo_root)
         .args(["retrieval", "--sample", "2", "--concurrency", "2"])
         .arg("--server-bin")

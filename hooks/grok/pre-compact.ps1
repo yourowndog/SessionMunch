@@ -1,3 +1,3 @@
-. "$PSScriptRoot\..\lib\ai-memory-hook.ps1"
-Invoke-AiMemoryHook -Event "pre-compact" -Agent "grok"
+. "$PSScriptRoot\..\lib\sessionmunch-hook.ps1"
+Invoke-SessionMunchHook -Event "pre-compact" -Agent "grok"
 exit 0

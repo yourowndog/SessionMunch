@@ -1,5 +1,5 @@
 [package]
-name = "ai-memory-eval"
+name = "sessionmunch-eval"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,13 +7,13 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [[bin]]
-name = "ai-memory-eval"
+name = "sessionmunch-eval"
 path = "src/main.rs"
 
 [dependencies]
-ai-memory-core.workspace = true
-ai-memory-llm.workspace = true
-ai-memory-consolidate.workspace = true
+sessionmunch-core.workspace = true
+sessionmunch-llm.workspace = true
+sessionmunch-consolidate.workspace = true
 
 anyhow.workspace = true
 clap.workspace = true

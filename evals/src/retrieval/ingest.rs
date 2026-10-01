@@ -112,7 +112,7 @@ fn build_items(q: &Question) -> Vec<BatchItem> {
                     sid,
                     json!({
                         "hook_event_name": "Stop",
-                        "_ai_memory_assistant": {
+                        "_sessionmunch_assistant": {
                             "version": 1,
                             "excerpt": format!("[session date: {date}] {}", cap_excerpt(&turn.content)),
                         },
@@ -236,7 +236,7 @@ mod tests {
         // stop carries the opt-in marker and the capture flag
         let stop = &items[2];
         assert!(stop.url.contains("capture_assistant=1"));
-        assert_eq!(stop.body["_ai_memory_assistant"]["version"], 1);
+        assert_eq!(stop.body["_sessionmunch_assistant"]["version"], 1);
         // every item scopes explicitly
         for item in &items {
             assert!(item.url.contains("workspace=longmemeval"));

@@ -1,17 +1,27 @@
-# ai-memory hook helper — find marker file + parse minimal TOML.
+# sessionmunch hook helper — find marker file + parse minimal TOML.
 # Sourced by per-agent lifecycle hook scripts. POSIX shell only —
 # no bash-isms, no non-standard deps (no jq, no toml crate). Keep changes
 # byte-trivial because every supported agent (claude-code, codex,
 # cursor, gemini-cli, kimi-code, kiro-cli, antigravity-cli, opencode,
 # omp, pool) sources this same file.
 
-# Walk up from "$1" toward $HOME (or /) looking for `.ai-memory.toml`.
+# Read-only pre-rename recognition (t_3f5184b0): honor `SESSIONMUNCH_*` only
+# when the `SESSIONMUNCH_*` counterpart is unset. SessionMunch never writes
+# the old names; re-running the installers migrates staged hook scripts.
+: "${SESSIONMUNCH_DATA_DIR:=${SESSIONMUNCH_DATA_DIR:-}}"
+: "${SESSIONMUNCH_SESSION_ID:=${SESSIONMUNCH_SESSION_ID:-}}"
+: "${SESSIONMUNCH_RUN_ID:=${SESSIONMUNCH_RUN_ID:-}}"
+: "${SESSIONMUNCH_PROJECT_STRATEGY:=${SESSIONMUNCH_PROJECT_STRATEGY:-}}"
+: "${SESSIONMUNCH_AUTH_TOKEN:=${SESSIONMUNCH_AUTH_TOKEN:-}}"
+: "${SESSIONMUNCH_SERVER_URL:=${SESSIONMUNCH_SERVER_URL:-}}"
+
+# Walk up from "$1" toward $HOME (or /) looking for `.sessionmunch.toml`.
 # Prints the absolute path of the first marker found, or nothing.
 # Stops at $HOME to avoid leaking declarations from a shared system
 # user's home into another user's session on multi-user boxes. When cwd is
 # outside HOME, stop at the nearest checkout root (`.git` file/dir); a plain
 # non-git directory checks only cwd. This keeps unrelated parent markers out.
-ai_memory_find_marker() {
+sessionmunch_find_marker() {
     dir="$1"
     [ -z "$dir" ] && return 0
     boundary=""
@@ -34,8 +44,13 @@ ai_memory_find_marker() {
         esac
     fi
     while [ -n "$dir" ] && [ "$dir" != "/" ]; do
-        if [ -f "$dir/.ai-memory.toml" ]; then
-            printf '%s\n' "$dir/.ai-memory.toml"
+        if [ -f "$dir/.sessionmunch.toml" ]; then
+            printf '%s\n' "$dir/.sessionmunch.toml"
+            return 0
+        fi
+        # Read-only legacy recognition: pre-rename markers still resolve.
+        if [ -f "$dir/.sessionmunch.toml" ]; then
+            printf '%s\n' "$dir/.sessionmunch.toml"
             return 0
         fi
         if [ -n "$boundary" ] && [ "$dir" = "$boundary" ]; then
@@ -51,19 +66,19 @@ ai_memory_find_marker() {
 # tables). Returns the first match or nothing. Ignores comments and
 # blank lines by construction (the regex only matches the `key = "..."`
 # shape).
-ai_memory_parse_toml_key() {
+sessionmunch_parse_toml_key() {
     file="$1"; key="$2"
     [ -f "$file" ] || return 0
     sed -n -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*\"([^\"]*)\".*/\1/p" \
         "$file" | head -n 1
 }
 
-# Like ai_memory_parse_toml_key but also accepts a BARE value
+# Like sessionmunch_parse_toml_key but also accepts a BARE value
 # (`key = true` / `key = 6000`), so section-style flags such as
 # `[briefing] inject_on_session_start = true` work quoted or not.
 # Parity with `parse_toml_flag` in hook_capture.rs: line-based (section
 # headers are ignored), first match wins, trailing `# comment` stripped.
-ai_memory_parse_toml_flag() {
+sessionmunch_parse_toml_flag() {
     file="$1"; key="$2"
     [ -f "$file" ] || return 0
     sed -n -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*\"?([^\"#]*)\"?.*/\1/p" \
@@ -72,34 +87,34 @@ ai_memory_parse_toml_flag() {
 
 # Whether "$1" (a marker file) declares anything beyond a `[capture]`
 # section: any root-level scope key (workspace/project/project_strategy), or
-# any of the other settings ai_memory_marker_qs / ai_memory_briefing_qs
+# any of the other settings sessionmunch_marker_qs / sessionmunch_briefing_qs
 # forward (drop_subagent_captures, default_global, [briefing] keys). Mirrors
 # `declares_more_than_capture` in marker.rs. A marker with any of these is a
 # resolution boundary; only a marker whose only content is `[capture]` (e.g.
 # ignore_paths) is scope/settings-transparent (#668).
-ai_memory_marker_declares_settings() {
+sessionmunch_marker_declares_settings() {
     file="$1"
     [ -f "$file" ] || return 1
     for key in workspace project project_strategy drop_subagent_captures; do
-        [ -n "$(ai_memory_parse_toml_key "$file" "$key")" ] && return 0
+        [ -n "$(sessionmunch_parse_toml_key "$file" "$key")" ] && return 0
     done
     for key in default_global inject_on_session_start max_chars; do
-        [ -n "$(ai_memory_parse_toml_flag "$file" "$key")" ] && return 0
+        [ -n "$(sessionmunch_parse_toml_flag "$file" "$key")" ] && return 0
     done
     return 1
 }
 
-# Like ai_memory_find_marker, but skips a marker that declares nothing beyond
-# `[capture]` (see ai_memory_marker_declares_settings) and continues the walk
+# Like sessionmunch_find_marker, but skips a marker that declares nothing beyond
+# `[capture]` (see sessionmunch_marker_declares_settings) and continues the walk
 # to the next ancestor. Resolves workspace/project/project_strategy and the
-# other root-level settings ai_memory_marker_qs / ai_memory_briefing_qs
+# other root-level settings sessionmunch_marker_qs / sessionmunch_briefing_qs
 # forward, so a nested capture-only marker no longer resets them to their
 # fallback (#668). [capture]/ignore_paths itself keeps using
-# ai_memory_find_marker (the nearest marker, unchanged). Boundary logic is
-# duplicated rather than shared with ai_memory_find_marker on purpose: this
+# sessionmunch_find_marker (the nearest marker, unchanged). Boundary logic is
+# duplicated rather than shared with sessionmunch_find_marker on purpose: this
 # file is sourced by every supported agent's hook scripts, so the existing,
 # well-exercised walk stays untouched.
-ai_memory_find_settings_marker() {
+sessionmunch_find_settings_marker() {
     dir="$1"
     [ -z "$dir" ] && return 0
     boundary=""
@@ -122,8 +137,8 @@ ai_memory_find_settings_marker() {
         esac
     fi
     while [ -n "$dir" ] && [ "$dir" != "/" ]; do
-        if [ -f "$dir/.ai-memory.toml" ] && ai_memory_marker_declares_settings "$dir/.ai-memory.toml"; then
-            printf '%s\n' "$dir/.ai-memory.toml"
+        if [ -f "$dir/.sessionmunch.toml" ] && sessionmunch_marker_declares_settings "$dir/.sessionmunch.toml"; then
+            printf '%s\n' "$dir/.sessionmunch.toml"
             return 0
         fi
         if [ -n "$boundary" ] && [ "$dir" = "$boundary" ]; then
@@ -144,11 +159,11 @@ ai_memory_find_settings_marker() {
 # Undo the JSON string escapes that can appear in a path value: \\ -> \
 # and \/ -> /. Windows payloads carry cwd as "C:\\dev\\proj"; without this
 # the doubled backslashes leak into the query string (#188).
-ai_memory_json_unescape_path() {
+sessionmunch_json_unescape_path() {
     printf '%s' "$1" | sed 's/\\\\/\\/g; s/\\\//\//g'
 }
 
-ai_memory_extract_cwd() {
+sessionmunch_extract_cwd() {
     payload="${1:-$(cat)}"
     rest=${payload#*\"cwd\"}
     if [ "$rest" != "$payload" ]; then
@@ -156,7 +171,7 @@ ai_memory_extract_cwd() {
             | sed -n -E 's/^[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p' \
             | head -n 1)
         if [ -n "$raw" ]; then
-            ai_memory_json_unescape_path "$raw"
+            sessionmunch_json_unescape_path "$raw"
             return 0
         fi
     fi
@@ -171,7 +186,7 @@ ai_memory_extract_cwd() {
             | sed -n -E 's/^[[:space:]]*:[[:space:]]*\[[[:space:]]*"([^"]*)".*/\1/p' \
             | head -n 1)
         if [ -n "$raw" ]; then
-            ai_memory_json_unescape_path "$raw"
+            sessionmunch_json_unescape_path "$raw"
             return 0
         fi
     done
@@ -179,8 +194,8 @@ ai_memory_extract_cwd() {
 
 # Extract a harness-native session id from the common hook payload spellings.
 # Like the cwd fallback above this intentionally handles top-level JSON strings
-# only; native `ai-memory hook` uses a real JSON parser.
-ai_memory_extract_session_id() {
+# only; native `sessionmunch hook` uses a real JSON parser.
+sessionmunch_extract_session_id() {
     payload="${1:-$(cat)}"
     for key in session_id sessionId sessionID session conversationId; do
         rest=${payload#*\"$key\"}
@@ -195,9 +210,9 @@ ai_memory_extract_session_id() {
 
 # Antigravity's PreInvocation hook fires before every model call. Only the
 # documented invocationNum=0 boundary represents the startup event that
-# ai-memory maps to SessionStart. Missing or malformed counters fail closed so
+# sessionmunch maps to SessionStart. Missing or malformed counters fail closed so
 # a repeated invocation cannot consume a next-session handoff.
-ai_memory_antigravity_is_initial_invocation() {
+sessionmunch_antigravity_is_initial_invocation() {
     payload="${1:-$(cat)}"
     rest=${payload#*\"invocationNum\"}
     [ "$rest" != "$payload" ] || return 1
@@ -207,16 +222,16 @@ ai_memory_antigravity_is_initial_invocation() {
     [ "$value" = "0" ]
 }
 
-ai_memory_managed_qs() {
-    [ -n "${AI_MEMORY_RUN_ID:-}" ] || return 0
-    printf '&managed_run=%s' "$(ai_memory_url_encode "$AI_MEMORY_RUN_ID")"
+sessionmunch_managed_qs() {
+    [ -n "${SESSIONMUNCH_RUN_ID:-}" ] || return 0
+    printf '&managed_run=%s' "$(sessionmunch_url_encode "$SESSIONMUNCH_RUN_ID")"
 }
 
 # Resolve cwd for agents whose native hook payload omits it. Payload wins,
 # then Devin's project env var, then the hook process cwd.
-ai_memory_resolve_cwd() {
+sessionmunch_resolve_cwd() {
     payload="${1:-$(cat)}"
-    cwd=$(ai_memory_extract_cwd "$payload")
+    cwd=$(sessionmunch_extract_cwd "$payload")
     if [ -n "$cwd" ]; then
         printf '%s' "$cwd"
         return 0
@@ -237,7 +252,7 @@ ai_memory_resolve_cwd() {
 # backslash, so a Windows cwd went into the query string raw and the
 # request never reached the server (#188). Parity with the native
 # helper's url_encode in hook_capture.rs.
-ai_memory_url_encode() {
+sessionmunch_url_encode() {
     LC_ALL=C
     s="$1"
     out=""
@@ -262,7 +277,7 @@ ai_memory_url_encode() {
 # fails and falls back to basename(cwd), so out-of-tree worktrees each
 # became their own project). Prints the name, or nothing when cwd is not
 # inside a git work tree (caller keeps its basename(cwd) fallback).
-ai_memory_repo_root_project() {
+sessionmunch_repo_root_project() {
     cwd="$1"
     [ -z "$cwd" ] && return 0
     command -v git >/dev/null 2>&1 || return 0
@@ -285,13 +300,13 @@ ai_memory_repo_root_project() {
 # it. Returns the suffix with the leading `&`, or nothing when cwd is absent.
 # `cwd` is always included so `GET /handoff` resolves the same basename project
 # as the prior hook events even when no marker file exists.
-ai_memory_marker_qs() {
+sessionmunch_marker_qs() {
     cwd="$1"
     if [ -z "$cwd" ]; then
-        ai_memory_managed_qs
+        sessionmunch_managed_qs
         return 0
     fi
-    qs="&cwd=$(ai_memory_url_encode "$cwd")"
+    qs="&cwd=$(sessionmunch_url_encode "$cwd")"
     ws=""
     pr=""
     st=""
@@ -303,19 +318,19 @@ ai_memory_marker_qs() {
     # The nearest marker that declares more than `[capture]` (#668): a nested
     # capture-only marker (e.g. one that only sets ignore_paths) must not
     # shadow an outer marker's workspace/project/etc.
-    marker=$(ai_memory_find_settings_marker "$cwd")
+    marker=$(sessionmunch_find_settings_marker "$cwd")
     if [ -n "$marker" ]; then
-        ws=$(ai_memory_parse_toml_key "$marker" workspace)
-        pr=$(ai_memory_parse_toml_key "$marker" project)
-        st=$(ai_memory_parse_toml_key "$marker" project_strategy)
-        ds=$(ai_memory_parse_toml_key "$marker" drop_subagent_captures)
+        ws=$(sessionmunch_parse_toml_key "$marker" workspace)
+        pr=$(sessionmunch_parse_toml_key "$marker" project)
+        st=$(sessionmunch_parse_toml_key "$marker" project_strategy)
+        ds=$(sessionmunch_parse_toml_key "$marker" drop_subagent_captures)
         [ -n "$pr" ] && ps="marker"
     fi
     # Install-time default baked into the hook command by
     # `install-hooks --project-strategy` fills the strategy only when no marker
     # pinned one. A marker's explicit project / project_strategy still win.
-    if [ -z "$st" ] && [ -n "${AI_MEMORY_PROJECT_STRATEGY:-}" ]; then
-        st="$AI_MEMORY_PROJECT_STRATEGY"
+    if [ -z "$st" ] && [ -n "${SESSIONMUNCH_PROJECT_STRATEGY:-}" ]; then
+        st="$SESSIONMUNCH_PROJECT_STRATEGY"
     fi
     # The repo-root strategy must be resolved here, on the host: a containerized
     # server cannot see this checkout, so its own libgit2 discovery fails and
@@ -326,60 +341,60 @@ ai_memory_marker_qs() {
     if [ -z "$pr" ]; then
         case "$st" in
             repo-root | repo_root)
-                pr=$(ai_memory_repo_root_project "$cwd")
+                pr=$(sessionmunch_repo_root_project "$cwd")
                 [ -n "$pr" ] && ps="repo-root"
                 ;;
         esac
     fi
-    [ -n "$ws" ] && qs="${qs}&workspace=$(ai_memory_url_encode "$ws")"
-    [ -n "$pr" ] && qs="${qs}&project=$(ai_memory_url_encode "$pr")"
-    [ -n "$ps" ] && qs="${qs}&project_src=$(ai_memory_url_encode "$ps")"
-    [ -n "$st" ] && qs="${qs}&project_strategy=$(ai_memory_url_encode "$st")"
+    [ -n "$ws" ] && qs="${qs}&workspace=$(sessionmunch_url_encode "$ws")"
+    [ -n "$pr" ] && qs="${qs}&project=$(sessionmunch_url_encode "$pr")"
+    [ -n "$ps" ] && qs="${qs}&project_src=$(sessionmunch_url_encode "$ps")"
+    [ -n "$st" ] && qs="${qs}&project_strategy=$(sessionmunch_url_encode "$st")"
     # Per-project drop_subagent_captures opt-in: forward to the server, which
     # interprets truthiness (1/true/...) and scopes the drop to this project.
-    [ -n "$ds" ] && qs="${qs}&drop_subagent=$(ai_memory_url_encode "$ds")"
-    qs="${qs}$(ai_memory_managed_qs)"
+    [ -n "$ds" ] && qs="${qs}&drop_subagent=$(sessionmunch_url_encode "$ds")"
+    qs="${qs}$(sessionmunch_managed_qs)"
     printf '%s' "$qs"
 }
 
 # Build `&briefing=<v>[&briefing_budget=<v>]` from the `[briefing]` section
 # of the marker walked up from "$1" (inject_on_session_start + optional
 # max_chars). Prints nothing when cwd is absent or the repo did not opt in.
-# NOT part of ai_memory_marker_qs on purpose: agents that deliver the brief
+# NOT part of sessionmunch_marker_qs on purpose: agents that deliver the brief
 # once per session (kimi-code, via the first user prompt — kimi discards
 # SessionStart hook stdout) append this only on the first fetch, so the
 # server does not recompose the brief on every request. The char-budget clamp
 # is decided server-side.
-ai_memory_briefing_qs() {
+sessionmunch_briefing_qs() {
     cwd="$1"
     [ -z "$cwd" ] && return 0
     # Settings walk (#668): a nested capture-only marker must not shadow an
     # outer marker's [briefing] opt-in.
-    marker=$(ai_memory_find_settings_marker "$cwd")
+    marker=$(sessionmunch_find_settings_marker "$cwd")
     [ -n "$marker" ] || return 0
     qs=""
-    briefing=$(ai_memory_parse_toml_flag "$marker" inject_on_session_start)
+    briefing=$(sessionmunch_parse_toml_flag "$marker" inject_on_session_start)
     case "$(printf '%s' "$briefing" | tr '[:upper:]' '[:lower:]')" in
         1|true|yes|on) ;;
         *) return 0 ;;
     esac
-    budget=$(ai_memory_parse_toml_flag "$marker" max_chars)
-    qs="&briefing=$(ai_memory_url_encode "$briefing")"
-    [ -n "$budget" ] && qs="${qs}&briefing_budget=$(ai_memory_url_encode "$budget")"
+    budget=$(sessionmunch_parse_toml_flag "$marker" max_chars)
+    qs="&briefing=$(sessionmunch_url_encode "$briefing")"
+    [ -n "$budget" ] && qs="${qs}&briefing_budget=$(sessionmunch_url_encode "$budget")"
     printf '%s' "$qs"
 }
 
 # Path of the once-per-session "brief delivered" marker for "$1" (a session
 # id or a caller-built fallback key), sanitized to a safe file name under
 # the shared state dir.
-ai_memory_briefed_file() {
+sessionmunch_briefed_file() {
     key=$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')
-    printf '%s/briefed/%s' "$(ai_memory_state_dir)" "$key"
+    printf '%s/briefed/%s' "$(sessionmunch_state_dir)" "$key"
 }
 
 # Write a once-per-session briefing marker and keep only the 512 newest
-# markers. All marker names are sanitized by ai_memory_briefed_file.
-ai_memory_mark_briefed() {
+# markers. All marker names are sanitized by sessionmunch_briefed_file.
+sessionmunch_mark_briefed() {
     path="$1"
     [ -n "$path" ] || return 0
     dir=$(dirname "$path")
@@ -394,58 +409,58 @@ ai_memory_mark_briefed() {
 
 # Local bridge state for agents whose hook payloads do not carry a session id.
 # The value is intentionally non-secret; the server hashes non-UUID ids into its
-# typed SessionId domain. `AI_MEMORY_SESSION_ID` may be supplied by advanced
+# typed SessionId domain. `SESSIONMUNCH_SESSION_ID` may be supplied by advanced
 # launchers to pin an externally managed run id.
-ai_memory_state_dir() {
-    if [ -n "${AI_MEMORY_DATA_DIR:-}" ]; then
-        printf '%s' "$AI_MEMORY_DATA_DIR"
+sessionmunch_state_dir() {
+    if [ -n "${SESSIONMUNCH_DATA_DIR:-}" ]; then
+        printf '%s' "$SESSIONMUNCH_DATA_DIR"
     elif [ -n "${XDG_DATA_HOME:-}" ]; then
-        printf '%s/ai-memory' "$XDG_DATA_HOME"
+        printf '%s/sessionmunch' "$XDG_DATA_HOME"
     elif [ -n "${HOME:-}" ]; then
-        printf '%s/.local/share/ai-memory' "$HOME"
+        printf '%s/.local/share/sessionmunch' "$HOME"
     else
-        printf '.ai-memory'
+        printf '.sessionmunch'
     fi
 }
 
-ai_memory_session_id_file() {
+sessionmunch_session_id_file() {
     agent="$1"
-    printf '%s/hook-state/%s-session-id' "$(ai_memory_state_dir)" "$agent"
+    printf '%s/hook-state/%s-session-id' "$(sessionmunch_state_dir)" "$agent"
 }
 
-ai_memory_new_session_id() {
+sessionmunch_new_session_id() {
     agent="$1"
     now=$(date +%s 2>/dev/null || printf '0')
     printf '%s-%s-%s' "$agent" "$now" "$$"
 }
 
-ai_memory_session_id_qs() {
+sessionmunch_session_id_qs() {
     agent="$1"; event="$2"
-    if [ -n "${AI_MEMORY_SESSION_ID:-}" ]; then
-        printf '&session_id=%s' "$(ai_memory_url_encode "$AI_MEMORY_SESSION_ID")"
+    if [ -n "${SESSIONMUNCH_SESSION_ID:-}" ]; then
+        printf '&session_id=%s' "$(sessionmunch_url_encode "$SESSIONMUNCH_SESSION_ID")"
         return 0
     fi
-    file=$(ai_memory_session_id_file "$agent")
+    file=$(sessionmunch_session_id_file "$agent")
     sid=""
     if [ "$event" != "session-start" ] && [ -f "$file" ]; then
         sid=$(sed -n '1p' "$file" 2>/dev/null)
     fi
     if [ -z "$sid" ]; then
-        sid=$(ai_memory_new_session_id "$agent")
+        sid=$(sessionmunch_new_session_id "$agent")
         dir=$(dirname "$file")
         mkdir -p "$dir" 2>/dev/null || true
         printf '%s\n' "$sid" > "$file" 2>/dev/null || true
     fi
-    printf '&session_id=%s' "$(ai_memory_url_encode "$sid")"
+    printf '&session_id=%s' "$(sessionmunch_url_encode "$sid")"
 }
 
-ai_memory_clear_session_id() {
+sessionmunch_clear_session_id() {
     agent="$1"
-    rm -f "$(ai_memory_session_id_file "$agent")" 2>/dev/null || true
+    rm -f "$(sessionmunch_session_id_file "$agent")" 2>/dev/null || true
 }
 
 # POST stdin to "$1" as JSON. Adds an
-# `Authorization: Bearer` header when `AI_MEMORY_AUTH_TOKEN` is set.
+# `Authorization: Bearer` header when `SESSIONMUNCH_AUTH_TOKEN` is set.
 # The 0.2s timeout is invariant 5's budget for a script hook
 # (never block the agent), and the trailing `|| true` makes the
 # function safe to call from `set -e` scripts. An undelivered event
@@ -455,20 +470,20 @@ ai_memory_clear_session_id() {
 # in this bundle discards it.
 # Path of the `Authorization:` header file `install-hooks --apply` writes
 # (0600, inside the 0700 data dir). Printed only when readable.
-ai_memory_auth_header_file() {
-    _amhf="${AI_MEMORY_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/ai-memory}/auth-header"
+sessionmunch_auth_header_file() {
+    _amhf="${SESSIONMUNCH_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/sessionmunch}/auth-header"
     [ -r "$_amhf" ] && printf '%s' "$_amhf"
 }
 
-ai_memory_post_hook() {
+sessionmunch_post_hook() {
     _amurl="$1"
     _ambody=$(cat)
-    _amhdr=$(ai_memory_auth_header_file || printf '')
-    if [ -n "${AI_MEMORY_AUTH_TOKEN:-}" ]; then
+    _amhdr=$(sessionmunch_auth_header_file || printf '')
+    if [ -n "${SESSIONMUNCH_AUTH_TOKEN:-}" ]; then
         _amcode=$(printf '%s' "$_ambody" | curl -s --max-time 0.2 -o /dev/null \
             -w '%{http_code}' -X POST "$1" \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $AI_MEMORY_AUTH_TOKEN" \
+            -H "Authorization: Bearer $SESSIONMUNCH_AUTH_TOKEN" \
             --data-binary @- 2>/dev/null) || _amcode=000
     elif [ -n "$_amhdr" ]; then
         # `-H @file`: curl reads the header from disk, so the bearer never
@@ -485,24 +500,24 @@ ai_memory_post_hook() {
             --data-binary @- 2>/dev/null) || _amcode=000
     fi
     case "$_amcode" in
-        2*) ai_memory_kick_drain ;;
+        2*) sessionmunch_kick_drain ;;
         4*) ;;
-        *) ai_memory_spool_event "$_amurl" "$_ambody" ;;
+        *) sessionmunch_spool_event "$_amurl" "$_ambody" ;;
     esac
     return 0
 }
 
-# GET "$1" with the same auth-header rules as `ai_memory_post_hook`.
+# GET "$1" with the same auth-header rules as `sessionmunch_post_hook`.
 # Used by `session-start.sh` to pull the cross-agent handoff before
 # the resuming agent's first prompt. 1s budget — slightly more
 # generous than POST because the result is *synchronously* fed to
 # stdout (and prepended to the agent's context), so we want to avoid
 # truncating a handoff that was almost ready.
-ai_memory_get_handoff() {
-    _amhdr=$(ai_memory_auth_header_file)
-    if [ -n "${AI_MEMORY_AUTH_TOKEN:-}" ]; then
+sessionmunch_get_handoff() {
+    _amhdr=$(sessionmunch_auth_header_file)
+    if [ -n "${SESSIONMUNCH_AUTH_TOKEN:-}" ]; then
         curl -s --max-time 1.0 "$1" \
-            -H "Authorization: Bearer $AI_MEMORY_AUTH_TOKEN"
+            -H "Authorization: Bearer $SESSIONMUNCH_AUTH_TOKEN"
     elif [ -n "$_amhdr" ]; then
         curl -s --max-time 1.0 "$1" -H @"$_amhdr"
     else
@@ -514,7 +529,7 @@ ai_memory_get_handoff() {
 # whose stdout contract is JSON rather than raw context text: Antigravity's
 # PreInvocation hook and Claude Code's session-start hook (which wraps the
 # handoff in hookSpecificOutput.additionalContext).
-ai_memory_json_string() {
+sessionmunch_json_string() {
     awk '
         BEGIN { printf "\"" }
         {
@@ -531,7 +546,7 @@ ai_memory_json_string() {
 
 # --- offline spool -----------------------------------------------------
 # A failed delivery is written to `<data_dir>/hook-spool/` in the same
-# on-disk contract `ai-memory hook-drain` reads (same filenames, same
+# on-disk contract `sessionmunch hook-drain` reads (same filenames, same
 # `SpoolEntry` JSON, same 0600/0700 modes, tmp+rename), so an unreachable
 # or erroring server costs latency instead of the event. The generated
 # TypeScript integrations gained this in #580; the script bundle is the
@@ -540,15 +555,15 @@ ai_memory_json_string() {
 # The backlog is drained at session boundaries only — never on the
 # per-tool-call hot path, which must not block the agent.
 
-ai_memory_spool_dir() {
-    printf '%s/hook-spool' "$(ai_memory_state_dir)"
+sessionmunch_spool_dir() {
+    printf '%s/hook-spool' "$(sessionmunch_state_dir)"
 }
 
 # Unix milliseconds. `date +%s%N` gives nanoseconds on GNU (and the width
 # modifier `%3N` is not honoured everywhere, so it is not used); BSD/macOS
 # date leaves a literal `N`. Anything that is not a long enough run of digits
 # falls back to whole seconds, which keeps filenames ordered and parseable.
-ai_memory_now_ms() {
+sessionmunch_now_ms() {
     _amnow=$(date +%s%N 2>/dev/null || printf '')
     case "$_amnow" in
         '' | *[!0-9]*) _amnow='' ;;
@@ -562,20 +577,20 @@ ai_memory_now_ms() {
 }
 
 # The bearer a drain should replay this event with, or empty for none.
-ai_memory_spool_token() {
-    if [ -n "${AI_MEMORY_AUTH_TOKEN:-}" ]; then
-        printf '%s' "$AI_MEMORY_AUTH_TOKEN"
+sessionmunch_spool_token() {
+    if [ -n "${SESSIONMUNCH_AUTH_TOKEN:-}" ]; then
+        printf '%s' "$SESSIONMUNCH_AUTH_TOKEN"
         return 0
     fi
-    _amtf=$(ai_memory_auth_header_file || printf '')
+    _amtf=$(sessionmunch_auth_header_file || printf '')
     [ -n "$_amtf" ] || return 0
     sed -n 's/^[Aa]uthorization:[[:space:]]*[Bb]earer[[:space:]]*//p' "$_amtf" \
         | head -n 1 | tr -d '\r\n'
 }
 
 # Idempotency key minted ONCE at spool time and baked into the URL, so this
-# bundle's drain and a concurrent `ai-memory hook-drain` cannot double-ingest.
-ai_memory_ingest_key() {
+# bundle's drain and a concurrent `sessionmunch hook-drain` cannot double-ingest.
+sessionmunch_ingest_key() {
     _amrnd=$(od -An -N8 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')
     [ -n "$_amrnd" ] || _amrnd=$(printf '%s%s' "$(date +%s 2>/dev/null || printf '0')" "$$")
     printf 'sh%s' "$_amrnd"
@@ -583,32 +598,32 @@ ai_memory_ingest_key() {
 
 # Persist one undelivered event. Best-effort on top of best-effort capture:
 # every failure path returns 0 so a hook never fails because of the spool.
-ai_memory_spool_event() {
+sessionmunch_spool_event() {
     _amsurl="$1"
     _amsbody="$2"
-    _amsdir=$(ai_memory_spool_dir)
+    _amsdir=$(sessionmunch_spool_dir)
     mkdir -p "$_amsdir" 2>/dev/null || return 0
     chmod 700 "$_amsdir" 2>/dev/null || true
     case "$_amsurl" in
         *ingest_key=*) ;;
-        *\?*) _amsurl="$_amsurl&ingest_key=$(ai_memory_ingest_key)" ;;
-        *) _amsurl="$_amsurl?ingest_key=$(ai_memory_ingest_key)" ;;
+        *\?*) _amsurl="$_amsurl&ingest_key=$(sessionmunch_ingest_key)" ;;
+        *) _amsurl="$_amsurl?ingest_key=$(sessionmunch_ingest_key)" ;;
     esac
-    _amstok=$(ai_memory_spool_token)
-    _amsnow=$(ai_memory_now_ms)
-    AI_MEMORY_SPOOL_SEQ=$((${AI_MEMORY_SPOOL_SEQ:-0} + 1))
-    _amsname=$(printf '%013d-%s-%016x.json' "$_amsnow" "$$" "$AI_MEMORY_SPOOL_SEQ")
+    _amstok=$(sessionmunch_spool_token)
+    _amsnow=$(sessionmunch_now_ms)
+    SESSIONMUNCH_SPOOL_SEQ=$((${SESSIONMUNCH_SPOOL_SEQ:-0} + 1))
+    _amsname=$(printf '%013d-%s-%016x.json' "$_amsnow" "$$" "$SESSIONMUNCH_SPOOL_SEQ")
     (
         umask 077
         {
             printf '{"url":'
-            printf '%s' "$_amsurl" | ai_memory_json_string
+            printf '%s' "$_amsurl" | sessionmunch_json_string
             printf ',"body":'
-            printf '%s' "$_amsbody" | ai_memory_json_string
+            printf '%s' "$_amsbody" | sessionmunch_json_string
             printf ',"created_ms":%s' "$_amsnow"
             if [ -n "$_amstok" ]; then
                 printf ',"auth_mode":"static","token":'
-                printf '%s' "$_amstok" | ai_memory_json_string
+                printf '%s' "$_amstok" | sessionmunch_json_string
             else
                 printf ',"auth_mode":"none"'
             fi
@@ -621,11 +636,11 @@ ai_memory_spool_event() {
 }
 
 # Read one top-level string field out of a spool entry, undoing the escapes
-# `ai_memory_json_string` produces. Scans left to right, which is the only
+# `sessionmunch_json_string` produces. Scans left to right, which is the only
 # correct way to find the closing quote. An entry carrying a `\uXXXX` escape
 # was written by a richer serializer (the native binary); this prints nothing
-# for it so the caller leaves it to `ai-memory hook-drain`.
-ai_memory_json_field() {
+# for it so the caller leaves it to `sessionmunch hook-drain`.
+sessionmunch_json_field() {
     awk -v key="$1" '
         { text = text (NR > 1 ? "\n" : "") $0 }
         END {
@@ -662,19 +677,19 @@ ai_memory_json_field() {
 # permanently rejected); anything else stops the pass and keeps the remainder
 # for the next one. The bearer goes through a 0600 header file rather than
 # curl's argv, for the reason #552 moved it off the command line.
-ai_memory_drain_spool() {
+sessionmunch_drain_spool() {
     _amdmax=${1:-64}
-    _amddir=$(ai_memory_spool_dir)
+    _amddir=$(sessionmunch_spool_dir)
     [ -d "$_amddir" ] || return 0
     _amdn=0
     for _amdf in "$_amddir"/*.json; do
         [ -f "$_amdf" ] || break
         [ "$_amdn" -lt "$_amdmax" ] || break
         _amdn=$((_amdn + 1))
-        _amdurl=$(ai_memory_json_field url "$_amdf" 2>/dev/null) || continue
+        _amdurl=$(sessionmunch_json_field url "$_amdf" 2>/dev/null) || continue
         [ -n "$_amdurl" ] || continue
-        _amdbody=$(ai_memory_json_field body "$_amdf" 2>/dev/null) || continue
-        _amdtok=$(ai_memory_json_field token "$_amdf" 2>/dev/null) || _amdtok=''
+        _amdbody=$(sessionmunch_json_field body "$_amdf" 2>/dev/null) || continue
+        _amdtok=$(sessionmunch_json_field token "$_amdf" 2>/dev/null) || _amdtok=''
         if [ -n "$_amdtok" ]; then
             _amdhdr="$_amddir/.drain-header.$$"
             (umask 077; printf 'Authorization: Bearer %s\n' "$_amdtok" >"$_amdhdr") 2>/dev/null || continue
@@ -701,11 +716,11 @@ ai_memory_drain_spool() {
 # reachable, so flush the backlog behind it. Detached from the hook's own
 # process so the agent never waits, and a no-op when nothing is queued —
 # which is every call on a healthy install.
-ai_memory_kick_drain() {
-    _amkdir=$(ai_memory_spool_dir)
+sessionmunch_kick_drain() {
+    _amkdir=$(sessionmunch_spool_dir)
     [ -d "$_amkdir" ] || return 0
     set -- "$_amkdir"/*.json
     [ -f "$1" ] || return 0
-    (ai_memory_drain_spool 64 >/dev/null 2>&1 &) 2>/dev/null || true
+    (sessionmunch_drain_spool 64 >/dev/null 2>&1 &) 2>/dev/null || true
     return 0
 }

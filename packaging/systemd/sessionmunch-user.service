@@ -1,0 +1,17 @@
+[Unit]
+Description=sessionmunch MCP server (user service)
+Documentation=https://github.com/akitaonrails/ai-memory
+# Note: This unit provides boot/login startup, process supervision/restart, and journal logging.
+# It is not a capture/record hook; recording is triggered by integrations, API calls, or agent hooks.
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.config/sessionmunch/env
+ExecStart=/usr/bin/sessionmunch --data-dir %h/.local/share/sessionmunch --config %h/.config/sessionmunch/config.toml serve --transport http --enable-web
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

@@ -11,7 +11,7 @@ we will aim to release a patch within 30 days and credit you in the changelog
 
 ## Threat model
 
-ai-memory is a **single-tenant workstation/homelab service**. It supports
+sessionmunch is a **single-tenant workstation/homelab service**. It supports
 multiple attributed users, but every authenticated user belongs to the same
 trust domain and can read the same project memory. The following describes
 what the project is and is not designed to defend against.
@@ -29,9 +29,9 @@ what the project is and is not designed to defend against.
   POSIX mode bits.
 
 - **Network exposure when binding to non-loopback addresses.** If you run
-  `ai-memory serve --bind 0.0.0.0:…` you are exposing the MCP and admin
+  `sessionmunch serve --bind 0.0.0.0:…` you are exposing the MCP and admin
   routes to your local network. Protect this with:
-  - `AI_MEMORY_AUTH_TOKEN` / `ai-memory generate-auth-token` (bearer token
+  - `SESSIONMUNCH_AUTH_TOKEN` / `sessionmunch generate-auth-token` (bearer token
     checked on every request).
   - Firewall rules or a reverse proxy with TLS.
 
@@ -44,20 +44,20 @@ what the project is and is not designed to defend against.
   address says nothing about reachability there — that is decided by the
   host-side publish spec, which the process cannot see. In a container the
   thing to check is your own `-p`: `-p 127.0.0.1:49374:49374` is loopback-only
-  and safe without a token; anything broader needs `AI_MEMORY_AUTH_TOKEN`.
+  and safe without a token; anything broader needs `SESSIONMUNCH_AUTH_TOKEN`.
   Note the `Host` allowlist is not a substitute — it defends against DNS
   rebinding, where a browser sets the header, and a client that can route to
   the port sets `Host` freely. Authentication does not encrypt
   bearer tokens, so use a TLS reverse proxy for traffic beyond loopback; see
   [`docs/https-via-proxy.md`](docs/https-via-proxy.md).
 
-  For `/web` behind that proxy, set `AI_MEMORY_AUTH__SECURE_COOKIE=true` to
-  make its browser session cookie HTTPS-only. ai-memory does not trust
+  For `/web` behind that proxy, set `SESSIONMUNCH_AUTH__SECURE_COOKIE=true` to
+  make its browser session cookie HTTPS-only. sessionmunch does not trust
   forwarded-protocol headers to decide this. Close or redirect direct HTTP
   access; browsers intentionally withhold Secure cookies over HTTP.
 
 - **Host-header DNS rebinding.** The HTTP server enforces an
-  `AI_MEMORY_ALLOWED_HOSTS` allowlist (defaulting to `127.0.0.1` and
+  `SESSIONMUNCH_ALLOWED_HOSTS` allowlist (defaulting to `127.0.0.1` and
   `localhost`). Requests with a `Host` header not in the list are rejected
   with 403.
 
@@ -99,7 +99,7 @@ what the project is and is not designed to defend against.
   - The opt-in is **global** to the install: there is no per-project marker to
     exclude a sensitive repository once the flag is on (assistant text is not
     path-attributable). Turn the server flag off to disable it everywhere.
-  - The excerpt can quote code, secrets, or content from paths ai-memory never
+  - The excerpt can quote code, secrets, or content from paths sessionmunch never
     sees; the `Sanitizer` is a best-effort credential strip, not a guarantee
     (see the injection note below).
 
@@ -111,9 +111,9 @@ what the project is and is not designed to defend against.
   against current instructions and the checkout.
 
 - **Search reranking is an outbound-data opt-in.** Setting
-  `AI_MEMORY_RERANKER=llm` sends each eligible live query plus bounded page
+  `SESSIONMUNCH_RERANKER=llm` sends each eligible live query plus bounded page
   titles and search snippets to the configured LLM provider. Managed writes use
-  ai-memory's sanitizer, but manually edited wiki files can contain unsanitized
+  sessionmunch's sanitizer, but manually edited wiki files can contain unsanitized
   text; the live query is bounded but is not sanitized because redaction could
   change its meaning. JSON encoding, an explicit untrusted-data prompt, strict
   score validation, a timeout, and a four-call concurrency cap limit control and
@@ -145,6 +145,13 @@ what the project is and is not designed to defend against.
 - **Hostile-Internet denial of service.** Hook queues, request bodies, rate
   limits, and concurrency are bounded, but the service is not designed for
   direct untrusted-Internet exposure. Put it behind normal network controls.
+
+## Zero-telemetry and remote provider privacy
+
+SessionMunch guarantees a zero-telemetry architecture:
+- **Zero analytics or telemetry:** No usage statistics, pings, diagnostics, or telemetry payloads are transmitted to any remote servers.
+- **Local-only by default:** In default configuration (local embeddings via nomic-embed-text/MiniLM and local or disabled summarization), 100% of memory operations, indexing, and search occur locally on the host machine. Zero tokens or vectors leave the system.
+- **Explicit remote operations:** The only outbound connections ever initiated are explicitly operator-configured remote model providers: remote embedding providers (`embedding_provider = "openai" | "voyage" | "google" | "openai-compat"`), remote summarization providers (`summarizer_provider`), or remote LLM rerankers (`SESSIONMUNCH_RERANKER=llm`). When configured, requests transmit exclusively to the configured base URL/provider endpoint. No secondary telemetry or unencrypted transmission is performed.
 
 ## Supported versions
 

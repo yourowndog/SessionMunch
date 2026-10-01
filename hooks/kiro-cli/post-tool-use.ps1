@@ -1,4 +1,4 @@
 # Kiro CLI v2 post-tool-use hook (postToolUse).
-. "$PSScriptRoot\..\lib\ai-memory-hook.ps1"
-Invoke-AiMemoryHook -Event "post-tool-use" -Agent "kiro-cli"
+. "$PSScriptRoot\..\lib\sessionmunch-hook.ps1"
+Invoke-SessionMunchHook -Event "post-tool-use" -Agent "kiro-cli"
 exit 0

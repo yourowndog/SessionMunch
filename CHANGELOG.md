@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Product-wide rename: `ai-memory` is now SessionMunch (t_3f5184b0). Binary
+  `sessionmunch`; crates `sessionmunch-*`; env `SESSIONMUNCH_*`; data dir
+  `<data-local>/sessionmunch`; config `~/.config/sessionmunch`; marker
+  `.sessionmunch.toml`; services `sessionmunch(.service|-user.service)`;
+  MCP server name/realm `sessionmunch`. Read-only legacy recognition (never
+  written, never deleted): `AI_MEMORY_*` env (when `SESSIONMUNCH_*` is unset),
+  `.ai-memory.toml` markers, `bin/ai-memory*` forwarding shims, and the
+  `companions/ai-memory-importer` name. Upstream `akitaonrails/ai-memory`
+  URLs, Docker image defaults, release-artifact hosts, and all CHANGELOG
+  history below stay verbatim as lineage until the release task publishes
+  the first SessionMunch artifacts (follow-up t_d85c39f4); `aim_` native
+  API-key prefixes are unchanged (credential contract, not branding).
+
+### Added
+- New opt-in local cross-encoder reranker behind the existing
+  `ai_memory_core::CrossEncoder` trait: `ai_memory_llm::CrossEncoderReranker`
+  runs the pinned `cross-encoder/ms-marco-MiniLM-L-6-v2` candle model locally,
+  with pinned-sha256 fetch, lazy load, and fail-open behavior (missing/tampered
+  model or scoring failure degrades to the pre-rerank RRF order, never an
+  error). Its async `ai_memory_llm::Reranker` surface sigmoid-maps logits onto
+  `[0, 1]`; nothing constructs it yet — MCP `memory_query` wiring is a
+  separate card and `AI_MEMORY_RERANKER` still accepts only `llm`
+  (#t_c51f1a51).
+
 ## [2.2.1] - 2026-09-12
 
 ### Fixed

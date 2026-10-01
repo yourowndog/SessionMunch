@@ -1,6 +1,6 @@
 # Vector Backend Policy
 
-ai-memory currently stores embeddings as packed vectors in SQLite and
+sessionmunch currently stores embeddings as packed vectors in SQLite and
 does brute-force cosine over latest pages at query time. `sqlite-vec` is
 deferred intentionally, not rejected.
 

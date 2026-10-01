@@ -2,13 +2,13 @@
 
 ## What this buys you
 
-Your memory is portable beyond ai-memory. Hand a project bundle to a
+Your memory is portable beyond sessionmunch. Hand a project bundle to a
 teammate who runs a *different* OKF-aware tool — or no tool at all —
 and they read your decisions, gotchas and procedures as ordinary
 markdown with standard metadata:
 
 ```bash
-ai-memory export-okf --project myproject -o myproject-bundle.tar.gz
+sessionmunch export-okf --project myproject -o myproject-bundle.tar.gz
 ```
 
 The receiving side unpacks a directory of `.md` files where every page
@@ -16,14 +16,14 @@ declares its `type`, provenance (`generated`, `sources`) and freshness
 (`stale_after`) in the vocabulary Google's Open Knowledge Format
 standardized — greppable, Obsidian-openable, importable by anything
 OKF-aware. Nothing is held hostage: the export is a validated copy of
-the files ai-memory already lives on.
+the files sessionmunch already lives on.
 
 The rest of this page is the design: how conformance is enforced and
 how existing stores migrate.
 
 ---
 
-ai-memory's wiki is natively an **Open Knowledge Format** bundle from
+sessionmunch's wiki is natively an **Open Knowledge Format** bundle from
 2.0 on: every page a consumer reads off disk is a conformant OKF
 concept file, and a project's wiki directory is a conformant bundle.
 "Native" means the wiki files *are* the OKF files — no export step
@@ -44,20 +44,20 @@ families. Summary of what conformance requires:
   index.md frontmatter allowed) and lists the directory;
 - reserved names `index.md` / `log.md` follow spec structure when
   present;
-- consumers MUST tolerate unknown keys — all ai-memory extension
+- consumers MUST tolerate unknown keys — all sessionmunch extension
   fields are spec-safe as-is.
 
 ## Field mapping
 
-| OKF key | ai-memory source |
+| OKF key | sessionmunch source |
 |---|---|
 | `type` (required) | derived from path family + existing frontmatter: `sessions/` → `Session Summary`, `_rules/` → `Rule`, `gotchas/` → `Gotcha`, `decisions/` → `Decision`, `procedures/` → `Procedure`, `concepts/` → `Concept`, `notes/` → `Note`, `runbooks/` → `Runbook`, `_slots/` → `Invariant`/`State` (from `slot_kind`), `_lint/` → `Lint Report`, `_pending/` → `Pending Note`; `kind:` frontmatter (`fact`/`note`/`procedure`/`decision`) wins over the path default when present |
 | `title` | already written by every producer |
 | `description` | existing `summary` field, when present |
 | `tags` | already written |
-| `generated.by` | actor convention: `process:ai-memory/<version>` for the zero-LLM consolidator and system writers; `<provider-model>` (e.g. `openai-compat/qwen3:32b`) for LLM-written pages; `human:<user>` for wiki edits attributed via the watcher |
+| `generated.by` | actor convention: `process:sessionmunch/<version>` for the zero-LLM consolidator and system writers; `<provider-model>` (e.g. `openai-compat/qwen3:32b`) for LLM-written pages; `human:<user>` for wiki edits attributed via the watcher |
 | `generated.at` | the page version's `updated_at` |
-| `sources` | session provenance: pages already stamped with `session_id`/`agent` get `[{resource: "ai-memory://session/<uuid>", author: "<agent>"}]` |
+| `sources` | session provenance: pages already stamped with `session_id`/`agent` get `[{resource: "sessionmunch://session/<uuid>", author: "<agent>"}]` |
 | `stale_after` | existing `expires_at` (TTL), when present |
 | `status` | `deprecated` when TTL-expired but retained; otherwise omitted (spec default `stable`) |
 
@@ -70,7 +70,7 @@ Extension fields kept verbatim (unknown keys are conformant): `tier`,
 One **project scope directory = one bundle**: the portable unit of
 knowledge is a project. Each project dir gets a generated `index.md`
 (frontmatter `okf_version: "0.2"`, body = directory listing). The
-existing `_meta.md` scope manifest is unchanged — it is ai-memory's
+existing `_meta.md` scope manifest is unchanged — it is sessionmunch's
 identity record; `index.md` is the OKF-facing description. Nothing in
 the current tree writes `index.md` or `log.md` (verified), so the
 reserved names are free. `log.md` is not adopted: git is the log.
@@ -92,7 +92,7 @@ Order is fixed; each step gates the next:
 
 1. **Proactive backup, first, always.** The migration compresses the
    entire data dir (wiki, SQLite DB, manifests) to
-   `~/ai-memory-backup-pre-2.0-<date>.tar.gz` — outside the data dir —
+   `~/sessionmunch-backup-pre-2.0-<date>.tar.gz` — outside the data dir —
    verifies the archive is listable and size-sane, and **aborts if the
    backup cannot be written or verified**. The archive path is recorded
    in the wiki meta manifest.

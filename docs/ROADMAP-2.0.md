@@ -1,4 +1,4 @@
-# ai-memory 2.0 - Plan
+# sessionmunch 2.0 - Plan
 
 > Source: the September 2026 landscape research
 > (`research-2026-landscape.md`) and its ranked recommendations, promoted
@@ -36,7 +36,7 @@
 audits published numbers (mempalace). We publish none until this exists.
 
 - In-repo harness, on-demand like `writer_throughput` (`#[ignore]`d or a
-  `cargo run -p ai-memory-eval` target - the `evals/` crate already
+  `cargo run -p sessionmunch-eval` target - the `evals/` crate already
   exists as a home). Fetches/loads the LongMemEval-V2 dataset, ingests
   through the *real* store (hooks-shaped ingestion, not direct SQL),
   queries through the real retrieval stack, reports R@k / P@k per task
@@ -59,7 +59,7 @@ audits published numbers (mempalace). We publish none until this exists.
 
 ## Item 2 - OKF v0.1 conformance (the 2.0 headline)
 
-*Why:* our wiki is nearly an OKF bundle; conformance makes ai-memory the
+*Why:* our wiki is nearly an OKF bundle; conformance makes sessionmunch the
 server-grade implementation of the standard Google published, and the
 knowledge portable to any OKF-aware consumer.
 
@@ -75,7 +75,7 @@ knowledge portable to any OKF-aware consumer.
   - **proactive backup before anything is touched**: the migration's
     first step compresses the entire data dir (wiki files, SQLite DB,
     manifest) into a timestamped archive *outside* the data dir, in the
-    user's home (e.g. `~/ai-memory-backup-pre-2.0-<date>.tar.gz`),
+    user's home (e.g. `~/sessionmunch-backup-pre-2.0-<date>.tar.gz`),
     verifies the archive is readable (entry listing + size sanity)
     before proceeding, and **aborts the migration if the backup cannot
     be written or verified** - no backup, no migration. The archive
@@ -99,7 +99,7 @@ knowledge portable to any OKF-aware consumer.
   no-churn property (same ids before/after); backup control test - break
   the archive step and the migration must refuse to run; homepage notice
   renders the recorded archive path and clears when the file is gone.
-- `ai-memory export --okf <dir>` / `import --okf` for the non-native
+- `sessionmunch export --okf <dir>` / `import --okf` for the non-native
   direction regardless, for interop with bundles outside the store.
 
 ## Item 3 - Typed relation edges
@@ -140,7 +140,7 @@ worth having. Builds on item 3's schema work.
 reserved for this since M9.5. Competitors ship it by default.
 
 - `ort` crate; model NOT bundled in the binary (size) - fetched on
-  `ai-memory embed --provider local` first use into `models/`, with
+  `sessionmunch embed --provider local` first use into `models/`, with
   checksum pinning and an offline path (drop the file in manually).
 - Coexistence is already designed: `(provider, model, dim)` is
   denormalized on `page_embeddings`, so local vectors sit beside

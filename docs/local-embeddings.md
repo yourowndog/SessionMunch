@@ -1,6 +1,6 @@
 # Local embeddings
 
-*2.0 item 5.* `AI_MEMORY_EMBEDDING_PROVIDER=local` runs sentence
+*2.0 item 5.* `SESSIONMUNCH_EMBEDDING_PROVIDER=local` runs sentence
 embeddings **in-process** — no API key, no external server, no GPU
 required. Pure-Rust BERT inference (candle) with
 `all-MiniLM-L6-v2` (384-dim), the sentence-transformers workhorse the
@@ -34,7 +34,7 @@ enabling it cost one of two things:
   whose job is recording everything you do, that is not a small ask;
 - **a self-hosted engine** (Ollama / LM Studio via `openai-compat`):
   keyless, but another server to run, warm, and keep on the same
-  network as ai-memory.
+  network as sessionmunch.
 
 `local` removes both. Use it when any of these describe you:
 
@@ -88,7 +88,7 @@ Nothing is forced. `(provider, model, dim)` is stored on every
 embedding row, and hybrid search ignores vectors whose triple does not
 match the configured embedder — so local vectors sit beside any
 provider vectors you already have, and switching back is a config
-change. `ai-memory embed --force` re-embeds a project under the
+change. `sessionmunch embed --force` re-embeds a project under the
 current provider when you want one consistent set.
 
 Existing installs keep their configured provider; `local` is opt-in.
@@ -97,7 +97,7 @@ see `docs/benchmarks/` for the zero-LLM vs local-embeddings
 LongMemEval rows, reproducible via:
 
 ```bash
-cargo run --release -p ai-memory-eval -- retrieval --embeddings local
+cargo run --release -p sessionmunch-eval -- retrieval --embeddings local
 ```
 
 ## Operational notes

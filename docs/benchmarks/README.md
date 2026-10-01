@@ -1,12 +1,12 @@
 # Benchmarks
 
-Published retrieval-quality numbers for ai-memory, with full provenance
+Published retrieval-quality numbers for sessionmunch, with full provenance
 (commit, dataset sha256, hardware, mode). Every number here was produced
 by the in-repo harness — see `evals/README.md` for how to reproduce:
 
 ```bash
-cargo build --release -p ai-memory-cli
-cargo run --release -p ai-memory-eval -- retrieval --fetch
+cargo build --release -p sessionmunch-cli
+cargo run --release -p sessionmunch-eval -- retrieval --fetch
 ```
 
 ## Baselines

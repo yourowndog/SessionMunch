@@ -7,9 +7,9 @@ Knowledge Graphs for LLM Code Exploration via MCP"* (arXiv:2603.27277).
 
 > **Category caveat, up front.** codebase-memory-mcp ("cbm") is **not a
 > session-memory competitor** — it is *code-structure* memory. It answers
-> *"what is this code and how does it connect?"*, ai-memory answers *"what did
+> *"what is this code and how does it connect?"*, sessionmunch answers *"what did
 > we do and decide, and why?"*. They are **complementary**: an agent can run
-> both — cbm to navigate the code, ai-memory to recall the work. This report
+> both — cbm to navigate the code, sessionmunch to recall the work. This report
 > reads it for insights, not as a rival.
 
 ## 1. Purpose & Scope
@@ -32,7 +32,7 @@ file-by-file search"* (99.2% reduction) — and it indexes the Linux kernel
 - **Pipeline:** *"RAM-first: LZ4 compression, in-memory SQLite, fused
   Aho-Corasick pattern matching. Memory released after indexing."*
 - **Storage:** **SQLite** at `~/.cache/codebase-memory-mcp/` (a familiar
-  choice — ai-memory is single-SQLite too).
+  choice — sessionmunch is single-SQLite too).
 - **Graph model:** nodes (Project, Package, File, Function, Class, Route, …)
   and edges (`CALLS`, `IMPORTS`, `IMPLEMENTS`, `HTTP_CALLS`, `DATA_FLOWS`,
   `SIMILAR_TO`, `SEMANTICALLY_RELATED`), with **bundled `nomic-embed-code`
@@ -55,7 +55,7 @@ classification), `semantic_query` (vector search over the graph),
 ## 4. Freshness & Team Sharing
 
 - **Auto-sync watcher** re-indexes on file change (`auto_watch` default true) —
-  the same "index stays live" instinct as ai-memory's wiki watcher.
+  the same "index stays live" instinct as sessionmunch's wiki watcher.
 - **Committed, compressed derived index:** *".codebase-memory/graph.db.zst is
   a zstd-compressed snapshot of the knowledge graph"* checked into the repo;
   new clones decompress and run incremental indexing instead of a full
@@ -68,7 +68,7 @@ classification), `semantic_query` (vector search over the graph),
 ## 5. Distinctive Ideas Worth Noting
 
 - **Committing a compressed *derived* index for team sharing** (`graph.db.zst`
-  in-repo). ai-memory deliberately keeps its DB derived/rebuildable and shares
+  in-repo). sessionmunch deliberately keeps its DB derived/rebuildable and shares
   through the **server** instead; cbm's git-artifact model is the offline,
   server-less counterpart — a real trade-off to keep in mind (see the ECC and
   landscape notes on git-shared vs server-mediated).
@@ -78,45 +78,45 @@ classification), `semantic_query` (vector search over the graph),
   over-permissioning**. This is the most transferable idea: a principled way
   to expose *different subsets* of tools to different task phases.
 - **`detect_changes` → risk classification** — mapping a git diff to affected
-  symbols and a risk score. Adjacent to ai-memory's typed-edge/contradiction
+  symbols and a risk score. Adjacent to sessionmunch's typed-edge/contradiction
   lint, but over *code* rather than *knowledge*.
 - **Token-efficiency as the headline metric**, benchmarked and published — the
-  same discipline ai-memory applies with LongMemEval; cbm makes "queries vs
+  same discipline sessionmunch applies with LongMemEval; cbm makes "queries vs
   grep tokens" its north star.
 
 ## 6. What Good / What's Missing — Honest Take
 
-**Not a competitor — a complement.** cbm indexes the *codebase*; ai-memory
+**Not a competitor — a complement.** cbm indexes the *codebase*; sessionmunch
 indexes the *work*. The clean division of labour: cbm knows the code as it is
-*right now*; ai-memory knows the decisions, gotchas, sessions, and handoffs —
+*right now*; sessionmunch knows the decisions, gotchas, sessions, and handoffs —
 the *why* and the *history* that no AST carries. An agent wanting both "where
 is this function called" and "why did we build it this way" needs both tools.
 
-**Ideas ai-memory could borrow:**
-1. **Tiered tool exposure** (Scout/Verify/Auditor). ai-memory ships ~18 MCP
+**Ideas sessionmunch could borrow:**
+1. **Tiered tool exposure** (Scout/Verify/Auditor). sessionmunch ships ~18 MCP
    tools to every client at every phase; a task-phase-scoped subset (e.g. a
    read-only "recall" tier vs a full "curate" tier) would cut prompt surface
    and over-permissioning — worth considering alongside the rules-promotion
    work (`docs/design-rules-promotion.md`).
 2. **The token-efficiency framing** as a first-class, published metric for the
-   *retrieval* side (ai-memory already benchmarks recall; "tokens to answer"
+   *retrieval* side (sessionmunch already benchmarks recall; "tokens to answer"
    is the complementary axis).
 3. **A committed, compressed derived-index option** for server-less small
    teams — the same idea flagged in `research-ecc.md`'s git-shared team scope.
 
-**Where ai-memory is simply doing a different (harder-for-its-domain) job:**
+**Where sessionmunch is simply doing a different (harder-for-its-domain) job:**
 - Automatic, sanitized **session capture** and cross-agent **handoff**; LLM
   **consolidation** into human-readable knowledge; **temporal `as_of`**; a
   **server** for multi-user/multi-machine. None of that is cbm's problem —
   cbm never watches a session; it watches files.
 
 **Bottom line.** codebase-memory-mcp is an excellent, narrowly-scoped
-code-intelligence engine and a natural companion to ai-memory rather than a
+code-intelligence engine and a natural companion to sessionmunch rather than a
 rival. Its best lessons for us are operational, not architectural: **tiered
 tool profiles**, a **published token-efficiency metric**, and (optionally) a
 **git-committed compressed index** for teams that won't run a server.
 
-## 7. 2.1 Feasibility — grounded in ai-memory's code
+## 7. 2.1 Feasibility — grounded in sessionmunch's code
 
 Each borrowable idea was checked against the current tree so the release call
 rests on real choke points, not analogy. Verdicts: one **2.1 feature**, one
@@ -125,7 +125,7 @@ rests on real choke points, not analogy. Verdicts: one **2.1 feature**, one
 ### 7.1 Tiered tool profiles — **recommend for 2.1**
 
 *Where it plugs in.* The MCP server exposes **19 tools** through the rmcp
-`#[tool_router]` macro (`crates/ai-memory-mcp/src/server.rs:1239`), and
+`#[tool_router]` macro (`crates/sessionmunch-mcp/src/server.rs:1239`), and
 `list_tools` (`server.rs:3966`) is the **single choke point** — it returns
 `tool_router.list_all()` unfiltered, with only a per-dialect schema *reshape*
 (`restricted_schema_tool_list`, `server.rs:4021`) that never drops a tool. A
@@ -143,7 +143,7 @@ work** (`docs/design-rules-promotion.md`) — both are about giving the agent
 *less, better-scoped* authority by default.
 
 *Shape.* Add a `--tool-profile recall|full` flag to `ServeArgs`
-(`crates/ai-memory-cli/src/cli.rs:2119`), or a per-request `?profile=` marker
+(`crates/sessionmunch-cli/src/cli.rs:2119`), or a per-request `?profile=` marker
 mirroring the existing `?flavor=` mechanism (`server.rs:3980`); filter
 `list_all()` by `tool_call_is_write` before returning. No new classification
 logic — the partition is already written.
@@ -167,14 +167,14 @@ as a quality improvement whenever, independent of the 2.1 train.
 
 *Where it plugs in.* The DB is **contractually derived and rebuildable**:
 markdown-in-git is the source of truth, SQLite `db/` is the index
-(`crates/ai-memory-wiki/src/lib.rs:3`, `docs/companion-crates.md:14`), with a
-working rebuild (`ai-memory reindex`, `crates/ai-memory-cli/src/commands/reindex.rs`)
+(`crates/sessionmunch-wiki/src/lib.rs:3`, `docs/companion-crates.md:14`), with a
+working rebuild (`sessionmunch reindex`, `crates/sessionmunch-cli/src/commands/reindex.rs`)
 and an online-backup tarball producer (`POST /admin/backup`,
-`crates/ai-memory-mcp/src/admin.rs:746`). So a committed `graph.db.zst`-style
+`crates/sessionmunch-mcp/src/admin.rs:746`). So a committed `graph.db.zst`-style
 artifact *fits the model* mechanically.
 
 *Why defer.* It is a **different distribution philosophy**, not a small
-feature. ai-memory's multi-user/multi-machine story is deliberately
+feature. sessionmunch's multi-user/multi-machine story is deliberately
 **server-mediated** (attributed writes, per-user scope, live handoff); a
 git-committed binary index is the *server-less* counterpart, and it drags in
 snapshot-consistency, staleness, regeneration cadence, and binary-blob merge

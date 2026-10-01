@@ -13,8 +13,8 @@ set -euo pipefail
 
 repo_root=$(git rev-parse --show-toplevel)
 hook="$repo_root/.git/hooks/pre-push"
-begin="# >>> ai-memory pre-push >>>"
-end="# <<< ai-memory pre-push <<<"
+begin="# >>> sessionmunch pre-push >>>"
+end="# <<< sessionmunch pre-push <<<"
 tmp=$(mktemp "${hook}.XXXXXX")
 trap 'rm -f "$tmp"' EXIT
 
@@ -34,7 +34,7 @@ else
 fi
 
 cat >> "$tmp" <<'HOOK'
-# >>> ai-memory pre-push >>>
+# >>> sessionmunch pre-push >>>
 # Runs the full test tier before a push. See scripts/install-git-hooks.sh.
 set -euo pipefail
 
@@ -50,7 +50,7 @@ else
     echo "pre-push: cargo test --workspace --all-targets (nextest not installed)"
     cargo test --workspace --all-targets
 fi
-# <<< ai-memory pre-push <<<
+# <<< sessionmunch pre-push <<<
 HOOK
 
 mv "$tmp" "$hook"

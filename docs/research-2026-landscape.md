@@ -177,7 +177,7 @@ analysis in [`research-hindsight.md`](research-hindsight.md).
   something we already do by shape (session-end consolidation jobs,
   scheduled maintenance) without the branding.
 
-## 5. What this means for ai-memory - analysis and recommendations
+## 5. What this means for sessionmunch - analysis and recommendations
 
 The May research led us to build: versioned supersession, retention
 formulas, hybrid RRF retrieval, opt-in LLM consolidation, handoffs as a
@@ -191,7 +191,7 @@ recommendations are additive and ranked:
 **R1 - OKF conformance (small, high leverage).** Map our frontmatter
 conventions onto OKF v0.1 (`type` field plus its small vocabulary) and
 add an OKF export - possibly just documentation plus a thin
-`ai-memory export --okf` view of `wiki/`. Being the *server-grade*
+`sessionmunch export --okf` view of `wiki/`. Being the *server-grade*
 implementation of the format Google standardized is a positioning gift:
 interop with every OKF-aware consumer, at conventions-mapping cost.
 Evaluate whether native conformance (wiki pages *are* OKF files) beats

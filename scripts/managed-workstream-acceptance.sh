@@ -5,11 +5,11 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-BIN=${AI_MEMORY_ACCEPTANCE_BIN:-"$ROOT/target/debug/ai-memory"}
-KEEP=${AI_MEMORY_ACCEPTANCE_KEEP:-0}
-DETERMINISTIC_ONLY=${AI_MEMORY_ACCEPTANCE_DETERMINISTIC_ONLY:-0}
-HARNESS_WORDS=${AI_MEMORY_ACCEPTANCE_HARNESSES:-"claude codex opencode pi crush omp kimi command-code kiro grok antigravity"}
-TMP=$(mktemp -d "${TMPDIR:-/tmp}/ai-memory-workstream-acceptance.XXXXXX")
+BIN=${SESSIONMUNCH_ACCEPTANCE_BIN:-"$ROOT/target/debug/sessionmunch"}
+KEEP=${SESSIONMUNCH_ACCEPTANCE_KEEP:-0}
+DETERMINISTIC_ONLY=${SESSIONMUNCH_ACCEPTANCE_DETERMINISTIC_ONLY:-0}
+HARNESS_WORDS=${SESSIONMUNCH_ACCEPTANCE_HARNESSES:-"claude codex opencode pi crush omp kimi command-code kiro grok antigravity"}
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/sessionmunch-workstream-acceptance.XXXXXX")
 DATA="$TMP/data"
 REPO="$TMP/repo"
 CONFIG="$TMP/config"
@@ -37,20 +37,20 @@ for command in cargo curl diff git jq script sqlite3; do
   }
 done
 
-if [ ! -x "$BIN" ] || [ "${AI_MEMORY_ACCEPTANCE_REBUILD:-1}" = 1 ]; then
-  (cd "$ROOT" && cargo build -p ai-memory-cli)
+if [ ! -x "$BIN" ] || [ "${SESSIONMUNCH_ACCEPTANCE_REBUILD:-1}" = 1 ]; then
+  (cd "$ROOT" && cargo build -p sessionmunch-cli)
 fi
 
 mkdir -p "$DATA" "$REPO" "$CONFIG" "$LOGS"
 git -C "$REPO" init -q
-git -C "$REPO" config user.name "ai-memory acceptance"
+git -C "$REPO" config user.name "sessionmunch acceptance"
 git -C "$REPO" config user.email "acceptance@localhost"
 printf '# Managed workstream acceptance\n' >"$REPO/README.md"
 git -C "$REPO" add README.md
 git -C "$REPO" commit -q --no-gpg-sign -m "acceptance fixture"
 
 TOKEN="managed-acceptance-$(date +%s)-$$"
-PORT=${AI_MEMORY_ACCEPTANCE_PORT:-$((52000 + ($$ % 10000)))}
+PORT=${SESSIONMUNCH_ACCEPTANCE_PORT:-$((52000 + ($$ % 10000)))}
 for _ in $(seq 1 50); do
   if ! curl -sS --max-time 0.1 "http://127.0.0.1:$PORT/" >/dev/null 2>&1; then
     break
@@ -58,9 +58,9 @@ for _ in $(seq 1 50); do
   PORT=$((PORT + 1))
 done
 URL="http://127.0.0.1:$PORT"
-export AI_MEMORY_SERVER_URL="$URL"
-export AI_MEMORY_AUTH_TOKEN="$TOKEN"
-export AI_MEMORY_NO_VERSION_CHECK=1
+export SESSIONMUNCH_SERVER_URL="$URL"
+export SESSIONMUNCH_AUTH_TOKEN="$TOKEN"
+export SESSIONMUNCH_NO_VERSION_CHECK=1
 
 "$BIN" --data-dir "$DATA" serve \
   --transport http \
@@ -73,14 +73,14 @@ for _ in $(seq 1 100); do
     "$URL/workstream/not-a-uuid/events" 2>/dev/null || true)
   [ "$status" = 400 ] && break
   if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-    printf 'ai-memory server exited during startup\n' >&2
+    printf 'sessionmunch server exited during startup\n' >&2
     tail -80 "$LOGS/server.log" >&2
     exit 1
   fi
   sleep 0.1
 done
 [ "${status:-}" = 400 ] || {
-  printf 'ai-memory server did not become ready at %s\n' "$URL" >&2
+  printf 'sessionmunch server did not become ready at %s\n' "$URL" >&2
   tail -80 "$LOGS/server.log" >&2
   exit 1
 }
@@ -199,26 +199,26 @@ FAKE="$TMP/fake-harness.sh"
 cat >"$FAKE" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-case "${AI_MEMORY_ACCEPTANCE_FAKE_MODE:-argv}" in
+case "${SESSIONMUNCH_ACCEPTANCE_FAKE_MODE:-argv}" in
   argv)
-    printf '%s\n' "$@" >"$AI_MEMORY_ACCEPTANCE_ARGV_LOG"
+    printf '%s\n' "$@" >"$SESSIONMUNCH_ACCEPTANCE_ARGV_LOG"
     ;;
   exit)
-    exit "${AI_MEMORY_ACCEPTANCE_EXIT_CODE:-23}"
+    exit "${SESSIONMUNCH_ACCEPTANCE_EXIT_CODE:-23}"
     ;;
   lease)
-    : >"$AI_MEMORY_ACCEPTANCE_STARTED"
-    sleep "${AI_MEMORY_ACCEPTANCE_SLEEP:-3}"
+    : >"$SESSIONMUNCH_ACCEPTANCE_STARTED"
+    sleep "${SESSIONMUNCH_ACCEPTANCE_SLEEP:-3}"
     ;;
   crush)
-    printf '%s\n' "$@" >"$AI_MEMORY_ACCEPTANCE_ARGV_LOG"
-    printf '%s\n' "$CRUSH_GLOBAL_CONFIG" >"$AI_MEMORY_ACCEPTANCE_CRUSH_ENV_LOG"
-    cp "$CRUSH_GLOBAL_CONFIG/crush.json" "$AI_MEMORY_ACCEPTANCE_CRUSH_CONFIG_LOG"
+    printf '%s\n' "$@" >"$SESSIONMUNCH_ACCEPTANCE_ARGV_LOG"
+    printf '%s\n' "$CRUSH_GLOBAL_CONFIG" >"$SESSIONMUNCH_ACCEPTANCE_CRUSH_ENV_LOG"
+    cp "$CRUSH_GLOBAL_CONFIG/crush.json" "$SESSIONMUNCH_ACCEPTANCE_CRUSH_CONFIG_LOG"
     packet=$(jq -r '.options.global_context_paths[-1]' "$CRUSH_GLOBAL_CONFIG/crush.json")
-    cp "$packet" "$AI_MEMORY_ACCEPTANCE_CRUSH_PACKET_LOG"
+    cp "$packet" "$SESSIONMUNCH_ACCEPTANCE_CRUSH_PACKET_LOG"
     ;;
   kiro)
-    printf '%s\n' "$@" >"$AI_MEMORY_ACCEPTANCE_ARGV_LOG"
+    printf '%s\n' "$@" >"$SESSIONMUNCH_ACCEPTANCE_ARGV_LOG"
     # Honor `--resume-id <id>` (resume); a fresh launch mints its own id
     # because Kiro CLI session ids are server-assigned UUIDs.
     session_id=""
@@ -249,14 +249,14 @@ case "${AI_MEMORY_ACCEPTANCE_FAKE_MODE:-argv}" in
         "$session_id" "$PWD" >"$store/$session_id.json"
       : >"$stream"
     fi
-    sentinel=${AI_MEMORY_ACCEPTANCE_SENTINEL:-AMWS-FAKE-KIRO}
+    sentinel=${SESSIONMUNCH_ACCEPTANCE_SENTINEL:-AMWS-FAKE-KIRO}
     printf '{"version":"v1","kind":"Prompt","data":{"message_id":"m-%s-u","content":[{"kind":"text","data":"%s"}],"meta":{"timestamp":%s}}}\n' \
       "$(date +%s)" "$sentinel" "$(date +%s)000" >>"$stream"
     printf '{"version":"v1","kind":"AssistantMessage","data":{"message_id":"m-%s-a","content":[{"kind":"text","data":"%s reply"}],"meta":{"timestamp":%s}}}\n' \
       "$(date +%s)" "$sentinel" "$(date +%s)000" >>"$stream"
     ;;
   kiro-v3)
-    printf '%s\n' "$@" >"$AI_MEMORY_ACCEPTANCE_ARGV_LOG"
+    printf '%s\n' "$@" >"$SESSIONMUNCH_ACCEPTANCE_ARGV_LOG"
     session_id=""
     previous_arg=""
     for arg in "$@"; do
@@ -283,14 +283,14 @@ case "${AI_MEMORY_ACCEPTANCE_FAKE_MODE:-argv}" in
         "$session_id" "$PWD" >"$session_dir/session.json"
       : >"$stream"
     fi
-    sentinel=${AI_MEMORY_ACCEPTANCE_SENTINEL:-AMWS-FAKE-KIRO-V3}
+    sentinel=${SESSIONMUNCH_ACCEPTANCE_SENTINEL:-AMWS-FAKE-KIRO-V3}
     printf '{"id":"u-%s","timestamp":"2026-08-06T10:00:00Z","payload":{"type":"user","content":"%s"}}\n' \
       "$(date +%s)" "$sentinel" >>"$stream"
     printf '{"id":"a-%s","timestamp":"2026-08-06T10:00:01Z","payload":{"type":"assistant","operationType":"Say","content":"%s reply"}}\n' \
       "$(date +%s)" "$sentinel" >>"$stream"
     ;;
   kimi)
-    printf '%s\n' "$@" >"$AI_MEMORY_ACCEPTANCE_ARGV_LOG"
+    printf '%s\n' "$@" >"$SESSIONMUNCH_ACCEPTANCE_ARGV_LOG"
     # Honor `--session <id>` (resume); a fresh launch mints its own id
     # because Kimi Code cannot accept a caller-supplied session id.
     session_id=""
@@ -316,14 +316,14 @@ case "${AI_MEMORY_ACCEPTANCE_FAKE_MODE:-argv}" in
       printf '{"type":"metadata","protocol_version":"1","created_at":%s}\n' \
         "$(date +%s)000" >"$wire"
     fi
-    sentinel=${AI_MEMORY_ACCEPTANCE_SENTINEL:-AMWS-FAKE-KIMI}
+    sentinel=${SESSIONMUNCH_ACCEPTANCE_SENTINEL:-AMWS-FAKE-KIMI}
     printf '{"type":"context.append_message","time":%s,"message":{"role":"user","content":[{"type":"text","text":"%s"}],"toolCalls":[]}}\n' \
       "$(date +%s)000" "$sentinel" >>"$wire"
     printf '{"type":"context.append_message","time":%s,"message":{"role":"assistant","content":[{"type":"text","text":"%s reply"}],"toolCalls":[]}}\n' \
       "$(date +%s)000" "$sentinel" >>"$wire"
     ;;
   command-code)
-    printf '%s\n' "$@" >"$AI_MEMORY_ACCEPTANCE_ARGV_LOG"
+    printf '%s\n' "$@" >"$SESSIONMUNCH_ACCEPTANCE_ARGV_LOG"
     session_id=""
     previous_arg=""
     for arg in "$@"; do
@@ -349,7 +349,7 @@ case "${AI_MEMORY_ACCEPTANCE_FAKE_MODE:-argv}" in
       printf '{"type":"session","version":3,"id":"%s","timestamp":"2026-08-07T17:00:00Z","cwd":"%s"}\n' \
         "$session_id" "$PWD" >"$stream"
     fi
-    sentinel=${AI_MEMORY_ACCEPTANCE_SENTINEL:-AMWS-FAKE-COMMAND-CODE}
+    sentinel=${SESSIONMUNCH_ACCEPTANCE_SENTINEL:-AMWS-FAKE-COMMAND-CODE}
     now=$(date +%s)
     printf '{"type":"message","id":"u-%s","parentId":null,"timestamp":"2026-08-07T17:00:01Z","message":{"role":"user","content":[{"type":"text","text":"%s"}],"meta":{"source":"user"}}}\n' \
       "$now" "$sentinel" >>"$stream"
@@ -357,7 +357,7 @@ case "${AI_MEMORY_ACCEPTANCE_FAKE_MODE:-argv}" in
       "$now" "$now" "$sentinel" >>"$stream"
     ;;
   grok)
-    printf '%s\n' "$@" >"$AI_MEMORY_ACCEPTANCE_ARGV_LOG"
+    printf '%s\n' "$@" >"$SESSIONMUNCH_ACCEPTANCE_ARGV_LOG"
     # Honor the wrapper-owned `--session-id <id>` (fresh) and `--resume <id>`
     # (returning) selectors the way the real CLI does.
     session_id=""
@@ -378,12 +378,12 @@ case "${AI_MEMORY_ACCEPTANCE_FAKE_MODE:-argv}" in
       printf '{"info":{"id":"%s","cwd":"%s"}}\n' "$session_id" "$PWD" >"$session_dir/summary.json"
       printf '{"type":"system","content":"fake grok system prompt"}\n' >"$chat"
     fi
-    sentinel=${AI_MEMORY_ACCEPTANCE_SENTINEL:-AMWS-FAKE-GROK}
+    sentinel=${SESSIONMUNCH_ACCEPTANCE_SENTINEL:-AMWS-FAKE-GROK}
     printf '{"type":"user","content":[{"type":"text","text":"%s"}]}\n' "$sentinel" >>"$chat"
     printf '{"type":"assistant","content":"%s reply"}\n' "$sentinel" >>"$chat"
     ;;
   antigravity)
-    printf '%s\n' "$@" >"$AI_MEMORY_ACCEPTANCE_ARGV_LOG"
+    printf '%s\n' "$@" >"$SESSIONMUNCH_ACCEPTANCE_ARGV_LOG"
     session_id=""
     previous_arg=""
     for arg in "$@"; do
@@ -393,7 +393,7 @@ case "${AI_MEMORY_ACCEPTANCE_FAKE_MODE:-argv}" in
       previous_arg=$arg
     done
     if [ -z "$session_id" ]; then
-      session_id=${AI_MEMORY_ACCEPTANCE_ANTIGRAVITY_SESSION_ID:?antigravity fake mode requires a fresh session id}
+      session_id=${SESSIONMUNCH_ACCEPTANCE_ANTIGRAVITY_SESSION_ID:?antigravity fake mode requires a fresh session id}
     fi
     conversations="$HOME/.gemini/antigravity-cli/conversations"
     mkdir -p "$conversations"
@@ -414,9 +414,9 @@ case "${AI_MEMORY_ACCEPTANCE_FAKE_MODE:-argv}" in
     payload=$(jq -nc --arg id "$session_id" --arg cwd "$PWD" \
       '{invocationNum: 0, conversationId: $id, workspacePaths: [$cwd]}')
     printf '%s' "$payload" | \
-      AI_MEMORY_HOOK_URL="${AI_MEMORY_SERVER_URL:?}" \
-      "$AI_MEMORY_ACCEPTANCE_ANTIGRAVITY_HOOK" \
-      >"$AI_MEMORY_ACCEPTANCE_ANTIGRAVITY_HOOK_LOG"
+      SESSIONMUNCH_HOOK_URL="${SESSIONMUNCH_SERVER_URL:?}" \
+      "$SESSIONMUNCH_ACCEPTANCE_ANTIGRAVITY_HOOK" \
+      >"$SESSIONMUNCH_ACCEPTANCE_ANTIGRAVITY_HOOK_LOG"
     ;;
 esac
 EOF
@@ -435,8 +435,8 @@ printf '%s\n%s\n' \
 (
   cd "$REPO"
   CODEX_HOME="$UTILITY_CODEX_HOME" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=argv \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/utility-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=argv \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/utility-argv.log" \
     "$BIN" --data-dir "$DATA" run --new edge-utility --executable "$FAKE" \
       codex --version >"$LOGS/edge-utility.log" 2>&1
 )
@@ -447,8 +447,8 @@ grep -q "workstream 'edge-utility' saved 1 new event(s)" "$LOGS/edge-utility.log
 
 (
   cd "$REPO"
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=argv \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=argv \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/argv.log" \
     "$BIN" --data-dir "$DATA" run --new edge-argv --executable "$FAKE" \
       codex --yolo -m gpt-5 "prompt words" >"$LOGS/edge-argv.log" 2>&1
 )
@@ -459,7 +459,7 @@ diff -u \
 set +e
 (
   cd "$REPO"
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=exit AI_MEMORY_ACCEPTANCE_EXIT_CODE=23 \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=exit SESSIONMUNCH_ACCEPTANCE_EXIT_CODE=23 \
     "$BIN" --data-dir "$DATA" run --new edge-exit --executable "$FAKE" \
       codex >"$LOGS/edge-exit.log" 2>&1
 )
@@ -472,9 +472,9 @@ set -e
 
 (
   cd "$REPO"
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=lease \
-  AI_MEMORY_ACCEPTANCE_SLEEP=7 \
-  AI_MEMORY_ACCEPTANCE_STARTED="$TMP/lease-started" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=lease \
+  SESSIONMUNCH_ACCEPTANCE_SLEEP=7 \
+  SESSIONMUNCH_ACCEPTANCE_STARTED="$TMP/lease-started" \
     "$BIN" --data-dir "$DATA" run --new edge-lease --executable "$FAKE" \
       codex >"$LOGS/edge-lease-owner.log" 2>&1
 ) &
@@ -490,8 +490,8 @@ done
 set +e
 (
   cd "$REPO"
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=argv \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/lease-contender-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=argv \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/lease-contender-argv.log" \
     "$BIN" --data-dir "$DATA" run --workstream edge-lease --executable "$FAKE" \
       codex >"$LOGS/edge-lease-contender.log" 2>&1
 )
@@ -549,8 +549,8 @@ printf '{"type":"session","version":3,"id":"%s","timestamp":"2026-08-07T17:00:00
   cd "$REPO"
   HOME="$AUTO_HOME" CODEX_HOME="$AUTO_CODEX_HOME" \
   CLAUDE_CONFIG_DIR="$AUTO_CLAUDE_HOME" PATH="$AUTO_BIN:$PATH" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=argv \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/auto-newest-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=argv \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/auto-newest-argv.log" \
     "$BIN" --data-dir "$DATA" run --workspace edge-auto --project edge-auto --yolo \
       >"$LOGS/edge-auto-newest.log" 2>&1
 )
@@ -563,8 +563,8 @@ diff -u \
 (
   cd "$REPO"
   HOME="$AUTO_HOME" CLAUDE_CONFIG_DIR="$AUTO_CLAUDE_HOME" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=argv \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/auto-claude-first-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=argv \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/auto-claude-first-argv.log" \
     "$BIN" --data-dir "$DATA" run --workspace edge-auto --project edge-auto \
       --executable "$FAKE" claude >"$LOGS/edge-auto-claude-first.log" 2>&1
 )
@@ -580,8 +580,8 @@ printf '{"sessionId":"%s","cwd":"%s"}\n' "$auto_claude_id" "$REPO" \
   cd "$REPO"
   HOME="$AUTO_HOME" CODEX_HOME="$AUTO_CODEX_HOME" \
   CLAUDE_CONFIG_DIR="$AUTO_CLAUDE_HOME" PATH="$AUTO_BIN:$PATH" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=argv \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/auto-managed-precedence-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=argv \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/auto-managed-precedence-argv.log" \
     "$BIN" --data-dir "$DATA" run --workspace edge-auto --project edge-auto \
       >"$LOGS/edge-auto-managed-precedence.log" 2>&1
 )
@@ -598,7 +598,7 @@ set +e
 (
   cd "$REPO"
   HOME="$AUTO_HOME" CRUSH_GLOBAL_CONFIG="$BAD_CRUSH_CONFIG" \
-    AI_MEMORY_ACCEPTANCE_FAKE_MODE=crush \
+    SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=crush \
     "$BIN" --data-dir "$DATA" run --workspace edge-auto --project edge-auto \
       --executable "$FAKE" crush >"$LOGS/edge-crush-invalid-config.log" 2>&1
 )
@@ -615,16 +615,16 @@ grep -q 'parsing Crush config' "$LOGS/edge-crush-invalid-config.log"
 (
   cd "$REPO"
   HOME="$AUTO_HOME" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=crush \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/crush-context-argv.log" \
-  AI_MEMORY_ACCEPTANCE_CRUSH_ENV_LOG="$TMP/crush-context-env.log" \
-  AI_MEMORY_ACCEPTANCE_CRUSH_CONFIG_LOG="$TMP/crush-context-config.json" \
-  AI_MEMORY_ACCEPTANCE_CRUSH_PACKET_LOG="$TMP/crush-context-packet.md" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=crush \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/crush-context-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_CRUSH_ENV_LOG="$TMP/crush-context-env.log" \
+  SESSIONMUNCH_ACCEPTANCE_CRUSH_CONFIG_LOG="$TMP/crush-context-config.json" \
+  SESSIONMUNCH_ACCEPTANCE_CRUSH_PACKET_LOG="$TMP/crush-context-packet.md" \
     "$BIN" --data-dir "$DATA" run --workspace edge-auto --project edge-auto \
       --executable "$FAKE" --yolo crush >"$LOGS/edge-crush-context.log" 2>&1
 )
 diff -u <(printf '%s\n' --yolo) "$TMP/crush-context-argv.log"
-grep -q 'ai-memory managed workstream' "$TMP/crush-context-packet.md"
+grep -q 'sessionmunch managed workstream' "$TMP/crush-context-packet.md"
 crush_context_dir=$(cat "$TMP/crush-context-env.log")
 [ ! -e "$crush_context_dir" ] || {
   printf 'temporary Crush context directory was not removed\n' >&2
@@ -642,9 +642,9 @@ mkdir -p "$KIMI_FAKE_HOME"
 (
   cd "$REPO"
   KIMI_CODE_HOME="$KIMI_FAKE_HOME" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=kimi \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/kimi-first-argv.log" \
-  AI_MEMORY_ACCEPTANCE_SENTINEL="AMWS-FAKE-KIMI-ONE" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=kimi \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/kimi-first-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_SENTINEL="AMWS-FAKE-KIMI-ONE" \
     "$BIN" --data-dir "$DATA" run --new edge-kimi --executable "$FAKE" \
       kimi >"$LOGS/edge-kimi-first.log" 2>&1
 )
@@ -681,9 +681,9 @@ jq -e --arg id "$kimi_session_id" \
 (
   cd "$REPO"
   KIMI_CODE_HOME="$KIMI_FAKE_HOME" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=kimi \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/kimi-second-argv.log" \
-  AI_MEMORY_ACCEPTANCE_SENTINEL="AMWS-FAKE-KIMI-TWO" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=kimi \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/kimi-second-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_SENTINEL="AMWS-FAKE-KIMI-TWO" \
     "$BIN" --data-dir "$DATA" run --workstream edge-kimi --executable "$FAKE" \
       kimi-cli >"$LOGS/edge-kimi-second.log" 2>&1
 )
@@ -705,9 +705,9 @@ rm -rf "$kimi_session_dir"
 (
   cd "$REPO"
   KIMI_CODE_HOME="$KIMI_FAKE_HOME" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=kimi \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/kimi-orphan-argv.log" \
-  AI_MEMORY_ACCEPTANCE_SENTINEL="AMWS-FAKE-KIMI-RECOVERED" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=kimi \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/kimi-orphan-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_SENTINEL="AMWS-FAKE-KIMI-RECOVERED" \
     "$BIN" --data-dir "$DATA" run --workstream edge-kimi --executable "$FAKE" \
       kimi >"$LOGS/edge-kimi-orphan.log" 2>&1
 )
@@ -743,9 +743,9 @@ mkdir -p "$COMMAND_CODE_FAKE_HOME"
 (
   cd "$REPO"
   HOME="$COMMAND_CODE_FAKE_HOME" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=command-code \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/command-code-first-argv.log" \
-  AI_MEMORY_ACCEPTANCE_SENTINEL="AMWS-FAKE-COMMAND-CODE-ONE" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=command-code \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/command-code-first-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_SENTINEL="AMWS-FAKE-COMMAND-CODE-ONE" \
     "$BIN" --data-dir "$DATA" run --new edge-command-code --executable "$FAKE" \
       --yolo command-code >"$LOGS/edge-command-code-first.log" 2>&1
 )
@@ -776,9 +776,9 @@ jq -e --arg id "$command_code_session_id" \
 (
   cd "$REPO"
   HOME="$COMMAND_CODE_FAKE_HOME" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=command-code \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/command-code-second-argv.log" \
-  AI_MEMORY_ACCEPTANCE_SENTINEL="AMWS-FAKE-COMMAND-CODE-TWO" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=command-code \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/command-code-second-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_SENTINEL="AMWS-FAKE-COMMAND-CODE-TWO" \
     "$BIN" --data-dir "$DATA" run --workstream edge-command-code --executable "$FAKE" \
       cmdc >"$LOGS/edge-command-code-second.log" 2>&1
 )
@@ -803,9 +803,9 @@ mkdir -p "$KIRO_FAKE_HOME"
 (
   cd "$REPO"
   KIRO_HOME="$KIRO_FAKE_HOME" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=kiro \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/kiro-first-argv.log" \
-  AI_MEMORY_ACCEPTANCE_SENTINEL="AMWS-FAKE-KIRO-ONE" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=kiro \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/kiro-first-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_SENTINEL="AMWS-FAKE-KIRO-ONE" \
     "$BIN" --data-dir "$DATA" run --new edge-kiro --executable "$FAKE" \
       --yolo kiro >"$LOGS/edge-kiro-first.log" 2>&1
 )
@@ -835,9 +835,9 @@ jq -e --arg id "$kiro_session_id" \
 (
   cd "$REPO"
   KIRO_HOME="$KIRO_FAKE_HOME" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=kiro \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/kiro-second-argv.log" \
-  AI_MEMORY_ACCEPTANCE_SENTINEL="AMWS-FAKE-KIRO-TWO" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=kiro \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/kiro-second-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_SENTINEL="AMWS-FAKE-KIRO-TWO" \
     "$BIN" --data-dir "$DATA" run --workstream edge-kiro --executable "$FAKE" \
       kiro-cli >"$LOGS/edge-kiro-second.log" 2>&1
 )
@@ -855,9 +855,9 @@ jq -e \
 (
   cd "$REPO"
   KIRO_HOME="$KIRO_FAKE_HOME" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=kiro-v3 \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/kiro-v3-first-argv.log" \
-  AI_MEMORY_ACCEPTANCE_SENTINEL="AMWS-FAKE-KIRO-V3-ONE" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=kiro-v3 \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/kiro-v3-first-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_SENTINEL="AMWS-FAKE-KIRO-V3-ONE" \
     "$BIN" --data-dir "$DATA" run --new edge-kiro-v3 --executable "$FAKE" \
       --yolo kiro --v3 >"$LOGS/edge-kiro-v3-first.log" 2>&1
 )
@@ -884,9 +884,9 @@ jq -e --arg id "$kiro_v3_session_id" \
 (
   cd "$REPO"
   KIRO_HOME="$KIRO_FAKE_HOME" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=kiro-v3 \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/kiro-v3-second-argv.log" \
-  AI_MEMORY_ACCEPTANCE_SENTINEL="AMWS-FAKE-KIRO-V3-TWO" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=kiro-v3 \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/kiro-v3-second-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_SENTINEL="AMWS-FAKE-KIRO-V3-TWO" \
     "$BIN" --data-dir "$DATA" run --workstream edge-kiro-v3 --executable "$FAKE" \
       kiro >"$LOGS/edge-kiro-v3-second.log" 2>&1
 )
@@ -915,11 +915,11 @@ antigravity_first_observations=$(agent_observation_count antigravity-cli)
 (
   cd "$REPO"
   HOME="$ANTIGRAVITY_FAKE_HOME" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=antigravity \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/antigravity-first-argv.log" \
-  AI_MEMORY_ACCEPTANCE_ANTIGRAVITY_SESSION_ID="$ANTIGRAVITY_FAKE_ID" \
-  AI_MEMORY_ACCEPTANCE_ANTIGRAVITY_HOOK="$ANTIGRAVITY_HOOK" \
-  AI_MEMORY_ACCEPTANCE_ANTIGRAVITY_HOOK_LOG="$TMP/antigravity-first-hook.json" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=antigravity \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/antigravity-first-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_ANTIGRAVITY_SESSION_ID="$ANTIGRAVITY_FAKE_ID" \
+  SESSIONMUNCH_ACCEPTANCE_ANTIGRAVITY_HOOK="$ANTIGRAVITY_HOOK" \
+  SESSIONMUNCH_ACCEPTANCE_ANTIGRAVITY_HOOK_LOG="$TMP/antigravity-first-hook.json" \
     "$BIN" --data-dir "$DATA" run --new edge-antigravity --executable "$FAKE" \
       --yolo antigravity >"$LOGS/edge-antigravity-first.log" 2>&1
 )
@@ -951,11 +951,11 @@ antigravity_second_observations=$(agent_observation_count antigravity-cli)
 (
   cd "$REPO"
   HOME="$ANTIGRAVITY_FAKE_HOME" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=antigravity \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/antigravity-second-argv.log" \
-  AI_MEMORY_ACCEPTANCE_ANTIGRAVITY_SESSION_ID="$ANTIGRAVITY_FAKE_ID" \
-  AI_MEMORY_ACCEPTANCE_ANTIGRAVITY_HOOK="$ANTIGRAVITY_HOOK" \
-  AI_MEMORY_ACCEPTANCE_ANTIGRAVITY_HOOK_LOG="$TMP/antigravity-second-hook.json" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=antigravity \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/antigravity-second-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_ANTIGRAVITY_SESSION_ID="$ANTIGRAVITY_FAKE_ID" \
+  SESSIONMUNCH_ACCEPTANCE_ANTIGRAVITY_HOOK="$ANTIGRAVITY_HOOK" \
+  SESSIONMUNCH_ACCEPTANCE_ANTIGRAVITY_HOOK_LOG="$TMP/antigravity-second-hook.json" \
     "$BIN" --data-dir "$DATA" run --workstream edge-antigravity \
       --executable "$FAKE" agy >"$LOGS/edge-antigravity-second.log" 2>&1
 )
@@ -980,11 +980,11 @@ antigravity_cross_observations=$(agent_observation_count antigravity-cli)
 (
   cd "$REPO"
   HOME="$ANTIGRAVITY_CROSS_HOME" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=antigravity \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/antigravity-cross-argv.log" \
-  AI_MEMORY_ACCEPTANCE_ANTIGRAVITY_SESSION_ID="$ANTIGRAVITY_CROSS_ID" \
-  AI_MEMORY_ACCEPTANCE_ANTIGRAVITY_HOOK="$ANTIGRAVITY_HOOK" \
-  AI_MEMORY_ACCEPTANCE_ANTIGRAVITY_HOOK_LOG="$TMP/antigravity-cross-hook.json" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=antigravity \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/antigravity-cross-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_ANTIGRAVITY_SESSION_ID="$ANTIGRAVITY_CROSS_ID" \
+  SESSIONMUNCH_ACCEPTANCE_ANTIGRAVITY_HOOK="$ANTIGRAVITY_HOOK" \
+  SESSIONMUNCH_ACCEPTANCE_ANTIGRAVITY_HOOK_LOG="$TMP/antigravity-cross-hook.json" \
     "$BIN" --data-dir "$DATA" run --workstream edge-kimi --executable "$FAKE" \
       antigravity-cli >"$LOGS/edge-antigravity-cross.log" 2>&1
 )
@@ -1013,9 +1013,9 @@ mkdir -p "$GROK_FAKE_HOME"
 (
   cd "$REPO"
   GROK_HOME="$GROK_FAKE_HOME" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=grok \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/grok-first-argv.log" \
-  AI_MEMORY_ACCEPTANCE_SENTINEL="AMWS-FAKE-GROK-ONE" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=grok \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/grok-first-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_SENTINEL="AMWS-FAKE-GROK-ONE" \
     "$BIN" --data-dir "$DATA" run --new edge-grok --executable "$FAKE" \
       grok >"$LOGS/edge-grok-first.log" 2>&1
 )
@@ -1055,9 +1055,9 @@ jq -e --arg id "$grok_session_id" \
 (
   cd "$REPO"
   GROK_HOME="$GROK_FAKE_HOME" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=grok \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/grok-second-argv.log" \
-  AI_MEMORY_ACCEPTANCE_SENTINEL="AMWS-FAKE-GROK-TWO" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=grok \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/grok-second-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_SENTINEL="AMWS-FAKE-GROK-TWO" \
     "$BIN" --data-dir "$DATA" run --workstream edge-grok --executable "$FAKE" \
       grok-build >"$LOGS/edge-grok-second.log" 2>&1
 )
@@ -1089,9 +1089,9 @@ grok_cross_delivery=$(current_delivery_cursor "$kimi_ws_hex" grok)
 (
   cd "$REPO"
   GROK_HOME="$GROK_FAKE_HOME" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=grok \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/grok-cross-argv.log" \
-  AI_MEMORY_ACCEPTANCE_SENTINEL="AMWS-FAKE-GROK-CROSS" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=grok \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/grok-cross-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_SENTINEL="AMWS-FAKE-GROK-CROSS" \
     "$BIN" --data-dir "$DATA" run --workstream edge-kimi --executable "$FAKE" \
       grok >"$LOGS/edge-grok-cross.log" 2>&1
 )
@@ -1121,8 +1121,8 @@ mkdir -p "$ADOPTION_CODEX_HOME/sessions/2026/01/01"
 (
   cd "$REPO"
   CODEX_HOME="$ADOPTION_CODEX_HOME" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=argv \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/adoption-blank-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=argv \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/adoption-blank-argv.log" \
     "$BIN" --data-dir "$DATA" run --new edge-adopt --executable "$FAKE" \
       codex >"$LOGS/edge-adoption-blank.log" 2>&1
 )
@@ -1133,19 +1133,19 @@ ADOPTION_RUNNER="$TMP/adoption-runner.sh"
 cat >"$ADOPTION_RUNNER" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$AI_MEMORY_ACCEPTANCE_REPO"
-exec "$AI_MEMORY_ACCEPTANCE_BIN" --data-dir "$AI_MEMORY_ACCEPTANCE_DATA" \
-  run --workstream edge-adopt --executable "$AI_MEMORY_ACCEPTANCE_FAKE" "$@"
+cd "$SESSIONMUNCH_ACCEPTANCE_REPO"
+exec "$SESSIONMUNCH_ACCEPTANCE_BIN" --data-dir "$SESSIONMUNCH_ACCEPTANCE_DATA" \
+  run --workstream edge-adopt --executable "$SESSIONMUNCH_ACCEPTANCE_FAKE" "$@"
 EOF
 chmod +x "$ADOPTION_RUNNER"
 
 printf '\n' | env \
-  AI_MEMORY_ACCEPTANCE_REPO="$REPO" \
-  AI_MEMORY_ACCEPTANCE_BIN="$BIN" \
-  AI_MEMORY_ACCEPTANCE_DATA="$DATA" \
-  AI_MEMORY_ACCEPTANCE_FAKE="$FAKE" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=argv \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/adoption-codex-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_REPO="$REPO" \
+  SESSIONMUNCH_ACCEPTANCE_BIN="$BIN" \
+  SESSIONMUNCH_ACCEPTANCE_DATA="$DATA" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE="$FAKE" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=argv \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/adoption-codex-argv.log" \
   CODEX_HOME="$ADOPTION_CODEX_HOME" \
   script -qefc "$ADOPTION_RUNNER codex" /dev/null \
     >"$LOGS/edge-adoption-codex.log" 2>&1
@@ -1158,12 +1158,12 @@ mkdir -p "$ADOPTION_CLAUDE_HOME/projects/fixture"
 printf '{"sessionId":"obsolete-claude-id","cwd":"%s"}\n' "$REPO" \
   >"$ADOPTION_CLAUDE_HOME/projects/fixture/obsolete-claude-id.jsonl"
 printf '\n' | env \
-  AI_MEMORY_ACCEPTANCE_REPO="$REPO" \
-  AI_MEMORY_ACCEPTANCE_BIN="$BIN" \
-  AI_MEMORY_ACCEPTANCE_DATA="$DATA" \
-  AI_MEMORY_ACCEPTANCE_FAKE="$FAKE" \
-  AI_MEMORY_ACCEPTANCE_FAKE_MODE=argv \
-  AI_MEMORY_ACCEPTANCE_ARGV_LOG="$TMP/adoption-claude-argv.log" \
+  SESSIONMUNCH_ACCEPTANCE_REPO="$REPO" \
+  SESSIONMUNCH_ACCEPTANCE_BIN="$BIN" \
+  SESSIONMUNCH_ACCEPTANCE_DATA="$DATA" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE="$FAKE" \
+  SESSIONMUNCH_ACCEPTANCE_FAKE_MODE=argv \
+  SESSIONMUNCH_ACCEPTANCE_ARGV_LOG="$TMP/adoption-claude-argv.log" \
   CLAUDE_CONFIG_DIR="$ADOPTION_CLAUDE_HOME" \
   script -qefc "$ADOPTION_RUNNER claude" /dev/null \
     >"$LOGS/edge-adoption-claude.log" 2>&1
@@ -1177,7 +1177,7 @@ mapfile -t adoption_claude_argv <"$TMP/adoption-claude-argv.log"
   exit 1
 }
 
-# `ai-memory workstreams` must answer from the same checkout identity `run`
+# `sessionmunch workstreams` must answer from the same checkout identity `run`
 # selects with, without turning that identity into readable output. The list is
 # taken from the repository the previous legs launched in, so `edge-adopt` --
 # the workstream the Claude adoption leg selected last -- has to lead it.
@@ -1231,7 +1231,7 @@ grep -q '^\* edge-adopt' <<<"$workstreams_human" || {
 OTHER_REPO="$TMP/repo-elsewhere"
 mkdir -p "$OTHER_REPO"
 git -C "$OTHER_REPO" init -q
-git -C "$OTHER_REPO" config user.name "ai-memory acceptance"
+git -C "$OTHER_REPO" config user.name "sessionmunch acceptance"
 git -C "$OTHER_REPO" config user.email "acceptance@localhost"
 printf '# elsewhere\n' >"$OTHER_REPO/README.md"
 git -C "$OTHER_REPO" add README.md
@@ -1244,10 +1244,10 @@ jq -e 'length == 0' <<<"$other_json" >/dev/null || {
   exit 1
 }
 
-# `ai-memory rename-workstream` must correct a name without disturbing anything
+# `sessionmunch rename-workstream` must correct a name without disturbing anything
 # keyed on the workstream. The id is stable, so the ledger, managed runs, and
 # linked native sessions follow the rename, and neither the listing order nor
-# the workstream a bare `ai-memory run` resumes may move as a side effect of
+# the workstream a bare `sessionmunch run` resumes may move as a side effect of
 # relabelling.
 before_rename_json=$workstreams_json
 adopt_id=$(jq -r '.[] | select(.name == "edge-adopt") | .workstream_id' \
@@ -1364,11 +1364,11 @@ CLAUDE_SETTINGS="$CLAUDE_CONFIG_HOME/settings.json"
 CODEX_ACCEPTANCE_HOME="$CONFIG/codex-home"
 CODEX_HOOKS="$CODEX_ACCEPTANCE_HOME/.codex/hooks.json"
 OPENCODE_CONFIG_HOME="$CONFIG/opencode-xdg"
-OPENCODE_PLUGIN="$OPENCODE_CONFIG_HOME/opencode/plugins/ai-memory.ts"
-OPENCODE2_PLUGIN="$OPENCODE_CONFIG_HOME/opencode/plugins/ai-memory-opencode2.ts"
+OPENCODE_PLUGIN="$OPENCODE_CONFIG_HOME/opencode/plugins/sessionmunch.ts"
+OPENCODE2_PLUGIN="$OPENCODE_CONFIG_HOME/opencode/plugins/sessionmunch-opencode2.ts"
 OPENCODE_DATA_HOME="$CONFIG/opencode-xdg-data"
-PI_EXTENSION="$CONFIG/pi/ai-memory.ts"
-OMP_EXTENSION="$CONFIG/omp/ai-memory.ts"
+PI_EXTENSION="$CONFIG/pi/sessionmunch.ts"
+OMP_EXTENSION="$CONFIG/omp/sessionmunch.ts"
 OMP_AGENT_DIR="$CONFIG/omp/agent"
 CRUSH_DATA_DIR="$CONFIG/crush/data"
 KIMI_ACCEPTANCE_HOME="$CONFIG/kimi-home"
@@ -1423,9 +1423,9 @@ for config_name in opencode.json opencode.jsonc tui.json; do
   fi
 done
 
-# opencode2's background service defaults to port 49374 — ai-memory's own
+# opencode2's background service defaults to port 49374 — sessionmunch's own
 # default — so an isolated service left on defaults crash-loops against any
-# live ai-memory server on this machine. Pin the fixture service at a
+# live sessionmunch server on this machine. Pin the fixture service at a
 # neighbouring free port before any opencode2 leg runs.
 if command -v opencode2 >/dev/null 2>&1; then
   OPENCODE2_PORT=$((PORT + 1))
@@ -1564,49 +1564,49 @@ run_harness() {
   fi
   case "$harness" in
     claude)
-      native_args=(-p --settings "$CLAUDE_SETTINGS" --model "${AI_MEMORY_ACCEPTANCE_CLAUDE_MODEL:-haiku}" --permission-mode plan "$prompt")
+      native_args=(-p --settings "$CLAUDE_SETTINGS" --model "${SESSIONMUNCH_ACCEPTANCE_CLAUDE_MODEL:-haiku}" --permission-mode plan "$prompt")
       ;;
     codex)
       native_args=(exec -c 'sandbox_mode="read-only"' --dangerously-bypass-hook-trust --json "$prompt")
-      if [ -n "${AI_MEMORY_ACCEPTANCE_CODEX_MODEL:-}" ]; then
-        native_args=(exec -c 'sandbox_mode="read-only"' --dangerously-bypass-hook-trust --json --model "$AI_MEMORY_ACCEPTANCE_CODEX_MODEL" "$prompt")
+      if [ -n "${SESSIONMUNCH_ACCEPTANCE_CODEX_MODEL:-}" ]; then
+        native_args=(exec -c 'sandbox_mode="read-only"' --dangerously-bypass-hook-trust --json --model "$SESSIONMUNCH_ACCEPTANCE_CODEX_MODEL" "$prompt")
       fi
       ;;
     opencode)
       native_args=(run --format json --auto "$prompt")
-      [ -z "${AI_MEMORY_ACCEPTANCE_OPENCODE_MODEL:-}" ] || native_args=(run --format json --auto --model "$AI_MEMORY_ACCEPTANCE_OPENCODE_MODEL" "$prompt")
+      [ -z "${SESSIONMUNCH_ACCEPTANCE_OPENCODE_MODEL:-}" ] || native_args=(run --format json --auto --model "$SESSIONMUNCH_ACCEPTANCE_OPENCODE_MODEL" "$prompt")
       ;;
     opencode2)
       native_args=(run --format json --auto "$prompt")
-      [ -z "${AI_MEMORY_ACCEPTANCE_OPENCODE2_MODEL:-${AI_MEMORY_ACCEPTANCE_OPENCODE_MODEL:-}}" ] || native_args=(run --format json --auto --model "${AI_MEMORY_ACCEPTANCE_OPENCODE2_MODEL:-$AI_MEMORY_ACCEPTANCE_OPENCODE_MODEL}" "$prompt")
+      [ -z "${SESSIONMUNCH_ACCEPTANCE_OPENCODE2_MODEL:-${SESSIONMUNCH_ACCEPTANCE_OPENCODE_MODEL:-}}" ] || native_args=(run --format json --auto --model "${SESSIONMUNCH_ACCEPTANCE_OPENCODE2_MODEL:-$SESSIONMUNCH_ACCEPTANCE_OPENCODE_MODEL}" "$prompt")
       ;;
     pi)
       native_args=(-p --no-tools --no-extensions --extension "$PI_EXTENSION" --session-dir "$CONFIG/pi/sessions" "$prompt")
-      [ -z "${AI_MEMORY_ACCEPTANCE_PI_MODEL:-}" ] || native_args=(-p --no-tools --no-extensions --extension "$PI_EXTENSION" --session-dir "$CONFIG/pi/sessions" --model "$AI_MEMORY_ACCEPTANCE_PI_MODEL" "$prompt")
+      [ -z "${SESSIONMUNCH_ACCEPTANCE_PI_MODEL:-}" ] || native_args=(-p --no-tools --no-extensions --extension "$PI_EXTENSION" --session-dir "$CONFIG/pi/sessions" --model "$SESSIONMUNCH_ACCEPTANCE_PI_MODEL" "$prompt")
       ;;
     crush)
       native_args=(run --quiet --data-dir "$CRUSH_DATA_DIR" "$prompt")
-      [ -z "${AI_MEMORY_ACCEPTANCE_CRUSH_MODEL:-}" ] || native_args=(run --quiet --data-dir "$CRUSH_DATA_DIR" --model "$AI_MEMORY_ACCEPTANCE_CRUSH_MODEL" "$prompt")
+      [ -z "${SESSIONMUNCH_ACCEPTANCE_CRUSH_MODEL:-}" ] || native_args=(run --quiet --data-dir "$CRUSH_DATA_DIR" --model "$SESSIONMUNCH_ACCEPTANCE_CRUSH_MODEL" "$prompt")
       ;;
     omp)
       native_args=(-p --no-tools --extension "$OMP_EXTENSION" --session-dir "$CONFIG/omp/sessions" "$prompt")
-      [ -z "${AI_MEMORY_ACCEPTANCE_OMP_MODEL:-}" ] || native_args=(-p --no-tools --extension "$OMP_EXTENSION" --session-dir "$CONFIG/omp/sessions" --model "$AI_MEMORY_ACCEPTANCE_OMP_MODEL" "$prompt")
+      [ -z "${SESSIONMUNCH_ACCEPTANCE_OMP_MODEL:-}" ] || native_args=(-p --no-tools --extension "$OMP_EXTENSION" --session-dir "$CONFIG/omp/sessions" --model "$SESSIONMUNCH_ACCEPTANCE_OMP_MODEL" "$prompt")
       ;;
     kimi)
       native_args=(-p "$prompt")
-      [ -z "${AI_MEMORY_ACCEPTANCE_KIMI_MODEL:-}" ] || native_args=(-p -m "$AI_MEMORY_ACCEPTANCE_KIMI_MODEL" "$prompt")
+      [ -z "${SESSIONMUNCH_ACCEPTANCE_KIMI_MODEL:-}" ] || native_args=(-p -m "$SESSIONMUNCH_ACCEPTANCE_KIMI_MODEL" "$prompt")
       ;;
     command-code)
       native_args=(-p --no-auto-update "$prompt")
-      [ -z "${AI_MEMORY_ACCEPTANCE_COMMAND_CODE_MODEL:-}" ] || native_args=(-p --no-auto-update -m "$AI_MEMORY_ACCEPTANCE_COMMAND_CODE_MODEL" "$prompt")
+      [ -z "${SESSIONMUNCH_ACCEPTANCE_COMMAND_CODE_MODEL:-}" ] || native_args=(-p --no-auto-update -m "$SESSIONMUNCH_ACCEPTANCE_COMMAND_CODE_MODEL" "$prompt")
       ;;
     grok)
       native_args=(-p "$prompt")
-      [ -z "${AI_MEMORY_ACCEPTANCE_GROK_MODEL:-}" ] || native_args=(-p -m "$AI_MEMORY_ACCEPTANCE_GROK_MODEL" "$prompt")
+      [ -z "${SESSIONMUNCH_ACCEPTANCE_GROK_MODEL:-}" ] || native_args=(-p -m "$SESSIONMUNCH_ACCEPTANCE_GROK_MODEL" "$prompt")
       ;;
     antigravity)
-      native_args=(-p --print-timeout "${AI_MEMORY_ACCEPTANCE_ANTIGRAVITY_TIMEOUT:-5m}" "$prompt")
-      [ -z "${AI_MEMORY_ACCEPTANCE_ANTIGRAVITY_MODEL:-}" ] || native_args=(-p --print-timeout "${AI_MEMORY_ACCEPTANCE_ANTIGRAVITY_TIMEOUT:-5m}" --model "$AI_MEMORY_ACCEPTANCE_ANTIGRAVITY_MODEL" "$prompt")
+      native_args=(-p --print-timeout "${SESSIONMUNCH_ACCEPTANCE_ANTIGRAVITY_TIMEOUT:-5m}" "$prompt")
+      [ -z "${SESSIONMUNCH_ACCEPTANCE_ANTIGRAVITY_MODEL:-}" ] || native_args=(-p --print-timeout "${SESSIONMUNCH_ACCEPTANCE_ANTIGRAVITY_TIMEOUT:-5m}" --model "$SESSIONMUNCH_ACCEPTANCE_ANTIGRAVITY_MODEL" "$prompt")
       ;;
     *)
       printf 'unsupported acceptance harness: %s\n' "$harness" >&2

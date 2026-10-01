@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# End-to-end handoff + recall smoke test for ai-memory.
+# End-to-end handoff + recall smoke test for sessionmunch.
 #
 # What this validates:
 #
 # 1. Two real LLM calls against Gemini free-tier (different model
-#    variants per session so any recall must come from ai-memory, not
+#    variants per session so any recall must come from sessionmunch, not
 #    a per-process cache or the same model "remembering" itself).
-# 2. ai-memory's /hook ingress — observations land in the store.
-# 3. ai-memory's auto-handoff creation at SessionEnd.
-# 4. ai-memory's GET /handoff endpoint — the path SessionStart hooks
+# 2. sessionmunch's /hook ingress — observations land in the store.
+# 3. sessionmunch's auto-handoff creation at SessionEnd.
+# 4. sessionmunch's GET /handoff endpoint — the path SessionStart hooks
 #    use to surface prior context to the next agent CLI.
 # 5. Sanitisation end-to-end — a planted "sk-canary-LEAK_ME_PLEASE_…"
 #    secret in session 1's prompt must NOT appear in any persisted
@@ -22,7 +22,7 @@
 #   CLI POSTs to it, so the test injects hook events directly while
 #   driving the LLM with the simplest possible client. The agent-CLI
 #   integrations are still documented + shipped (see hooks/) and
-#   exercised by the unit tests in ai-memory-hooks.
+#   exercised by the unit tests in sessionmunch-hooks.
 # - Gemini's free tier has per-user quotas (vs OpenRouter's shared
 #   pool which was returning 429s when this test was written) and
 #   responds in under 5 s for the prompts here.
@@ -30,7 +30,7 @@
 # Required env: GEMINI_API_KEY. Get one free at
 # https://aistudio.google.com/app/apikey (no credit card needed).
 #
-# Isolation: ai-memory's data dir + the on-the-fly opencode-style
+# Isolation: sessionmunch's data dir + the on-the-fly opencode-style
 # config live under a tempdir and are removed on exit. Re-runnable on
 # any machine that has cargo + curl + jq.
 
@@ -41,7 +41,7 @@ set -euo pipefail
 # --------------------------------------------------------------------
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TEST_DIR="$(mktemp -d -t ai-memory-e2e-XXXXXX)"
+TEST_DIR="$(mktemp -d -t sessionmunch-e2e-XXXXXX)"
 LOG_FILE="$TEST_DIR/test.log"
 SERVER_PID=""
 
@@ -81,7 +81,7 @@ if [[ -z "${GEMINI_API_KEY:-}" ]]; then
     exit 64
 fi
 
-# Free port for ai-memory.
+# Free port for sessionmunch.
 PORT="$(python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()")"
 SERVER_URL="http://127.0.0.1:$PORT"
 HOOK_SCOPE="workspace=e2e-test&project=blog"
@@ -95,10 +95,10 @@ HOOK_SCOPE="workspace=e2e-test&project=blog"
 MODEL_A="${MODEL_A:-gemini-3.5-flash}"
 MODEL_B="${MODEL_B:-gemini-2.5-flash-lite}"
 
-# Isolate ai-memory's data dir; leave $HOME alone so cargo's target
+# Isolate sessionmunch's data dir; leave $HOME alone so cargo's target
 # cache + the user's git config etc. stay accessible.
-export AI_MEMORY_DATA_DIR="$TEST_DIR/ai-memory-data"
-mkdir -p "$AI_MEMORY_DATA_DIR" "$TEST_DIR/blog"
+export SESSIONMUNCH_DATA_DIR="$TEST_DIR/sessionmunch-data"
+mkdir -p "$SESSIONMUNCH_DATA_DIR" "$TEST_DIR/blog"
 
 # Mini blog project — non-coding topic so models don't "know" the
 # answer absent the handoff.
@@ -112,8 +112,8 @@ EOF
 # Canary that MUST be redacted end-to-end.
 CANARY_KEY="sk-canary-LEAK_ME_PLEASE_e2e_smoketest_xxxxxxxxxxxx"
 
-# Generated bearer token for this test run. The test starts ai-memory
-# with AI_MEMORY_AUTH_TOKEN set, then exercises both the unauth (must
+# Generated bearer token for this test run. The test starts sessionmunch
+# with SESSIONMUNCH_AUTH_TOKEN set, then exercises both the unauth (must
 # 401) and auth (must 200) paths.
 AUTH_TOKEN="testtoken-$(date +%s)-$(printf '%08x' $RANDOM$RANDOM)"
 AUTH_HEADER="Authorization: Bearer $AUTH_TOKEN"
@@ -144,27 +144,27 @@ gemini_call() {
 }
 
 # --------------------------------------------------------------------
-# Build + start ai-memory
+# Build + start sessionmunch
 # --------------------------------------------------------------------
 
-step "Building ai-memory release binary"
+step "Building sessionmunch release binary"
 cd "$REPO_ROOT"
-cargo build --release --bin ai-memory --quiet 2>&1 | tee -a "$LOG_FILE"
-AI_MEMORY="$REPO_ROOT/target/release/ai-memory"
+cargo build --release --bin sessionmunch --quiet 2>&1 | tee -a "$LOG_FILE"
+SESSIONMUNCH="$REPO_ROOT/target/release/sessionmunch"
 
-step "Initialising ai-memory data dir at $AI_MEMORY_DATA_DIR"
-"$AI_MEMORY" init >>"$LOG_FILE" 2>&1
+step "Initialising sessionmunch data dir at $SESSIONMUNCH_DATA_DIR"
+"$SESSIONMUNCH" init >>"$LOG_FILE" 2>&1
 
-step "Starting ai-memory server on $SERVER_URL (auth-required)"
-AI_MEMORY_AUTH_TOKEN="$AUTH_TOKEN" \
-"$AI_MEMORY" serve \
+step "Starting sessionmunch server on $SERVER_URL (auth-required)"
+SESSIONMUNCH_AUTH_TOKEN="$AUTH_TOKEN" \
+"$SESSIONMUNCH" serve \
     --transport http --bind "127.0.0.1:$PORT" \
     --workspace e2e-test --project blog \
     >>"$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 sleep 2
 if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-    echo "FATAL: ai-memory server died on startup" >&2
+    echo "FATAL: sessionmunch server died on startup" >&2
     tail -30 "$LOG_FILE" >&2
     exit 1
 fi
@@ -240,7 +240,7 @@ echo "--- model A response (first 30 lines) ---"
 echo "$S1_RESPONSE" | head -30
 echo "--- end model A response ---"
 
-# Tell ai-memory what the user prompt was so a meaningful handoff
+# Tell sessionmunch what the user prompt was so a meaningful handoff
 # is built at SessionEnd.
 step "Session 1: forward user-prompt + session-end hooks"
 echo "{\"session_id\":\"$SESSION_ID_1\",\"prompt\":$(jq -Rs <<<"$S1_PROMPT")}" \
@@ -351,7 +351,7 @@ check_contains "tone descriptor"                 "$S2_RESPONSE" "friendly" "conv
 
 step "Sanitisation assertions: canary NEVER in persisted state"
 LEAKED=0
-for path in "$AI_MEMORY_DATA_DIR/wiki" "$AI_MEMORY_DATA_DIR/db" "$TEST_DIR/handoff.md"; do
+for path in "$SESSIONMUNCH_DATA_DIR/wiki" "$SESSIONMUNCH_DATA_DIR/db" "$TEST_DIR/handoff.md"; do
     if [[ -e "$path" ]] && grep -rqF "LEAK_ME_PLEASE" "$path" 2>/dev/null; then
         echo "  FAIL: canary 'LEAK_ME_PLEASE' found under $path:"
         grep -rnF "LEAK_ME_PLEASE" "$path" 2>/dev/null | head -5

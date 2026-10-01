@@ -6,8 +6,8 @@
 > just before the durable mutation commits. Write hooks can mutate the page
 > (return a new frontmatter / body); delete/purge/move hooks are notifications
 > that can observe, mirror, or reject. Sourced from
-> `crates/ai-memory-wiki/src/admission.rs` and the wiring in
-> `crates/ai-memory-cli/src/commands/serve.rs` — keep both as the
+> `crates/sessionmunch-wiki/src/admission.rs` and the wiring in
+> `crates/sessionmunch-cli/src/commands/serve.rs` — keep both as the
 > canonical reference if anything here drifts.
 
 ## 1. What this is (and isn't)
@@ -215,9 +215,9 @@ the list, not a second header.)
   },
   "ctx": {
     "workspace": "default",                  // resolved name (see §5)
-    "project": "ai-memory-ops",              // resolved name
+    "project": "sessionmunch-ops",              // resolved name
     "destination_workspace": "archive",       // move_project / move_session only; omitted otherwise
-    "destination_project": "ai-memory-ops",   // move_project / move_session only; omitted otherwise
+    "destination_project": "sessionmunch-ops",   // move_project / move_session only; omitted otherwise
     "actor": {                               // request-layer identity
       "agent": "claude-code",                // claude-code | codex | opencode | hook | cli | …
       "user": "djalmajr",                    // null when unauthenticated
@@ -238,7 +238,7 @@ the list, not a second header.)
 
 The `WebhookRequestBody` / `WebhookPagePayload` / `ActorContext` /
 `AdmissionContext` types in
-`crates/ai-memory-wiki/src/admission.rs` are the authoritative
+`crates/sessionmunch-wiki/src/admission.rs` are the authoritative
 serialisation source.
 
 ### Response (webhook → engine)
@@ -306,7 +306,7 @@ write; the next external write picks the chain back up normally.
 
 ## 7. Limits
 
-Constants are exported from the `ai-memory-wiki` crate root:
+Constants are exported from the `sessionmunch-wiki` crate root:
 
 | Constant | Value | What it caps |
 |---|---|---|
@@ -372,7 +372,7 @@ it a decider — awaited before the operation, and able to refuse it.
 Env override:
 
 ```bash
-AI_MEMORY_ADMISSION_WEBHOOKS_JSON='[{"name":"contributors","url":"http://contributors.memory.svc.cluster.local:8080/enrich","timeout_ms":2000,"failure_policy":"ignore","events":["write_page","consolidate"],"blocking":true}]'
+SESSIONMUNCH_ADMISSION_WEBHOOKS_JSON='[{"name":"contributors","url":"http://contributors.memory.svc.cluster.local:8080/enrich","timeout_ms":2000,"failure_policy":"ignore","events":["write_page","consolidate"],"blocking":true}]'
 ```
 
 The JSON env var is canonical for webhook lists because the figment env layer
@@ -389,7 +389,7 @@ built, no per-write branch).
 // POST /enrich
 {
   "page": { "path": "gotchas/x.md", "frontmatter": { "title": "X" }, "body": "..." },
-  "ctx":  { "workspace": "default", "project": "ai-memory-ops",
+  "ctx":  { "workspace": "default", "project": "sessionmunch-ops",
             "actor": { "agent": "claude-code", "user": "djalmajr", "client": "72836f52-..." }, ... }
 }
 
@@ -424,7 +424,7 @@ under the webhook's `timeout_ms`.
 
 ## 10. Tests
 
-`crates/ai-memory-wiki/tests/admission.rs` covers the wire contract end
+`crates/sessionmunch-wiki/tests/admission.rs` covers the wire contract end
 to end against an axum loopback server. Categories:
 
 - Mutating frontmatter and body propagates correctly.
@@ -440,7 +440,7 @@ to end against an axum loopback server. Categories:
 - `MAX_RESPONSE_BYTES` cap drops oversized responses.
 - `workspace` / `project` resolution propagates into the payload.
 
-`crates/ai-memory-wiki/src/wiki.rs::tests::write_page_resolves_workspace_and_project_names_for_chain`
+`crates/sessionmunch-wiki/src/wiki.rs::tests::write_page_resolves_workspace_and_project_names_for_chain`
 covers the integrated path (`Wiki::write_page` → store reader resolution
 → chain → recorded payload).
 
@@ -448,12 +448,12 @@ covers the integrated path (`Wiki::write_page` → store reader resolution
 
 | Concept | File:line |
 |---|---|
-| `AdmissionContext` / `ActorContext` / wire structs | `crates/ai-memory-wiki/src/admission.rs` |
-| `AdmissionChain::run` (the hot loop) | `crates/ai-memory-wiki/src/admission.rs` |
-| Invocation inside `write_page` (resolution + chain call) | `crates/ai-memory-wiki/src/wiki.rs::Wiki::write_page` |
-| Config schema (`[[admission_webhooks]]`) | `crates/ai-memory-cli/src/config.rs::Config::admission_webhooks` |
-| Server wiring (`with_admission_chain` + `with_store_reader`) | `crates/ai-memory-cli/src/commands/serve.rs` |
-| Header → `ActorContext` mapping (mcp-auth → engine) | `crates/ai-memory-mcp/src/actor.rs` |
+| `AdmissionContext` / `ActorContext` / wire structs | `crates/sessionmunch-wiki/src/admission.rs` |
+| `AdmissionChain::run` (the hot loop) | `crates/sessionmunch-wiki/src/admission.rs` |
+| Invocation inside `write_page` (resolution + chain call) | `crates/sessionmunch-wiki/src/wiki.rs::Wiki::write_page` |
+| Config schema (`[[admission_webhooks]]`) | `crates/sessionmunch-cli/src/config.rs::Config::admission_webhooks` |
+| Server wiring (`with_admission_chain` + `with_store_reader`) | `crates/sessionmunch-cli/src/commands/serve.rs` |
+| Header → `ActorContext` mapping (mcp-auth → engine) | `crates/sessionmunch-mcp/src/actor.rs` |
 
 ## 12. Non-goals (planned iterations, not blockers)
 

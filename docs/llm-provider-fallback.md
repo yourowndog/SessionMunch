@@ -51,7 +51,7 @@ llm_model = "mimo-v2.5-free"
 provider = "openai-compat"
 model = "poolside/laguna-s-2.1-free"
 base_url = "http://127.0.0.1:49375/v1"
-api_key_env = "AI_MEMORY_LOCAL_ROUTER_TOKEN"
+api_key_env = "SESSIONMUNCH_LOCAL_ROUTER_TOKEN"
 
 [[llm_fallbacks]]
 provider = "gemini"
@@ -71,7 +71,7 @@ until it can encode profile boundaries and credential names unambiguously.
 
 ## Implementation boundary
 
-Add `FallbackLlmProvider` in `crates/ai-memory-llm/src/fallback.rs`:
+Add `FallbackLlmProvider` in `crates/sessionmunch-llm/src/fallback.rs`:
 
 ```text
 Config::load

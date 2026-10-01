@@ -15,7 +15,7 @@ What that means for you:
 - **Solo with an LLM**: the default is fine — proposals are small,
   bounded, audited (every one lands in the pending-writes trail with
   evidence quotes and a confidence score), and reversible via wiki
-  history. Run `ai-memory pending-writes list` for a week if you want to
+  history. Run `sessionmunch pending-writes list` for a week if you want to
   build trust — that (and SQLite) is the source of truth for a proposal's
   status. The `_pending/auto-improve/` sidecar files are a human-readable
   snapshot frozen at staging time; they do not track a proposal to
@@ -48,7 +48,7 @@ implementation notes, kept for depth.
 
 ## Executive Summary
 
-An ai-memory equivalent of Hermes Agent's self-improvement loop is worth
+An sessionmunch equivalent of Hermes Agent's self-improvement loop is worth
 shipping as a default-available, review-gated staging path. The current wiki
 already captures useful durable knowledge: decisions, gotchas, concepts, rules,
 notes, and session summaries. The missing piece is not more capture. It is a
@@ -66,11 +66,11 @@ The safe product shape is:
 4. Keep a separate slow maintenance pass for deduplication, stale-page review,
    and lifecycle cleanup.
 
-Do not copy Hermes' agent-local skill system directly. ai-memory's durable unit
+Do not copy Hermes' agent-local skill system directly. sessionmunch's durable unit
 is the project wiki page, not a `SKILL.md` package. The analogous targets are
 `gotchas/`, `decisions/`, `concepts/`, `procedures/`, `_rules/`, small
 `_slots/` state pages, and pending review pages under `_pending/`. The managed
-ai-memory Agent Skills installed with routing are a narrow prompt-packaging
+sessionmunch Agent Skills installed with routing are a narrow prompt-packaging
 exception: static files that teach agents when to call MCP tools, not durable
 memory pages or auto-improvement outputs.
 
@@ -87,7 +87,7 @@ tool iterations for skill review.
 
 Important implementation properties:
 
-| Property | Hermes behavior | Lesson for ai-memory |
+| Property | Hermes behavior | Lesson for sessionmunch |
 |---|---|---|
 | Active context | The review runs after the response is delivered. | Never compete with the user's active task. |
 | Prompt mutation | Mid-session writes update disk but do not mutate the cached active prompt. | Background learning must not rewrite the current agent context. |
@@ -121,9 +121,9 @@ The default is off, preserving existing behavior. When enabled:
 Validation runs before staging, so invalid writes are rejected immediately
 instead of being queued for approval and failing later.
 
-This maps strongly to ai-memory. Wiki edits are closer to Hermes skills than to
+This maps strongly to sessionmunch. Wiki edits are closer to Hermes skills than to
 small memory entries: they can be large, durable, and project-shaping. Staging
-should be the default for autonomous ai-memory learning writes.
+should be the default for autonomous sessionmunch learning writes.
 
 ### Curator
 
@@ -144,7 +144,7 @@ manual report first.
 
 Important curator properties:
 
-| Property | Hermes behavior | Lesson for ai-memory |
+| Property | Hermes behavior | Lesson for sessionmunch |
 |---|---|---|
 | Managed scope | Primarily agent-created skills, tracked in `.usage.json`. | Separate user-authored pages from autonomous pages. |
 | Destructive limit | Archive is the maximum automatic destructive action. No auto-delete. | Prefer supersession or soft deletion. |
@@ -152,9 +152,9 @@ Important curator properties:
 | Reports | Writes machine-readable `run.json` and human `REPORT.md`. | Every maintenance run should leave an audit artifact. |
 | Backups | Takes snapshots before mutating runs and supports rollback. | Wiki git commits help, but approval reports should still be explicit. |
 | Report mode | Produces report-only output. | Non-destructive reports should be first-class for maintenance. |
-| Consolidation | Merges narrow skills into umbrellas with structured summary. | ai-memory should consolidate duplicate/narrow pages separately from fresh lesson capture. |
+| Consolidation | Merges narrow skills into umbrellas with structured summary. | sessionmunch should consolidate duplicate/narrow pages separately from fresh lesson capture. |
 
-## Live ai-memory Wiki Findings
+## Live sessionmunch Wiki Findings
 
 The deployed homelab wiki was sampled on 2026-06-15. At the time of sampling it
 contained 1 workspace, 38 projects, and 204 latest pages.
@@ -176,8 +176,8 @@ Representative high-signal pages:
 
 | Page | Why it is useful |
 |---|---|
-| `ai-memory/gotchas/cli-is-always-http-client.md` | Captures a durable architectural rule, why it exists, exceptions, and prior-art failure modes. |
-| `ai-memory/concepts/karpathy-wiki-pattern.md` | Explains the conceptual model behind the product. |
+| `sessionmunch/gotchas/cli-is-always-http-client.md` | Captures a durable architectural rule, why it exists, exceptions, and prior-art failure modes. |
+| `sessionmunch/concepts/karpathy-wiki-pattern.md` | Explains the conceptual model behind the product. |
 | `.config/notes/marvin-server-nfs-drop-rootcause.md` | Concrete root cause and fix with enough detail to prevent rediscovery. |
 | `nes-to-sms/gotchas/vram-budget.md` | Domain-specific constraint that will matter across future work. |
 | `akitaonrails-hugo/decisions/blog-content-sourcing.md` | Short decision with rationale and implementation guidance. |
@@ -192,7 +192,7 @@ Representative low-signal pages:
 | `.config/sessions/cf81e9c3-...md` | Repeated bash smoke attempts; useful as diagnostics history only. |
 | `.config/sessions/914f9f80-...md` | User prompt was only `config`; no substantive work. |
 | `sabadell/sessions/8feda9e6-...md` | Heuristic session-end page with one observation. |
-| `ai-memory/notes/livetest-v011-release.md` | Valid release smoke marker, but not a general lesson. |
+| `sessionmunch/notes/livetest-v011-release.md` | Valid release smoke marker, but not a general lesson. |
 
 The current system is already creating the right durable page families. The
 auto-improvement opportunity is therefore selective promotion and cleanup, not a
@@ -310,7 +310,7 @@ reviewer. Reviewers can only consume what was stored; see
 Default-available auto-improvement must not surprise existing installs:
 
 1. Existing project wiki folders need no migration. Older configs may still
-   contain an `[auto_improve] mode = ...` key; current ai-memory ignores that
+   contain an `[auto_improve] mode = ...` key; current sessionmunch ignores that
    legacy key. Operators can remove the line when convenient.
 2. Session-end triggering stays off; the bounded background scheduler runs
    outside hook latency and sleeps for its configured interval after each
@@ -323,8 +323,8 @@ Default-available auto-improvement must not surprise existing installs:
 4. Pending proposal storage must use additive, idempotent migrations that
     preserve all existing wiki files and session/observation rows.
 5. Existing installed `CLAUDE.md`/`AGENTS.md` blocks remain valid. Operators pick
-   up newer proactive retrieval guidance by running `ai-memory install-instructions`
-   or asking an agent to refresh the ai-memory routing package. The marker-based
+   up newer proactive retrieval guidance by running `sessionmunch install-instructions`
+   or asking an agent to refresh the sessionmunch routing package. The marker-based
    replacement must remain idempotent, and the managed Agent Skill files should
    refresh from the same binary-owned assets as the slim snippet.
 6. Target-page mutations must pass through proposal staging first and must keep
@@ -420,15 +420,15 @@ them by default through the wiki mutation path. With `require_approval = true`,
 | Command or route | Purpose |
 |---|---|
 | Background scheduler | Reviews newly completed sessions after the first-run watermark and applies or stages validated proposals according to approval policy. |
-| `ai-memory auto-improve --session-id <id>` | Manually review one session and apply or stage validated proposals through the auto-improvement approval path. |
-| `ai-memory auto-improve-report --workspace <w> --project <p> [--days N] [--limit N] [--stage]` | Read-only telemetry report for recent auto-improvement runs, proposal outcomes, terminal rates, and findings by default. `--stage` creates exactly one pending telemetry report page for audit/approval. |
+| `sessionmunch auto-improve --session-id <id>` | Manually review one session and apply or stage validated proposals through the auto-improvement approval path. |
+| `sessionmunch auto-improve-report --workspace <w> --project <p> [--days N] [--limit N] [--stage]` | Read-only telemetry report for recent auto-improvement runs, proposal outcomes, terminal rates, and findings by default. `--stage` creates exactly one pending telemetry report page for audit/approval. |
 | `memory_auto_improve` | Manually review the newest completed session with no persisted auto-improvement run, or explicitly rerun a named session, and apply or stage validated proposals through the same path. An empty run records a preflight skip so the next implicit call advances. |
-| `ai-memory curator` | Rule-based, report-only maintenance review. |
-| `ai-memory curator --stage` | Stage exactly one curator report page for pending-writes approval. |
-| `ai-memory pending-writes list` | Show staged wiki changes. |
-| `ai-memory pending-writes diff <id>` | Show markdown diff. |
-| `ai-memory pending-writes approve <id>` | Apply through the normal wiki mutation path. |
-| `ai-memory pending-writes reject <id>` | Discard proposal with audit trail. |
+| `sessionmunch curator` | Rule-based, report-only maintenance review. |
+| `sessionmunch curator --stage` | Stage exactly one curator report page for pending-writes approval. |
+| `sessionmunch pending-writes list` | Show staged wiki changes. |
+| `sessionmunch pending-writes diff <id>` | Show markdown diff. |
+| `sessionmunch pending-writes approve <id>` | Apply through the normal wiki mutation path. |
+| `sessionmunch pending-writes reject <id>` | Discard proposal with audit trail. |
 
 Pending proposals should be visible as markdown under `_pending/auto-improve/`
 so humans can review them in the wiki/Obsidian workflow. SQLite can still hold
@@ -447,7 +447,7 @@ Because this is now an MCP tool surface, the standard prompt snippets, managed
 Agent Skills, and regression tests assert `memory_auto_improve` appears in the
 combined prompt-routing surface. Existing installed `CLAUDE.md`/`AGENTS.md`
 snippets update idempotently when the operator runs
-`ai-memory install-instructions` or asks an agent to refresh the ai-memory
+`sessionmunch install-instructions` or asks an agent to refresh the sessionmunch
 routing package.
 
 ### Upgrade note for existing installs
@@ -472,7 +472,7 @@ The maintenance loop should handle:
 5. Broken cross-references and contradiction candidates already surfaced by
    `memory_lint`.
 
-The maintenance loop starts as report-only. `ai-memory curator --stage` stages
+The maintenance loop starts as report-only. `sessionmunch curator --stage` stages
 one normal report page under `notes/curator-<date>.md`; approving it records the
 report only and does not perform the recommended maintenance actions. Later it
 can stage merge or supersession proposals. It should not auto-delete semantic
@@ -579,7 +579,7 @@ part is not that the agent can write memory by itself. The useful part is a
 bounded, observable, reviewable loop that turns repeated work into durable
 knowledge while keeping active task execution isolated.
 
-For ai-memory, the current correct boundary is scheduled review plus pending
+For sessionmunch, the current correct boundary is scheduled review plus pending
 proposal storage under `_pending/auto-improve/`. Approval policy is separate:
 default auto-approval keeps the wiki compiling forward, while
 `require_approval = true` gives admins a human queue without disabling the

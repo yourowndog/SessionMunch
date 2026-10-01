@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.png">
-    <img alt="ai-memory" src="docs/logo-light.png" width="480">
+    <img alt="sessionmunch" src="docs/logo-light.png" width="480">
   </picture>
 </p>
 
@@ -14,14 +14,14 @@
 [![Rust](https://img.shields.io/badge/rust-1.95+-blue)](rust-toolchain.toml)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-## Why ai-memory
+## Why sessionmunch
 
 Your coding agent already has a memory feature. Claude Code takes its own
 notes, Cursor remembers some things, and every platform is adding more. All
 of them share the same walls: the notes live on one machine, belong to one
 agent, and vanish from view the moment you switch tools — or teammates.
 
-ai-memory is what's on the other side of those walls.
+sessionmunch is what's on the other side of those walls.
 
 - **It follows you across agents.** Twenty-plus harnesses — Claude Code,
   Codex, Cursor, Gemini CLI, OpenCode, Grok, Devin, Kimi, Kiro, and more —
@@ -123,26 +123,26 @@ caveats is in [`docs/support-matrix.md`](docs/support-matrix.md).
 ### Arch Linux (AUR)
 
 For native Arch installs, use the AUR packages. They install
-`/usr/bin/ai-memory`, packaged hook sources, and both system-level and
+`/usr/bin/sessionmunch`, packaged hook sources, and both system-level and
 user-level systemd units.
 
 ```bash
-yay -S ai-memory-bin    # prebuilt Linux x86_64/aarch64 binary
-yay -S ai-memory        # builds from source
+yay -S sessionmunch-bin    # prebuilt Linux x86_64/aarch64 binary
+yay -S sessionmunch        # builds from source
 ```
 
 Single-user workstation:
 
 ```bash
-mkdir -p ~/.config/ai-memory ~/.local/share/ai-memory
-ai-memory --data-dir ~/.local/share/ai-memory \
-  --config ~/.config/ai-memory/config.toml init
-systemctl --user enable --now ai-memory.service
-ai-memory install-mcp --client claude-code --apply
-ai-memory install-hooks --agent claude-code --apply
+mkdir -p ~/.config/sessionmunch ~/.local/share/sessionmunch
+sessionmunch --data-dir ~/.local/share/sessionmunch \
+  --config ~/.config/sessionmunch/config.toml init
+systemctl --user enable --now sessionmunch.service
+sessionmunch install-mcp --client claude-code --apply
+sessionmunch install-hooks --agent claude-code --apply
 ```
 
-System service installs use `/var/lib/ai-memory` and `/etc/ai-memory/` via the
+System service installs use `/var/lib/sessionmunch` and `/etc/sessionmunch/` via the
 packaged unit. Full user-service, system-service, auth, and provider setup is in
 [`docs/install.md#arch-linux-native-packages-aur`](docs/install.md#arch-linux-native-packages-aur).
 
@@ -161,27 +161,27 @@ it. Adding a bearer token is a one-line change once you're ready to
 expose the server on the LAN; see [Security](#security) below.
 
 ```bash
-# 1. Install the ai-memory CLI wrapper (a small shell script that
+# 1. Install the sessionmunch CLI wrapper (a small shell script that
 #    runs the binary inside a container with your $HOME mounted). This is
 #    the only thing that needs to live on the host filesystem.
 mkdir -p ~/.local/bin
 wrapper_tmp="$(mktemp -d)"
 trap 'rm -rf "$wrapper_tmp"' EXIT
-wrapper_base=https://github.com/akitaonrails/ai-memory/releases/latest/download/ai-memory-wrapper
-curl -fsSL "$wrapper_base" -o "$wrapper_tmp/ai-memory-wrapper"
-curl -fsSL "$wrapper_base.sha256" -o "$wrapper_tmp/ai-memory-wrapper.sha256"
-expected="$(awk 'NR == 1 { print $1 }' "$wrapper_tmp/ai-memory-wrapper.sha256")"
+wrapper_base=https://github.com/akitaonrails/ai-memory/releases/latest/download/sessionmunch-wrapper
+curl -fsSL "$wrapper_base" -o "$wrapper_tmp/sessionmunch-wrapper"
+curl -fsSL "$wrapper_base.sha256" -o "$wrapper_tmp/sessionmunch-wrapper.sha256"
+expected="$(awk 'NR == 1 { print $1 }' "$wrapper_tmp/sessionmunch-wrapper.sha256")"
 if command -v sha256sum >/dev/null 2>&1; then
-    actual="$(sha256sum "$wrapper_tmp/ai-memory-wrapper" | awk '{ print $1 }')"
+    actual="$(sha256sum "$wrapper_tmp/sessionmunch-wrapper" | awk '{ print $1 }')"
 else
-    actual="$(shasum -a 256 "$wrapper_tmp/ai-memory-wrapper" | awk '{ print $1 }')"
+    actual="$(shasum -a 256 "$wrapper_tmp/sessionmunch-wrapper" | awk '{ print $1 }')"
 fi
 [ -n "$expected" ] && [ "$actual" = "$expected" ] || { echo "wrapper checksum mismatch" >&2; exit 1; }
-install -m 0755 "$wrapper_tmp/ai-memory-wrapper" ~/.local/bin/ai-memory
+install -m 0755 "$wrapper_tmp/sessionmunch-wrapper" ~/.local/bin/sessionmunch
 rm -rf "$wrapper_tmp"
 trap - EXIT
 # Most distros put ~/.local/bin on PATH automatically. If `which
-# ai-memory` comes up empty, add this to ~/.bashrc / ~/.zshrc:
+# sessionmunch` comes up empty, add this to ~/.bashrc / ~/.zshrc:
 #     export PATH="$HOME/.local/bin:$PATH"
 
 # 2. Start the server. `--restart unless-stopped` makes it come back
@@ -191,13 +191,13 @@ trap - EXIT
 #    so nothing outside this machine can reach it. Omit the LLM /
 #    EMBEDDING lines for zero-LLM mode — FTS5 search still works
 #    without any keys.
-docker run -d --name ai-memory \
+docker run -d --name sessionmunch \
     --restart unless-stopped \
     -p 127.0.0.1:49374:49374 \
-    -v ai-memory-data:/data \
-    -e AI_MEMORY_LLM_PROVIDER=anthropic \
+    -v sessionmunch-data:/data \
+    -e SESSIONMUNCH_LLM_PROVIDER=anthropic \
     -e ANTHROPIC_API_KEY=sk-ant-... \
-    -e AI_MEMORY_EMBEDDING_PROVIDER=openai \
+    -e SESSIONMUNCH_EMBEDDING_PROVIDER=openai \
     -e OPENAI_API_KEY=sk-... \
     docker.io/akitaonrails/ai-memory:latest
 
@@ -208,16 +208,16 @@ docker run -d --name ai-memory \
 #    `--agent oh-my-pi`, `--client cursor`,
 #    `--client gemini-cli`, `--client grok`, `--client kiro-cli`, etc.
 #    for additional agents; full list in docs/install.md.
-ai-memory install-mcp   --client claude-code --apply
-ai-memory install-hooks --agent  claude-code --apply
+sessionmunch install-mcp   --client claude-code --apply
+sessionmunch install-hooks --agent  claude-code --apply
 ```
 
 The examples use `docker`; replace it with `podman` on a Podman host. The
 wrapper automatically uses Podman when Docker is not installed. Set
-`AI_MEMORY_DOCKER=podman` to force Podman when both engines are available.
+`SESSIONMUNCH_DOCKER=podman` to force Podman when both engines are available.
 
 On Linux/macOS, that's it. Start a Claude Code session as usual - every
-prompt and tool call now lands in ai-memory, and the next session you
+prompt and tool call now lands in sessionmunch, and the next session you
 open in this project will see a handoff with where you left off.
 On macOS, the native release binary is also supported and recommended when you
 do not need Docker; see [`docs/macos.md`](docs/macos.md).
@@ -236,25 +236,25 @@ Managed workstreams are optional and add cross-harness *session* continuity
 on top of shared memory:
 
 ```bash
-ai-memory run claude
-ai-memory run codex --yolo   # later: same workstream, different harness
-ai-memory continue           # resume the newest managed checkout
+sessionmunch run claude
+sessionmunch run codex --yolo   # later: same workstream, different harness
+sessionmunch continue           # resume the newest managed checkout
 ```
 
-`ai-memory uninstall --apply` removes everything ai-memory installed,
+`sessionmunch uninstall --apply` removes everything sessionmunch installed,
 and only what it installed. Install commands are idempotent and write
 timestamped backups next to any file they touch.
 
 ## Everyday use
 
-Day to day, you mostly do not think about ai-memory. Hooks capture
+Day to day, you mostly do not think about sessionmunch. Hooks capture
 prompts, tool calls, and session boundaries; session end turns them into
 readable wiki pages; the next session starts with a handoff.
 
 - Ask "where did we leave off?" to continue from the pending handoff.
 - Ask "have we discussed X?" or "search memory for Y" to query the wiki.
 - Ask "catch me up" for a prose digest of recent project activity.
-- Run `ai-memory bootstrap` once when adopting an existing project with
+- Run `sessionmunch bootstrap` once when adopting an existing project with
   months of history.
 - Start the server with `--enable-web` for a read-only browser view of
   the wiki and a JSON API under `/api/v1`.
@@ -324,26 +324,28 @@ diagram, crate breakdown, schema notes, and invariants.
 
 | File | What it is |
 |---|---|
+| [`docs/models.md`](docs/models.md) | **Model guide.** Opinionated recommendations for embedding and summarization models across six hardware tiers (CPU small, CPU workstation, 6-8 GB VRAM, 12-16 GB VRAM, 24 GB+ VRAM, API/hosted) with copy-paste configs and verified licensing. |
 | [`docs/install.md`](docs/install.md) | **Installation cookbook.** Every agent CLI, every alternative (curl, source build, no-docker, no-auth), and the server-on-a-different-machine (homelab/LAN) walkthrough. Read after the Quick start if your setup doesn't match the happy path. |
 | [`docs/usage.md`](docs/usage.md) | Handoffs, proactive memory queries, slim routing snippet + managed Agent Skills, migration from other memory tools, web UI, raw-wiki inspection, and rules-vs-facts workflow. |
-| [`docs/managed-workstreams.md`](docs/managed-workstreams.md) | Optional `ai-memory run` continuity across Claude Code, Codex, OpenCode, OpenCode 2 beta, Pi, Crush, Kimi Code, Command Code, Kiro CLI v2/v3, OMP, Grok Build CLI, and Antigravity CLI: automatic harness selection, native resume, argument forwarding, ledger search, privacy, and recovery. |
+| [`docs/managed-workstreams.md`](docs/managed-workstreams.md) | Optional `sessionmunch run` continuity across Claude Code, Codex, OpenCode, OpenCode 2 beta, Pi, Crush, Kimi Code, Command Code, Kiro CLI v2/v3, OMP, Grok Build CLI, and Antigravity CLI: automatic harness selection, native resume, argument forwarding, ledger search, privacy, and recovery. |
 | [`docs/managed-harness-contributions.md`](docs/managed-harness-contributions.md) | Protocol and acceptance bar for contributors adding managed resume, read-only transcript import, and startup context delivery to another harness. |
-| [`docs/marker-file.md`](docs/marker-file.md) | `.ai-memory.toml` workspace/project routing for multi-client trees, mono-repos, worktrees, and work/personal separation. |
+| [`docs/marker-file.md`](docs/marker-file.md) | `.sessionmunch.toml` workspace/project routing for multi-client trees, mono-repos, worktrees, and work/personal separation. |
 | [`docs/auto-scope.md`](docs/auto-scope.md) | `[auto_scope]` modes for shared servers: default single-slot routing, session-aware isolation, and multi-user `per_actor` behavior. |
 | [`docs/macos.md`](docs/macos.md) | macOS install paths: native release binary (recommended), source build, the Docker wrapper, hook-platform notes, and current macOS limitations. |
 | [`docs/windows.md`](docs/windows.md) | Windows install modes: full WSL2, native Windows with Docker Desktop, prebuilt native release zip, native source builds, and current hook/MCP harness caveats. |
 | [`docs/mcp-install.md`](docs/mcp-install.md) | Per-client MCP and lifecycle notes, handoff-injection limits, and community bridge guidance. |
 | [`docs/deploy.md`](docs/deploy.md) | Homelab deploy: bin/deploy, bearer-token auth, pointers to the TLS guide. |
-| [`docs/users.md`](docs/users.md) | **Multi-user attribution and human login.** Four-rung bearer ladder, password sessions, `ai-memory user` / `api-key` walkthrough, brownfield `aim_` migration. |
+| [`docs/users.md`](docs/users.md) | **Multi-user attribution and human login.** Four-rung bearer ladder, password sessions, `sessionmunch user` / `api-key` walkthrough, brownfield `aim_` migration. |
 | [`docs/https-via-proxy.md`](docs/https-via-proxy.md) | **HTTPS via a reverse proxy.** When you need TLS (multi-user, non-loopback) and when you don't (loopback / stdio). Copy-paste docker compose templates for Caddy + Let's Encrypt, Caddy + internal CA (LAN-only), Cloudflare Tunnel (no open ports), and external cert files; plus native-Caddy + nginx recipes. The "thinking you're secure when you're not" failure modes explicitly called out. |
 | [`docs/lifecycle-ops.md`](docs/lifecycle-ops.md) | **Read before running purge / rename / backup / restore / reset / reindex / restore-page.** Safety matrix for state-touching commands, per-project disk layout (how isolation actually works), checkpoint-based page recovery, and operator workflows for "fresh start", "snapshot before risky op", "drop one project", and rebuilding SQLite from wiki files. |
 | [`docs/auto-improvement-loop.md`](docs/auto-improvement-loop.md) | Auto-improvement design notes: Hermes-inspired scheduled review, auto-approval default, manual review opt-in, pending proposal storage, and curator work. |
-| [`docs/companion-crates.md`](docs/companion-crates.md) | Boundary and implementation plan for optional companion projects, including the standalone importer at [`companions/ai-memory-importer`](companions/ai-memory-importer), without widening core ai-memory. |
+| [`docs/companion-crates.md`](docs/companion-crates.md) | Boundary and implementation plan for optional companion projects, including the standalone importer at [`companions/sessionmunch-importer`](companions/sessionmunch-importer), without widening core sessionmunch. |
 | [`docs/llm-provider-comparison.md`](docs/llm-provider-comparison.md) | Empirical notes behind the recommended LLM defaults. |
 | [`docs/llm-provider-fallback.md`](docs/llm-provider-fallback.md) | Proposed opt-in fallback-chain design for transient LLM-provider failures; not yet a supported configuration surface. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Operational summary: data flow, crate layout, cross-cutting invariants, schema. |
 | [`docs/design-decisions.md`](docs/design-decisions.md) | The full v1 spec. |
 | Research docs under `docs/` | Karpathy LLM Wiki notes, Hermes Agent, agentmemory / basic-memory / cognee deep-dives, lessons-learned from upstream issues. |
+- [`docs/models.md`](docs/models.md) - opinionated model recommendations (embedding and summarization) across six hardware tiers.
 - [`docs/support-matrix.md`](docs/support-matrix.md) - the full agent/platform matrix with notes.
 - [`docs/use-cases.md`](docs/use-cases.md) - scenario walkthroughs.
 - [`docs/llm-providers.md`](docs/llm-providers.md) - provider configuration.

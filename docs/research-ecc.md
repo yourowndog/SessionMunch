@@ -6,7 +6,7 @@ created 2026-01, pushed daily. One of the most-starred AI-agent repos on
 GitHub, single-maintainer-led with an active contributor community.
 
 > **Category caveat, up front.** ECC is **not** a memory backend like
-> ai-memory. It bills itself as *"the agent harness operating system"* — a
+> sessionmunch. It bills itself as *"the agent harness operating system"* — a
 > plan → test → implement → review → verify → **remember** → improve loop
 > installed once into a coding agent (Claude Code, Codex, OpenCode, Cursor,
 > Gemini, Zed, …) as skills, subagents, rules, hooks, and MCP wiring. Memory
@@ -22,11 +22,11 @@ engineering system and toolbox: it plans before it builds, verifies changes
 with tests, reviews its own work from a fresh context, remembers what
 matters, and turns repeated wins into reusable skills and workflows."* The
 memory value prop is captured in one line — **"Optimize the context window.
-Persist everything else."** — which is exactly ai-memory's own reason to
-exist. Where ai-memory *is* the "persist everything else" layer, ECC ships a
+Persist everything else."** — which is exactly sessionmunch's own reason to
+exist. Where sessionmunch *is* the "persist everything else" layer, ECC ships a
 lightweight version of it inside a much larger workflow framework.
 
-ai-memory is the deeper, dedicated memory system; ECC is the broader agent
+sessionmunch is the deeper, dedicated memory system; ECC is the broader agent
 scaffolding with a shallow-but-opinionated memory slice. They are adjacent,
 not substitutes.
 
@@ -39,14 +39,14 @@ not substitutes.
 - **Hook-driven persistence.** PreToolUse / PostToolUse / Stop hooks
   (`hooks/hooks.json`, with `ECC_HOOK_PROFILE=minimal|standard|strict`
   runtime gating) capture session summaries and learned patterns — the same
-  lifecycle-hook capture spine ai-memory uses, but writing local files rather
+  lifecycle-hook capture spine sessionmunch uses, but writing local files rather
   than posting to a server.
 - **Skills / Agents / Rules.** ~286 Markdown "skills" (workflows loaded on
   demand), ~68 subagents with isolated context + scoped tool permissions, and
   always-loaded language/framework "rules" packs. This is a governance layer
-  ai-memory does not have and does not aim to.
+  sessionmunch does not have and does not aim to.
 
-Contrast: ai-memory is a single-writer SQLite + wiki-git **server** with a
+Contrast: sessionmunch is a single-writer SQLite + wiki-git **server** with a
 real retrieval engine (FTS5 + vector + entity + graph, fused by RRF) and an
 OKF-portable on-disk format; ECC is a distributed pile of Markdown + a
 SQLite side-table, retrieved by search over active files.
@@ -54,13 +54,13 @@ SQLite side-table, retrieved by search over active files.
 ## 3. Memory Model
 
 - **Format:** `ecc.memory.v1` Markdown documents — portable and inspectable
-  (same instinct as ai-memory's OKF-v0.2 human-readable wiki).
+  (same instinct as sessionmunch's OKF-v0.2 human-readable wiki).
 - **Scopes:** project / team / user. The **team scope is version-controlled
   and shared through git** — a genuinely different multi-user story than
-  ai-memory's server-mediated workspaces (see §6).
+  sessionmunch's server-mediated workspaces (see §6).
 - **Capture:** semi-manual — `ecc memory save`, `ecc memory handoff`
   (`--stdin` / `--body-file`) — plus hook-driven session summaries. This is
-  the biggest divergence: ai-memory's capture is **automatic and
+  the biggest divergence: sessionmunch's capture is **automatic and
   zero-ceremony** (every prompt/tool/session boundary sanitized and stored by
   lifecycle hooks with no `save` call), whereas ECC leans on explicit save
   commands for durable notes and reserves automation for summaries.
@@ -75,17 +75,17 @@ SQLite side-table, retrieved by search over active files.
 ECC's "Continuous Learning v2" extracts **instincts with confidence
 scoring** from session patterns — *"instinct-based learning with confidence
 scoring, import/export, evolution"* — and can promote recurring wins into
-generated skills. This maps closely to ai-memory's session-end consolidation
+generated skills. This maps closely to sessionmunch's session-end consolidation
 + auto-improve loop, with two notable differences:
 
 1. **Explicit confidence + evolution.** ECC attaches a confidence score to
    each learned instinct and supports import/export and "evolution" over
-   time. ai-memory's auto-improve is eval-gated and staged, but confidence is
+   time. sessionmunch's auto-improve is eval-gated and staged, but confidence is
    implicit; surfacing a per-page/per-rule confidence would be a cheap,
    legible upgrade.
 2. **Promotion to skills, not just recall.** ECC turns repeated patterns into
    *executable* skills/workflows, not only retrievable notes — a stronger
-   "learning produces behavior" story than ai-memory's "learning produces
+   "learning produces behavior" story than sessionmunch's "learning produces
    better recall."
 
 ## 5. Distinctive Ideas Worth Noting
@@ -97,7 +97,7 @@ generated skills. This maps closely to ai-memory's session-end consolidation
   and *governed knowledge* (reviewed, promoted into rules the agent obeys).
 - **AgentShield** — a bundled security scanner that audits harness config,
   hooks, MCP definitions, agent files, permissions, and secrets
-  (`ecc-agentshield scan --path .`). ai-memory has a security-audit *skill*
+  (`ecc-agentshield scan --path .`). sessionmunch has a security-audit *skill*
   but ships no scanner for the hook/MCP config it writes.
 - **Plan Canvas** — browser review of implementation plans (Mermaid
   diagrams, approval gates). Orthogonal to memory, but a nice human-in-the-
@@ -108,10 +108,10 @@ generated skills. This maps closely to ai-memory's session-end consolidation
 ## 6. Cross-Agent / Multi-User
 
 ECC's **team memory is git-shared Markdown** — every teammate pulls the same
-committed vault. ai-memory instead mediates multi-user/multi-machine through
+committed vault. sessionmunch instead mediates multi-user/multi-machine through
 a **server** (attributed writes, per-user scoping, live sync across
 machines). ECC's model is simpler and offline-friendly but has git's
-merge/conflict story and no live cross-session handoff; ai-memory's is richer
+merge/conflict story and no live cross-session handoff; sessionmunch's is richer
 (real-time handoff, attribution, one store many machines) at the cost of
 running a server. Different trade-offs for different teams.
 
@@ -119,25 +119,25 @@ running a server. Different trade-offs for different teams.
 
 **What ECC does better (or at least differently, worth stealing):**
 - The **memory-vs-governed-knowledge distinction** as a first-class
-  principle. ai-memory already gestures at this (the lint pass suggests
+  principle. sessionmunch already gestures at this (the lint pass suggests
   "this looks like a durable rule — copy it into CLAUDE.md/AGENTS.md"), but
-  ECC makes *promotion* an explicit, designed path. ai-memory could formalize
+  ECC makes *promotion* an explicit, designed path. sessionmunch could formalize
   a **promotion flow**: memory page → reviewed → emitted as a governed
   `AGENTS.md`/rule the agent loads every turn, closing the loop the lint only
   hints at.
 - **Explicit confidence scores** on learned knowledge (cheap legibility win).
 - **A bundled config scanner** (AgentShield analogue) for the hooks/MCP
-  ai-memory itself installs — the data-layer audit this project just ran by
-  hand could become a shippable `ai-memory audit-config`.
+  sessionmunch itself installs — the data-layer audit this project just ran by
+  hand could become a shippable `sessionmunch audit-config`.
 - **Learning that produces behavior** (instincts → skills), not just recall.
 
-**Where ai-memory is clearly ahead (for the memory problem specifically):**
-- **Automatic, zero-ceremony capture** vs ECC's `ecc memory save`. ai-memory
+**Where sessionmunch is clearly ahead (for the memory problem specifically):**
+- **Automatic, zero-ceremony capture** vs ECC's `ecc memory save`. sessionmunch
   never asks the agent to remember to persist.
 - **A real retrieval engine** — hybrid FTS5 + vector + entity + graph RRF,
   temporal `as_of`, benchmarked on LongMemEval-S (hit@5 0.62 → 0.82) — vs
   text search over an active file set.
-- **Scale of corpus.** ai-memory is built to auto-capture and retrieve over
+- **Scale of corpus.** sessionmunch is built to auto-capture and retrieve over
   thousands of pages and hundreds of thousands of observations; ECC's vault
   is a smaller, human-curated set.
 - **Server-mediated multi-user, temporal windows, OKF portability, and
@@ -146,19 +146,19 @@ running a server. Different trade-offs for different teams.
 **Bottom line.** ECC is not a memory competitor — it's an agent-harness OS
 whose memory is deliberately thin ("optimize the context window, persist
 everything else; keep memory as context, not policy"). Its best lesson for
-ai-memory is *governance*: the explicit line between raw memory and promoted,
+sessionmunch is *governance*: the explicit line between raw memory and promoted,
 reviewed, agent-obeyed knowledge, plus confidence scoring and a config
-scanner. Its capture and retrieval are well behind ai-memory's, by design.
+scanner. Its capture and retrieval are well behind sessionmunch's, by design.
 
-## 8. Concrete Ideas to Consider for ai-memory
+## 8. Concrete Ideas to Consider for sessionmunch
 
 1. **A promotion path** memory → governed rule (`AGENTS.md`/`CLAUDE.md`),
    turning the existing "looks like a durable rule" lint into an actual
    reviewed-and-emitted governance artifact.
 2. **Surface confidence** on consolidated pages / auto-improve proposals
    (already eval-gated internally; make it legible in `status`/`memory_query`).
-3. **`ai-memory audit-config`** — a shippable scanner for the hook/MCP config
-   ai-memory writes (AgentShield analogue), built from the data-layer audit
+3. **`sessionmunch audit-config`** — a shippable scanner for the hook/MCP config
+   sessionmunch writes (AgentShield analogue), built from the data-layer audit
    work already done.
 4. **Consider a lightweight git-shared "team rules" scope** for offline/small
    teams that don't want to run the server — complementary to, not a

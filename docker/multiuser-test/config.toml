@@ -6,7 +6,7 @@
 
 data_dir = "/data"
 bind = "0.0.0.0:49374"
-log_level = "ai_memory=debug,ai_memory_mcp=debug,ai_memory_store=info,ai_memory_wiki=info,ai_memory_hooks=debug"
+log_level = "sessionmunch=debug,sessionmunch_mcp=debug,sessionmunch_store=info,sessionmunch_wiki=info,sessionmunch_hooks=debug"
 
 [auth]
 # Direct administration uses this; the proxy never receives it.

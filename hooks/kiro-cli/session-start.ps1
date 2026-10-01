@@ -3,6 +3,6 @@
 # so the pending handoff is fetched and printed raw here (no envelope —
 # Kiro documents none). The compiled project brief rides the same fetch
 # once per session.
-. "$PSScriptRoot\..\lib\ai-memory-hook.ps1"
-Invoke-AiMemoryHook -Event "session-start" -Agent "kiro-cli" -FetchHandoff -BriefingOncePerSession
+. "$PSScriptRoot\..\lib\sessionmunch-hook.ps1"
+Invoke-SessionMunchHook -Event "session-start" -Agent "kiro-cli" -FetchHandoff -BriefingOncePerSession
 exit 0

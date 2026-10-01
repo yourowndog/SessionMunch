@@ -7,7 +7,7 @@ is the balance research the feature needs before code.*
 
 Insight borrowed from ECC (`docs/research-ecc.md`): **"Memory is unreviewed
 context, not executable policy. Promote accepted knowledge into governed
-project documentation."** ai-memory already gestures at this — the lint emits
+project documentation."** sessionmunch already gestures at this — the lint emits
 a `rule_suggestion` finding ("this page looks like a durable rule; consider
 copying it into CLAUDE.md/AGENTS.md"). The 2.1 feature closes that loop:
 turn a durable memory into a **governed, always-loaded rule** the agent obeys
@@ -95,7 +95,7 @@ set small *by construction*, not by after-the-fact pruning.
 ## 6. Command-driven, never auto-editing (maintainer's call, and the right one)
 
 The feature does **not** edit AGENTS.md on its own. There is no background
-writer and no "auto-apply." ai-memory only ever *recommends*; the human's
+writer and no "auto-apply." sessionmunch only ever *recommends*; the human's
 explicit command is the only thing that changes the file. This is strictly
 better than staged-auto-apply for the maintainer's stated fear — the user is
 in the loop *by construction*, so nothing can change behind their back, and
@@ -104,33 +104,33 @@ there is no "did I get notified enough?" problem to tune.
 **The command surface** (CLI, mirrored as MCP tools so an agent can run them
 when the user asks):
 
-- **`ai-memory rules recommend`** — read-only. Lists candidate promotions the
+- **`sessionmunch rules recommend`** — read-only. Lists candidate promotions the
   classifier/scorer surfaced (§4–5), ranked, each with: the one-line rule,
   source page, confidence, breadth signal, and *why it qualified*. Changes
   nothing. This is the discovery surface — the user asks "what have you
   learned that's rule-worthy?" and sees a short, ranked list, not a wall.
-- **`ai-memory rules approve <id>`** — promote one candidate into the managed
+- **`sessionmunch rules approve <id>`** — promote one candidate into the managed
   AGENTS.md block. If the block is at budget, the command *tells the user*
   ("at 15/15; approving this means dropping <lowest>, or raise the cap") and
   does nothing until they decide — eviction is a user choice, never silent.
-- **`ai-memory rules edit <id>`** — tweak the rule's wording before/after
+- **`sessionmunch rules edit <id>`** — tweak the rule's wording before/after
   promoting (the human phrasing usually beats the extracted one).
-- **`ai-memory rules remove <id>`** — demote a promoted rule back to
+- **`sessionmunch rules remove <id>`** — demote a promoted rule back to
   retrieval-only. The `_rules/` page is untouched; only the AGENTS.md line goes.
-- **`ai-memory rules list`** — show what is currently promoted (the managed
+- **`sessionmunch rules list`** — show what is currently promoted (the managed
   block's contents, with provenance).
 
 **Guarantees:**
 - **One managed, delimited block.** The block reuses the existing marker
-  mechanism (`ai_memory_core::routing_snippet`: `<!-- ai-memory:start -->` …
-  `<!-- ai-memory:end -->`), in a clearly labelled sub-block (e.g.
-  `<!-- ai-memory: promoted rules (managed) -->`). The human's hand-written
+  mechanism (`sessionmunch_core::routing_snippet`: `<!-- sessionmunch:start -->` …
+  `<!-- sessionmunch:end -->`), in a clearly labelled sub-block (e.g.
+  `<!-- sessionmunch: promoted rules (managed) -->`). The human's hand-written
   AGENTS.md outside the markers is **never** touched.
 - **Provenance per rule.** Each promoted line carries a terse trailer (source
   page + confidence) so a reader sees *why* it's there and can open the memory.
 - **Recommendations are pull, not push.** Candidates accrue silently; the user
   sees them only when they run `recommend`. The one *optional*, low-key nudge:
-  a single `status` line ("N new rule recommendations — `ai-memory rules
+  a single `status` line ("N new rule recommendations — `sessionmunch rules
   recommend`") when the candidate set grows, off by a config flag. No per-turn
   chatter, no pending-writes to babysit.
 - **Fully reversible.** Removing the managed block (or never running `approve`)

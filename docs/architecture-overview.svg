@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1400" height="920" viewBox="0 0 1400 920" role="img" aria-labelledby="title desc">
-  <title id="title">ai-memory architecture overview</title>
-  <desc id="desc">A diagram showing agent clients sending lifecycle hooks and MCP calls into ai-memory serve, which routes through hook, MCP, web, admin, scope, auth, writer, read pool, markdown wiki, SQLite index, scheduled auto-improvement and maintenance jobs, and optional LLM and embedding providers.</desc>
+  <title id="title">sessionmunch architecture overview</title>
+  <desc id="desc">A diagram showing agent clients sending lifecycle hooks and MCP calls into sessionmunch serve, which routes through hook, MCP, web, admin, scope, auth, writer, read pool, markdown wiki, SQLite index, scheduled auto-improvement and maintenance jobs, and optional LLM and embedding providers.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155" />
@@ -36,7 +36,7 @@
   </defs>
 
   <rect class="canvas" x="0" y="0" width="1400" height="920" />
-  <text class="title" x="700" y="48" text-anchor="middle">ai-memory architecture overview</text>
+  <text class="title" x="700" y="48" text-anchor="middle">sessionmunch architecture overview</text>
   <text class="subtitle" x="700" y="76" text-anchor="middle">Hooks capture automatically; markdown is the source of truth; SQLite is the derived search/index layer.</text>
 
   <text class="group-label" x="70" y="112">CLIENTS</text>
@@ -48,7 +48,7 @@
 
   <rect class="client" x="390" y="130" width="290" height="118" />
   <text class="box-title" x="415" y="164">Terminal and automation</text>
-  <text class="box-text" x="415" y="190">ai-memory CLI thin clients</text>
+  <text class="box-text" x="415" y="190">sessionmunch CLI thin clients</text>
   <text class="box-text" x="415" y="211">bootstrap, search, backup</text>
   <text class="box-text" x="415" y="232">lint, embed, forget-sweep</text>
 
@@ -65,7 +65,7 @@
   <text class="box-text" x="1075" y="232">embedding vector backfill</text>
 
   <rect class="server" x="60" y="300" width="1280" height="390" />
-  <text class="group-label" x="90" y="335">ai-memory serve - one Rust binary</text>
+  <text class="group-label" x="90" y="335">sessionmunch serve - one Rust binary</text>
 
   <rect class="route" x="100" y="365" width="235" height="100" />
   <text class="box-title" x="125" y="397">/hook router</text>

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cut a release of ai-memory.
+# Cut a release of sessionmunch.
 #
 # Usage: bin/release <version>
 #
@@ -101,10 +101,10 @@ if new_text == text:
     sys.exit("ERROR: could not find [workspace.package] version in Cargo.toml")
 
 # 2. Bump version constraints in [workspace.dependencies] for the intra-crate
-#    path deps (ai-memory-core, ai-memory-store, etc.).  These always use the
+#    path deps (sessionmunch-core, sessionmunch-store, etc.).  These always use the
 #    same version as the workspace package itself.
 new_text = re.sub(
-    r'(ai-memory-\w+\s*=\s*\{[^}]*version\s*=\s*")[^"]+(")',
+    r'(sessionmunch-\w+\s*=\s*\{[^}]*version\s*=\s*")[^"]+(")',
     r'\g<1>$VERSION\g<2>',
     new_text,
     flags=re.MULTILINE,

@@ -1,7 +1,7 @@
 # SessionMunch Perfect-World Architecture — Investigation Prompt Spec
 
 ## Mission
-Investigate and evolve our ai-memory fork toward **SessionMunch**: a source-grounded memory substrate that preserves the history of human/agent/tool work, structures it into progressively retrievable evidence, and gives agents the smallest sufficient slice of prior experience needed for the current task.
+Investigate and evolve our sessionmunch fork toward **SessionMunch**: a source-grounded memory substrate that preserves the history of human/agent/tool work, structures it into progressively retrievable evidence, and gives agents the smallest sufficient slice of prior experience needed for the current task.
 
 Treat this as the recovered target architecture and investigation brief. Separate **existing implementation**, **near-term design**, and **future capability**. Do not silently turn speculative ideas into current requirements.
 
@@ -75,7 +75,7 @@ Episodes, typed decisions/failures/results, supersession/temporal truth, artifac
 Trajectory capture, verifier outcomes, success/failure comparison, proposed improvements, controlled experiments, regression evaluation, promotion/rejection.
 
 ## Known failure to avoid
-The prior ai-memory design used page-level retrieval and represented a page with a vector derived from only an early prefix (~8 KB), creating tail blindness and a mismatch between retrieval unit and evidence location. Do not "fix" this merely by changing embedding models. The structural retrieval unit is the foundational correction.
+The prior sessionmunch design used page-level retrieval and represented a page with a vector derived from only an early prefix (~8 KB), creating tail blindness and a mismatch between retrieval unit and evidence location. Do not "fix" this merely by changing embedding models. The structural retrieval unit is the foundational correction.
 
 ## Investigation instructions
 Audit the current fork against this target. For every capability classify it as:

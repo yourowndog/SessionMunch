@@ -8,9 +8,9 @@
 
 set -euo pipefail
 
-BOX_NAME="${AI_MEMORY_NATIVE_TEST_BOX:-ai-memory-native-systemd-test}"
-IMAGE="${AI_MEMORY_NATIVE_TEST_IMAGE:-docker.io/library/archlinux:latest}"
-KEEP_BOX="${AI_MEMORY_NATIVE_TEST_KEEP_BOX:-0}"
+BOX_NAME="${SESSIONMUNCH_NATIVE_TEST_BOX:-sessionmunch-native-systemd-test}"
+IMAGE="${SESSIONMUNCH_NATIVE_TEST_IMAGE:-docker.io/library/archlinux:latest}"
+KEEP_BOX="${SESSIONMUNCH_NATIVE_TEST_KEEP_BOX:-0}"
 HOST_TEST_HOME=""
 
 log() {
@@ -55,7 +55,7 @@ wait_for_http() {
 run_inside() {
   assert_inside_container
 
-  cd /work/ai-memory
+  cd /work/sessionmunch
 
   log "Installing Arch build/runtime dependencies"
   sudo pacman -Syu --noconfirm --needed \
@@ -74,41 +74,41 @@ run_inside() {
   log "Checking package metadata syntax"
   bash -n packaging/aur/PKGBUILD
   bash -n packaging/aur/PKGBUILD-bin
-  (cd packaging/aur && makepkg --printsrcinfo -p PKGBUILD) >/tmp/ai-memory.PKGBUILD.SRCINFO
-  (cd packaging/aur && makepkg --printsrcinfo -p PKGBUILD-bin) >/tmp/ai-memory-bin.PKGBUILD.SRCINFO
+  (cd packaging/aur && makepkg --printsrcinfo -p PKGBUILD) >/tmp/sessionmunch.PKGBUILD.SRCINFO
+  (cd packaging/aur && makepkg --printsrcinfo -p PKGBUILD-bin) >/tmp/sessionmunch-bin.PKGBUILD.SRCINFO
 
-  log "Building ai-memory release binary from current working tree"
-  cargo build --release -p ai-memory-cli
+  log "Building sessionmunch release binary from current working tree"
+  cargo build --release -p sessionmunch-cli
 
   log "Installing native package layout into the disposable distrobox"
-  sudo install -Dm0755 target/release/ai-memory /usr/bin/ai-memory
-  sudo rm -rf /usr/share/ai-memory/hooks
-  sudo install -dm0755 /usr/share/ai-memory
-  sudo cp -a hooks /usr/share/ai-memory/
-  sudo install -Dm0644 crates/ai-memory-cli/templates/config.default.toml /etc/ai-memory/config.toml
-  sudo install -Dm0640 packaging/env/ai-memory.env /etc/ai-memory/env
-  sudo install -Dm0644 packaging/systemd/ai-memory.service /usr/lib/systemd/system/ai-memory.service
-  sudo install -Dm0644 packaging/systemd/ai-memory-user.service /usr/lib/systemd/user/ai-memory.service
-  sudo install -Dm0644 packaging/sysusers/ai-memory.conf /usr/lib/sysusers.d/ai-memory.conf
-  sudo install -Dm0644 packaging/tmpfiles/ai-memory.conf /usr/lib/tmpfiles.d/ai-memory.conf
+  sudo install -Dm0755 target/release/sessionmunch /usr/bin/sessionmunch
+  sudo rm -rf /usr/share/sessionmunch/hooks
+  sudo install -dm0755 /usr/share/sessionmunch
+  sudo cp -a hooks /usr/share/sessionmunch/
+  sudo install -Dm0644 crates/sessionmunch-cli/templates/config.default.toml /etc/sessionmunch/config.toml
+  sudo install -Dm0640 packaging/env/sessionmunch.env /etc/sessionmunch/env
+  sudo install -Dm0644 packaging/systemd/sessionmunch.service /usr/lib/systemd/system/sessionmunch.service
+  sudo install -Dm0644 packaging/systemd/sessionmunch-user.service /usr/lib/systemd/user/sessionmunch.service
+  sudo install -Dm0644 packaging/sysusers/sessionmunch.conf /usr/lib/sysusers.d/sessionmunch.conf
+  sudo install -Dm0644 packaging/tmpfiles/sessionmunch.conf /usr/lib/tmpfiles.d/sessionmunch.conf
 
   log "Verifying systemd unit files"
-  systemd-analyze verify /usr/lib/systemd/system/ai-memory.service
-  systemd-analyze --user verify /usr/lib/systemd/user/ai-memory.service
+  systemd-analyze verify /usr/lib/systemd/system/sessionmunch.service
+  systemd-analyze --user verify /usr/lib/systemd/user/sessionmunch.service
 
   log "Creating system service user and state directory"
-  sudo systemd-sysusers /usr/lib/sysusers.d/ai-memory.conf
-  sudo systemd-tmpfiles --create /usr/lib/tmpfiles.d/ai-memory.conf
-  test -d /var/lib/ai-memory
-  test "$(stat -c '%U:%G' /var/lib/ai-memory)" = "ai-memory:ai-memory"
+  sudo systemd-sysusers /usr/lib/sysusers.d/sessionmunch.conf
+  sudo systemd-tmpfiles --create /usr/lib/tmpfiles.d/sessionmunch.conf
+  test -d /var/lib/sessionmunch
+  test "$(stat -c '%U:%G' /var/lib/sessionmunch)" = "sessionmunch:sessionmunch"
 
   log "Initializing system-service data with explicit /var + /etc paths"
-  sudo -u ai-memory /usr/bin/ai-memory \
-    --data-dir /var/lib/ai-memory \
-    --config /etc/ai-memory/config.toml \
+  sudo -u sessionmunch /usr/bin/sessionmunch \
+    --data-dir /var/lib/sessionmunch \
+    --config /etc/sessionmunch/config.toml \
     init
-  sudo test -d /var/lib/ai-memory/wiki
-  sudo test -d /var/lib/ai-memory/db
+  sudo test -d /var/lib/sessionmunch/wiki
+  sudo test -d /var/lib/sessionmunch/db
 
   if ! systemctl list-units --type=service --no-pager >/dev/null 2>&1; then
     fail "systemd is not reachable inside this distrobox. Recreate with distrobox --init, or use a provider that supports systemd containers."
@@ -116,47 +116,47 @@ run_inside() {
 
   log "Starting packaged system service with real systemctl"
   sudo systemctl daemon-reload
-  sudo systemctl restart ai-memory.service
-  wait_for_http http://127.0.0.1:49374/web ai-memory.service
-  sudo -u ai-memory /usr/bin/ai-memory \
-    --data-dir /var/lib/ai-memory \
-    --config /etc/ai-memory/config.toml \
-    status --json >/tmp/ai-memory-system-status.json
-  sudo systemctl stop ai-memory.service
+  sudo systemctl restart sessionmunch.service
+  wait_for_http http://127.0.0.1:49374/web sessionmunch.service
+  sudo -u sessionmunch /usr/bin/sessionmunch \
+    --data-dir /var/lib/sessionmunch \
+    --config /etc/sessionmunch/config.toml \
+    status --json >/tmp/sessionmunch-system-status.json
+  sudo systemctl stop sessionmunch.service
 
   log "Initializing user profile paths"
-  mkdir -p "${HOME}/.config/ai-memory" "${HOME}/.local/share/ai-memory"
-  /usr/bin/ai-memory \
-    --data-dir "${HOME}/.local/share/ai-memory" \
-    --config "${HOME}/.config/ai-memory/config.toml" \
+  mkdir -p "${HOME}/.config/sessionmunch" "${HOME}/.local/share/sessionmunch"
+  /usr/bin/sessionmunch \
+    --data-dir "${HOME}/.local/share/sessionmunch" \
+    --config "${HOME}/.config/sessionmunch/config.toml" \
     init
-  sed -i 's/127\.0\.0\.1:49374/127.0.0.1:49375/' "${HOME}/.config/ai-memory/config.toml"
+  sed -i 's/127\.0\.0\.1:49374/127.0.0.1:49375/' "${HOME}/.config/sessionmunch/config.toml"
 
   log "Starting user-profile command under transient systemd supervision"
   sudo systemd-run \
-    --unit ai-memory-user-profile-smoke \
+    --unit sessionmunch-user-profile-smoke \
     --collect \
     --uid "$(id -u)" \
     --gid "$(id -g)" \
     --setenv "HOME=${HOME}" \
-    /usr/bin/ai-memory \
-      --data-dir "${HOME}/.local/share/ai-memory" \
-      --config "${HOME}/.config/ai-memory/config.toml" \
+    /usr/bin/sessionmunch \
+      --data-dir "${HOME}/.local/share/sessionmunch" \
+      --config "${HOME}/.config/sessionmunch/config.toml" \
       serve --transport http --enable-web
-  wait_for_http http://127.0.0.1:49375/web ai-memory-user-profile-smoke.service
-  sudo systemctl stop ai-memory-user-profile-smoke.service
+  wait_for_http http://127.0.0.1:49375/web sessionmunch-user-profile-smoke.service
+  sudo systemctl stop sessionmunch-user-profile-smoke.service
 
   log "Verifying packaged hook source lookup and agent config writes"
-  /usr/bin/ai-memory install-mcp --client claude-code --apply --server-url http://127.0.0.1:49375/mcp
-  /usr/bin/ai-memory install-hooks --agent claude-code --apply --server-url http://127.0.0.1:49375
-  test -x "${HOME}/.local/share/ai-memory/hooks/claude-code/session-start.sh"
+  /usr/bin/sessionmunch install-mcp --client claude-code --apply --server-url http://127.0.0.1:49375/mcp
+  /usr/bin/sessionmunch install-hooks --agent claude-code --apply --server-url http://127.0.0.1:49375
+  test -x "${HOME}/.local/share/sessionmunch/hooks/claude-code/session-start.sh"
   test -f "${HOME}/.claude.json"
 
   log "Native Arch systemd integration passed"
 }
 
 main() {
-  if [ "${AI_MEMORY_NATIVE_TEST_INNER:-0}" = "1" ]; then
+  if [ "${SESSIONMUNCH_NATIVE_TEST_INNER:-0}" = "1" ]; then
     run_inside
     return
   fi
@@ -165,7 +165,7 @@ main() {
 
   local repo
   repo="$(repo_root)"
-  HOST_TEST_HOME="$(mktemp -d /tmp/ai-memory-native-home.XXXXXX)"
+  HOST_TEST_HOME="$(mktemp -d /tmp/sessionmunch-native-home.XXXXXX)"
 
   cleanup() {
     if [ "${KEEP_BOX}" != "1" ]; then
@@ -187,12 +187,12 @@ main() {
     --image "${IMAGE}" \
     --init \
     --home "${HOST_TEST_HOME}" \
-    --volume "${repo}:/work/ai-memory:rw"
+    --volume "${repo}:/work/sessionmunch:rw"
 
   log "Running native integration inside ${BOX_NAME}"
   distrobox enter "${BOX_NAME}" -- \
-    env AI_MEMORY_NATIVE_TEST_INNER=1 \
-    bash /work/ai-memory/scripts/test-native-arch-systemd-distrobox.sh
+    env SESSIONMUNCH_NATIVE_TEST_INNER=1 \
+    bash /work/sessionmunch/scripts/test-native-arch-systemd-distrobox.sh
 }
 
 main "$@"

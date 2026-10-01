@@ -1,12 +1,12 @@
 # Auto-Improve SkillOpt-Inspired Roadmap
 
 This is the ongoing implementation plan for borrowing the best safety ideas from
-SkillOpt without turning ai-memory into a workflow manager, benchmark harness, or
+SkillOpt without turning sessionmunch into a workflow manager, benchmark harness, or
 agent orchestration platform.
 
 ## Boundary
 
-ai-memory remains a memory substrate:
+sessionmunch remains a memory substrate:
 
 - automatic capture from lifecycle hooks;
 - markdown wiki as the source of truth;
@@ -235,7 +235,7 @@ min_delta = 0.0
 
 Contract:
 
-- ai-memory does not build a benchmark registry, replay harness, scoring DSL, or
+- sessionmunch does not build a benchmark registry, replay harness, scoring DSL, or
   agent simulator;
 - the external command is executed directly (not through a shell) with JSON on
   stdin containing proposal metadata plus before/after bodies;
@@ -246,7 +246,7 @@ Contract:
   proposals and are recorded as rejected candidates with reasons such as
   `eval_gate_failed`, `eval_gate_timeout`, or `eval_gate_error`.
 
-If every proposal in a run fails eval, ai-memory stages the run with zero
+If every proposal in a run fails eval, sessionmunch stages the run with zero
 proposals and the eval rejections so the rejection buffer still learns from the
 attempt. Non-targeted proposals bypass eval even when the gate is enabled. Hook
 paths remain fire-and-forget and never run the eval command.
@@ -283,7 +283,7 @@ notes, or `_meta` pages.
 
 Later, a protected `_meta` section can be updated through a normal pending
 proposal, never directly by a per-session review. Cross-project optimizer
-memory is explicitly out of scope until there is evidence it helps ai-memory
+memory is explicitly out of scope until there is evidence it helps sessionmunch
 users. Neither has been started.
 
 ## Completion Criteria

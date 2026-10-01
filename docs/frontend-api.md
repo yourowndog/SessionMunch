@@ -1,10 +1,10 @@
 # Frontend integration: `/api/v1`
 
 > Read-only JSON API and custom-UI hosting model for building third-party
-> frontends against an `ai-memory` server. Added in **v0.6.0** (PR #7).
+> frontends against an `sessionmunch` server. Added in **v0.6.0** (PR #7).
 > Everything below is sourced from the actual route handlers in
-> `crates/ai-memory-web/src/routes/api.rs` and the response structs in
-> `crates/ai-memory-store/src/reader.rs` — keep them as the canonical
+> `crates/sessionmunch-web/src/routes/api.rs` and the response structs in
+> `crates/sessionmunch-store/src/reader.rs` — keep them as the canonical
 > reference if anything here drifts.
 
 ## 1. What this surface is (and isn't)
@@ -19,11 +19,11 @@
 `/api/v1/*` and `/admin/*` are dual-auth surfaces:
 
 - Human operators authenticate with `POST /auth/login`. The engine returns an
-  `HttpOnly`, `SameSite=Strict` `ai_memory_session` cookie plus a readable
-  `ai_memory_csrf` cookie. Browser requests use `credentials: "include"`;
+  `HttpOnly`, `SameSite=Strict` `sessionmunch_session` cookie plus a readable
+  `sessionmunch_csrf` cookie. Browser requests use `credentials: "include"`;
   mutations also copy the CSRF cookie to `X-CSRF-Token`.
 - Machine clients send `Authorization: Bearer <token>`. The static
-  `AI_MEMORY_AUTH_TOKEN` is machine-root authority; native `aim_` API keys are
+  `SESSIONMUNCH_AUTH_TOKEN` is machine-root authority; native `aim_` API keys are
   always User-level. Bearers never authenticate `/auth/*`.
 - A recognized Bearer has precedence over every browser credential. An invalid
   Bearer fails closed rather than falling back. Before human auth activates,
@@ -53,10 +53,10 @@ Content-Type: application/json
 {"username":"alice","password":"…"}
 ```
 
-Do not put `AI_MEMORY_AUTH_TOKEN`, `aim_` keys, session values, or CSRF values
+Do not put `SESSIONMUNCH_AUTH_TOKEN`, `aim_` keys, session values, or CSRF values
 in `localStorage`. Before any human password or completed bootstrap exists,
 deprecated GET-only browser compatibility may accept the root bearer through
-HTTP Basic and an HttpOnly `ai_memory_auth` cookie. Human activation disables
+HTTP Basic and an HttpOnly `sessionmunch_auth` cookie. Human activation disables
 that path immediately. See [`docs/users.md`](users.md) for bootstrap, password
 rotation, recovery, roles, session expiry, and API-key lifecycle.
 
@@ -120,7 +120,7 @@ GET /api/v1/projects?workspace=NAME   # projects in one workspace
   "projects": [
     {
       "workspace_name": "default",
-      "project_name": "ai-memory",
+      "project_name": "sessionmunch",
       "page_count": 138,
       "last_updated": "2026-05-28T14:02:11.123Z"
     }
@@ -166,7 +166,7 @@ links + back-links.
 
 ```json
 {
-  "project": "ai-memory",
+  "project": "sessionmunch",
   "path": "decisions/0007-db.md",
   "title": "Standardised on Postgres",
   "kind": "decision",
@@ -192,7 +192,7 @@ JSON body for multi-scope.
 
 ```http
 GET /api/v1/search?q=karpathy&limit=20                                # global
-GET /api/v1/search?q=karpathy&workspace=default&project=ai-memory     # one project
+GET /api/v1/search?q=karpathy&workspace=default&project=sessionmunch     # one project
 ```
 
 ```http
@@ -202,7 +202,7 @@ Content-Type: application/json
 {
   "q": "karpathy",
   "scopes": [
-    { "workspace": "default", "project": "ai-memory" },
+    { "workspace": "default", "project": "sessionmunch" },
     { "workspace": "default", "project": "shared-notes" }
   ],
   "limit": 20
@@ -369,7 +369,7 @@ plus `briefing` and `health` aggregated across all of its projects:
 
 ```json
 {
-  "handoff":  { "agent": "claude-code", "at": "…", "project": "ai-memory", "summary": "…", "open_questions": [ … ], "next_steps": [ … ] },
+  "handoff":  { "agent": "claude-code", "at": "…", "project": "sessionmunch", "summary": "…", "open_questions": [ … ], "next_steps": [ … ] },
   "briefing": { "counts": { … }, "activity_7d": { … }, "rules": [ … ], "recent_pages": [ … ] },
   "health":   { "stale": 4, "duplicates": 1, "contradictions": 0, "orphans": 12,
                 "audited_at": null, "stale_pages": [HealthPage, …],
@@ -382,7 +382,7 @@ either response, `handoff` is `null` when no open handoff matches the scope:
 
 ```json
 {
-  "handoff":  { "agent": "claude-code", "at": "…", "project": "ai-memory", "summary": "…", "open_questions": [ … ], "next_steps": [ … ] },
+  "handoff":  { "agent": "claude-code", "at": "…", "project": "sessionmunch", "summary": "…", "open_questions": [ … ], "next_steps": [ … ] },
   "briefing": { … },
   "health":   { … }
 }
@@ -393,7 +393,7 @@ either response, `handoff` is `null` when no open handoff matches the scope:
 ```json
 {
   "workspace": "default",
-  "project": "ai-memory",
+  "project": "sessionmunch",
   "path": "concepts/old-thing.md",
   "title": "Old thing",
   "kind": "concept"
@@ -418,7 +418,7 @@ rendering a project-level dependency view in the SPA.
   "edges": [
     {
       "from_workspace": "default",
-      "from_project":   "ai-memory",
+      "from_project":   "sessionmunch",
       "from_path":      "decisions/0014-storage.md",
       "to_workspace":   "default",
       "to_project":     "infra",
@@ -562,7 +562,7 @@ historical text. Never cached (`no-store`). Same payload as the MCP tool
 ## 6. Custom UI hosting and base paths
 
 ```bash
-ai-memory serve \
+sessionmunch serve \
     --transport http \
     --bind 127.0.0.1:49374 \
     --enable-web \
@@ -581,18 +581,18 @@ The static directory is served at `/web` via `tower-http::ServeDir`:
   `/web/whatever` without 404s.
 - **Path traversal is rejected** by `ServeDir`'s default safety.
 - **Pre-startup validation:** the directory must exist *and* contain
-  `index.html`, or `ai-memory serve` exits with a clear error before
+  `index.html`, or `sessionmunch serve` exits with a clear error before
   binding. Requires `--enable-web` to also be set.
-- **Base-path injection:** ai-memory injects `<base href="...">` and
-  `<meta name="ai-memory-base-path" content="...">` into the SPA shell. This
+- **Base-path injection:** sessionmunch injects `<base href="...">` and
+  `<meta name="sessionmunch-base-path" content="...">` into the SPA shell. This
   covers direct `/web`, `/web/index.html`, and client-router fallback paths;
   static assets are served unchanged.
 
-When a reverse proxy keeps ai-memory under a URL subpath, set
-`--base-path` (or `AI_MEMORY_BASE_PATH`) so every HTTP surface moves together:
+When a reverse proxy keeps sessionmunch under a URL subpath, set
+`--base-path` (or `SESSIONMUNCH_BASE_PATH`) so every HTTP surface moves together:
 
 ```bash
-ai-memory serve \
+sessionmunch serve \
     --transport http \
     --bind 127.0.0.1:49374 \
     --enable-web \
@@ -627,10 +627,10 @@ project tree). No regression.
 ## 7. Worked example: minimal SPA fetch
 
 ```js
-// Resolve bases from the SPA shell injected by ai-memory. The meta tag is
+// Resolve bases from the SPA shell injected by sessionmunch. The meta tag is
 // empty at host root and e.g. "/wiki" behind a subpath reverse proxy.
 const basePath = document
-  .querySelector('meta[name="ai-memory-base-path"]')
+  .querySelector('meta[name="sessionmunch-base-path"]')
   ?.getAttribute("content") ?? "";
 const origin = `${location.origin}${basePath}`;
 const API = `${origin}/api/v1`;
@@ -671,7 +671,7 @@ async function apiGet(path, params) {
 }
 
 // Call login() from the UI first. The HttpOnly session is never visible here.
-const overview = await apiGet("/workspaces/default/projects/ai-memory/overview", {
+const overview = await apiGet("/workspaces/default/projects/sessionmunch/overview", {
   limit: 10,
 });
 console.log(overview.briefing.counts.pages_latest, "pages");
@@ -682,12 +682,12 @@ const search = await fetch(`${API}/search`, {
   credentials: "include",
   headers: {
     "Content-Type": "application/json",
-    "X-CSRF-Token": decodeURIComponent(cookie("ai_memory_csrf") ?? ""),
+    "X-CSRF-Token": decodeURIComponent(cookie("sessionmunch_csrf") ?? ""),
   },
   body: JSON.stringify({
     q: "karpathy",
     scopes: [
-      { workspace: "default", project: "ai-memory" },
+      { workspace: "default", project: "sessionmunch" },
       { workspace: "default", project: "shared-notes" },
     ],
     limit: 20,
@@ -698,7 +698,7 @@ const search = await fetch(`${API}/search`, {
 `curl` smoke test:
 
 ```bash
-TOKEN=$(ai-memory generate-auth-token)
+TOKEN=$(sessionmunch generate-auth-token)
 curl -fsS "http://127.0.0.1:49374/api/v1/workspaces" -H "Authorization: Bearer $TOKEN" | jq
 ```
 
@@ -709,12 +709,12 @@ Read these:
 
 | | Location |
 |---|---|
-| Route registration + handler bodies | `crates/ai-memory-web/src/routes/api.rs` |
-| Response structs (`PageHit`, `WorkspaceSummary`, `BriefingSnapshot`, `HealthPage`, `SessionSummary`, `ObservationRecord`, …) | `crates/ai-memory-store/src/reader.rs` |
-| Session listing + per-session observation readers (`sessions_for_scope`, `session_summary_scoped`, `session_observations_scoped`) | `crates/ai-memory-store/src/reader.rs` |
-| 27 integration tests covering every endpoint (auth, 400s, 404s, multi-scope correctness, SPA fallback) | `crates/ai-memory-web/tests/routes.rs` |
-| Auth + middleware layering | `crates/ai-memory-cli/src/commands/serve.rs` (`mount_web_router`, `apply_http_layers`) |
-| Custom-UI dir validation | `crates/ai-memory-cli/src/commands/serve.rs` (`validate_web_ui_args`) |
+| Route registration + handler bodies | `crates/sessionmunch-web/src/routes/api.rs` |
+| Response structs (`PageHit`, `WorkspaceSummary`, `BriefingSnapshot`, `HealthPage`, `SessionSummary`, `ObservationRecord`, …) | `crates/sessionmunch-store/src/reader.rs` |
+| Session listing + per-session observation readers (`sessions_for_scope`, `session_summary_scoped`, `session_observations_scoped`) | `crates/sessionmunch-store/src/reader.rs` |
+| 27 integration tests covering every endpoint (auth, 400s, 404s, multi-scope correctness, SPA fallback) | `crates/sessionmunch-web/tests/routes.rs` |
+| Auth + middleware layering | `crates/sessionmunch-cli/src/commands/serve.rs` (`mount_web_router`, `apply_http_layers`) |
+| Custom-UI dir validation | `crates/sessionmunch-cli/src/commands/serve.rs` (`validate_web_ui_args`) |
 
 ## 9. CORS
 
@@ -723,7 +723,7 @@ the allow-list. The CORS layer is scoped to that router only — `/mcp`,
 `/hook`, `/admin/*`, and `/web` stay same-origin.
 
 Configure via either `--cors-allow-origin <origin>` (repeatable) on
-the `serve` subcommand or `AI_MEMORY_CORS_ALLOW_ORIGINS=<csv>` in the
+the `serve` subcommand or `SESSIONMUNCH_CORS_ALLOW_ORIGINS=<csv>` in the
 environment. The list is validated at startup:
 
 - Each entry must be a fully-qualified `scheme://host[:port]` URL.

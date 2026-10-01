@@ -3,7 +3,7 @@
 > **Status:** Introduced in v0.8; human password login, web sessions, and
 > native `aim_` API credentials are the current shipped contract.
 
-ai-memory is **single-tenant wiki data** with **optional multi-user
+sessionmunch is **single-tenant wiki data** with **optional multi-user
 attribution**. Every authenticated request sees the same wiki pages —
 there is no per-page RBAC or group permission model. Operational handoffs and
 open-session recovery are owner-scoped so one operator cannot accidentally
@@ -25,14 +25,14 @@ Authenticated clients sharing one server must emit a distinct agent-run id for
 each run and forward that same id on their MCP requests when using session-aware
 auto-scope. Legacy sessions whose stored owner is `NULL` remain shared.
 
-If you run ai-memory alone, you can skip this page — your install
+If you run sessionmunch alone, you can skip this page — your install
 keeps working unchanged.
 
 ## When to enable it
 
 You probably want multi-user mode when:
 
-- More than one human shares a single ai-memory server (a household,
+- More than one human shares a single sessionmunch server (a household,
   a small team's homelab).
 - You want the audit log to record *who* made each write (e.g. to
   trace `Codex` writes vs `Claude Code` writes vs hand-rolled CLI
@@ -44,7 +44,7 @@ You probably **don't** need it when:
 
 - You're the sole human user of your install. Single-user mode (no user rows)
   remains compatible whether or not `init` has generated `[auth].token_pepper`.
-- You need permissions / access control. v1 of ai-memory does
+- You need permissions / access control. v1 of sessionmunch does
   not implement RBAC by design (see
   [`design-decisions.md`](design-decisions.md) §13). Attribution
   records *who* did a write; it does not gate *whether* they
@@ -74,7 +74,7 @@ never authenticates as `Authorization: Bearer`.
 ## Human login (password + web session)
 
 The console signs in with username and password. The engine issues an
-`HttpOnly` `ai_memory_session` cookie (`ams_` secret, hash only in SQLite)
+`HttpOnly` `sessionmunch_session` cookie (`ams_` secret, hash only in SQLite)
 plus a separate CSRF cookie that the SPA must send on cookie-authenticated
 `POST`/`PUT`/`PATCH`/`DELETE`. Machine Bearers skip CSRF.
 
@@ -89,9 +89,9 @@ plus a separate CSRF cookie that the SPA must send on cookie-authenticated
 Passwords are Argon2id PHC strings, 12–1024 UTF-8 bytes, hashed off the writer
 actor. The last enabled root with a password cannot be disabled or demoted.
 
-Greenfield bootstrap consumes `AI_MEMORY_AUTH__INITIAL_ROOT_PASSWORD` once
+Greenfield bootstrap consumes `SESSIONMUNCH_AUTH__INITIAL_ROOT_PASSWORD` once
 (`human_auth_state.bootstrap_completed`). Later restarts ignore it — unset the
-env var. Lost root uses `AI_MEMORY_AUTH__RECOVERY_TOKEN` (at least 32
+env var. Lost root uses `SESSIONMUNCH_AUTH__RECOVERY_TOKEN` (at least 32
 characters), compared constant-time and never stored in SQLite. Public
 recovery failures — wrong token, recovery unset, or password policy —
 share one 401 `{"error":"invalid credentials"}` body. `Config::load()`
@@ -102,7 +102,7 @@ and actor-proxy bearer without logging the values. Operator runbook:
 `/admin/*` and `/api/v1/*` accept a machine Bearer **or** a web session.
 Custom SPA HTML at `/web` is public static; the builtin wiki browser stays
 behind auth. Once human auth becomes active, the engine expires the deprecated
-`ai_memory_auth` compatibility cookie.
+`sessionmunch_auth` compatibility cookie.
 
 ## Trusted proxy identity
 
@@ -130,7 +130,7 @@ root_subject = "<root-subject>"
   root bearer is absent.
 - Only set it when the server is reachable *only* through that proxy.
 - `secure_cookie` is independent of proxy identity. Human auth requires it on
-  every non-loopback listener; ai-memory treats it as the explicit signal that
+  every non-loopback listener; sessionmunch treats it as the explicit signal that
   a trusted reverse proxy terminates HTTPS for `/web` and never trusts
   forwarded protocol headers to infer that fact. Direct HTTP browsers will not
   send a Secure cookie.
@@ -193,7 +193,7 @@ to — and consumed by — the next session to start, whoever it belongs to.
 - `memory_handoff_list` / `memory_handoff_accept` / `memory_handoff_cancel` take `any_owner: true` to
   act on somebody else's baton; that opt-out requires admin authority in
   multi-user mode.
-- `ai-memory finalize-session --all-owners` does the same for sessions, and
+- `sessionmunch finalize-session --all-owners` does the same for sessions, and
   `GET /admin/open-sessions?all_owners=true` is the underlying switch.
   `--session-id <uuid>` / `session_id=<uuid>` narrows the same owner-scoped
   lookup to one exact open session; it cannot be combined with `--all` /
@@ -297,7 +297,7 @@ turned back off or an admin re-homes it.
 
 Before the case-insensitive namespace fix, a mixed-case username such as
 `Alice` used the readable segment `u-Alice`, and a username ending in a period
-kept that period; both now use deterministic `uh-<uuid>` segments. ai-memory
+kept that period; both now use deterministic `uh-<uuid>` segments. sessionmunch
 cannot safely move the old directory automatically because a case-insensitive
 filesystem may already have combined it with another identity. Administrators
 upgrading a shared deployment with `[slots] per_user = true` must inspect any
@@ -305,7 +305,7 @@ affected `u-…` slot directories and re-home confirmed content into the owning
 operator's new namespace. Preserve the old pages until ownership is
 established; do not infer it from filename casing alone.
 
-One gap is deliberate and documented rather than closed: `ai-memory bootstrap`
+One gap is deliberate and documented rather than closed: `sessionmunch bootstrap`
 writes pages at paths the model picks from the repository's own README, docs
 and code, with no operator to attribute them to, so a repo carrying injected
 instructions can make it write a `_slots/…` page. It is an admin-only
@@ -364,27 +364,27 @@ where `[auth].token_pepper` is absent.
 
 ## Quick start
 
-> Prerequisite: a fresh `ai-memory init`. Pre-v0.8 installs need
+> Prerequisite: a fresh `sessionmunch init`. Pre-v0.8 installs need
 > the [migration step](#migrating-an-existing-single-user-install)
 > below before any of these commands work.
 
 ### 1. Set the root identity
 
 Edit your `config.toml` (typically `<data_dir>/config.toml` or
-`/etc/ai-memory/config.toml`) and uncomment the `root_*` lines in
+`/etc/sessionmunch/config.toml`) and uncomment the `root_*` lines in
 the `[auth]` block:
 
 ```toml
 [auth]
 bearer_token = "<your-existing-token-or-a-fresh-one>"
-token_pepper = "<auto-generated-by-ai-memory-init>"
+token_pepper = "<auto-generated-by-sessionmunch-init>"
 
 root_username = "boss"            # required for root attribution
 root_email    = "boss@example.com" # optional, surfaced in UIs
 root_name     = "Boss"             # optional, surfaced in UIs
 ```
 
-`token_pepper` was auto-generated by `ai-memory init`; **do not
+`token_pepper` was auto-generated by `sessionmunch init`; **do not
 change it after issuing native API keys** — rotating the pepper invalidates
 every `aim_` credential. The pepper makes copied
 `api_credentials.token_hash` rows useless to an offline attacker; human
@@ -399,13 +399,13 @@ rather than deleting identities or keys.
 
 ### 2. Add another human
 
-Each `ai-memory user add-human` creates a person with a temporary password,
+Each `sessionmunch user add-human` creates a person with a temporary password,
 printed **exactly once**. The new user must change it on next login.
 This does **not** issue an API key.
 
 ```console
-$ AI_MEMORY_AUTH_TOKEN=<root-token> \
-  ai-memory user add-human --username alice --email alice@home --name "Alice Smith"
+$ SESSIONMUNCH_AUTH_TOKEN=<root-token> \
+  sessionmunch user add-human --username alice --email alice@home --name "Alice Smith"
 
 ✓ created user 'alice'
   name:  Alice Smith
@@ -424,7 +424,7 @@ pipe it. Use `--role root` to create a second recoverable root.
 ### 3. List users
 
 ```console
-$ AI_MEMORY_AUTH_TOKEN=<root-token> ai-memory user list
+$ SESSIONMUNCH_AUTH_TOKEN=<root-token> sessionmunch user list
 
 USERNAME  NAME         ROLE  STATUS
 alice     Alice Smith  user  must-change
@@ -441,18 +441,18 @@ secrets.
 
 ### 4. Disable human login (without losing attribution history)
 
-`ai-memory user disable <username>` stamps `disabled_at` and revokes web
+`sessionmunch user disable <username>` stamps `disabled_at` and revokes web
 sessions. Historical `author_id` references keep resolving. Native API
 credentials stay valid — revoke those separately with `api-key revoke`.
 
 ```console
-$ ai-memory user disable alice
+$ sessionmunch user disable alice
 Disable human login for user 'alice'? (y/N) y
 ✓ disabled user 'alice'
 ```
 
 Pass `--yes` to skip the prompt (CI / scripts). Re-enable with
-`ai-memory user enable alice`. The last enabled root with a password
+`sessionmunch user enable alice`. The last enabled root with a password
 cannot be disabled or demoted.
 
 ### 5. Issue, rotate, or revoke a native API key
@@ -460,7 +460,7 @@ cannot be disabled or demoted.
 Machine clients use `aim_` credentials, not passwords:
 
 ```console
-$ ai-memory api-key add --username alice --label codex-laptop
+$ sessionmunch api-key add --username alice --label codex-laptop
 ✓ created API key '…' (codex-laptop)
 
 Store this token now — it will NOT be shown again.
@@ -469,8 +469,8 @@ aim_mYi3pq...<secret>
 ```
 
 ```console
-$ ai-memory api-key rotate <id>
-$ ai-memory api-key revoke <id>
+$ sessionmunch api-key rotate <id>
+$ sessionmunch api-key revoke <id>
 ```
 
 Rotation 401s the previous plaintext immediately. A revoked secret does
@@ -486,18 +486,18 @@ the data dir, both `0600` (the data dir itself is `0700`):
 
 | file | read by |
 |---|---|
-| `<data_dir>/auth-token` | the native `ai-memory hook` command |
+| `<data_dir>/auth-token` | the native `sessionmunch hook` command |
 | `<data_dir>/auth-header` | the shell hooks, via `curl -H @<file>` |
 
 It is deliberately **not** written into the agent's own config any more. Before
 #552 it went onto the hook's command line — `--auth-token <token>` for native
-hooks, an `AI_MEMORY_AUTH_TOKEN=` shell prefix for the script hooks — which put
+hooks, an `SESSIONMUNCH_AUTH_TOKEN=` shell prefix for the script hooks — which put
 it in the agent's config file *and* in `/proc/<pid>/cmdline` for the lifetime of
 every hook and every `curl`, readable by any local user, on every tool call.
 The second file exists for exactly that reason: building the header inline
 would put the credential straight back on a command line.
 
-An explicit `--auth-token` on a hook command, or `AI_MEMORY_AUTH_TOKEN` in the
+An explicit `--auth-token` on a hook command, or `SESSIONMUNCH_AUTH_TOKEN` in the
 environment, still takes precedence — so configs written before this keep
 working unchanged. Re-run `install-hooks --apply` to move an existing install
 onto the stored form.
@@ -571,7 +571,7 @@ If you're upgrading a machine-bearer-only install:
   shims are removed in 2.0.
 - Before any human password or completed bootstrap exists, GET-only browser
   routes continue to accept the root bearer through HTTP Basic and the
-  HttpOnly `ai_memory_auth` cookie. Human activation disables that path
+  HttpOnly `sessionmunch_auth` cookie. Human activation disables that path
   immediately, without a restart. Machine routes remain Bearer-only.
 - Native API credentials require `[auth].token_pepper`. Human user creation,
   password reset, disable/enable, and session login do not create or depend
@@ -582,12 +582,12 @@ If you're upgrading a machine-bearer-only install:
 
 ### Migrating an existing single-user install
 
-`ai-memory init` is idempotent and won't overwrite a config it
+`sessionmunch init` is idempotent and won't overwrite a config it
 finds. To populate `token_pepper` without losing your current
 config:
 
 1. **Back up the existing config** (`cp config.toml config.toml.bak`).
-2. **Generate a pepper**: `ai-memory generate-auth-token 32` — this
+2. **Generate a pepper**: `sessionmunch generate-auth-token 32` — this
    prints a hex string of the same shape `init` would have
    generated.
 3. **Add the `[auth]` block** to your `config.toml`:
@@ -601,7 +601,7 @@ config:
    root_name     = "Boss"     # optional
    ```
 
-4. Restart `ai-memory serve`. The new fields are picked up; existing
+4. Restart `sessionmunch serve`. The new fields are picked up; existing
    behaviour is unchanged.
 
 You can defer steps 3-4 indefinitely — `bearer_token` alone keeps
@@ -620,7 +620,7 @@ DB-only theft (a copied SQLite file) useless offline. Constant-time
 comparison on the hash avoids timing leaks on the lookup path.
 Argon2id is the wrong KDF here: 256-bit CSPRNG secrets are not
 brute-forceable, and a per-hash salt would force O(N) scans on every
-auth request. See `crates/ai-memory-store/src/api_credentials.rs`.
+auth request. See `crates/sessionmunch-store/src/api_credentials.rs`.
 
 **Web sessions** hash a 256-bit `ams_` secret with SHA-256 (no pepper)
 into `web_sessions`. The cookie is `HttpOnly`, `SameSite=Strict`,
@@ -637,7 +637,7 @@ Runtime lookup no longer reads the old columns.
 |---|---|
 | Auth middleware injects `Extension<ActorContext>` on every request | ✓ P1.3 |
 | All `/admin/*` routes gate on `Extension<AuthLevel>::Root` in multi-user mode | ✓ P1.4 |
-| `ai-memory user add-human/list/reset-password/disable/enable/patch`, deprecated `user add/expire/revive/rotate-token`, and `ai-memory api-key add/list/rotate/revoke` | ✓ |
+| `sessionmunch user add-human/list/reset-password/disable/enable/patch`, deprecated `user add/expire/revive/rotate-token`, and `sessionmunch api-key add/list/rotate/revoke` | ✓ |
 | `pages.author_id` populated, frontmatter `last_modified_by` block | ✓ P1.6 |
 | `/api/v1` page responses include `author: { username, name?, email? }` | ✓ P1.7 |
 | ETag invalidation on author change (so caches refresh attribution) | ✓ P1.7 |
@@ -649,18 +649,18 @@ Commit ids for each milestone are recorded in `CHANGELOG.md`.
 
 ## Wiring agent hooks to a specific user
 
-After `ai-memory api-key add` prints a native secret, point that user's
+After `sessionmunch api-key add` prints a native secret, point that user's
 agent install at it via `install-hooks`:
 
 ```console
-$ ai-memory api-key add --username alice --label claude-hooks
+$ sessionmunch api-key add --username alice --label claude-hooks
 ✓ created API key '…' (claude-hooks)
 
 aim_XGq...<secret>    # stdout only
 
-$ ai-memory install-hooks --apply --agent claude-code \
+$ sessionmunch install-hooks --apply --agent claude-code \
     --as-user alice --auth-token aim_XGq...<secret>
-[ai-memory] hooks installing for user: alice
+[sessionmunch] hooks installing for user: alice
 ✓ staged 5 hook script(s) → ...
 ```
 
@@ -682,7 +682,7 @@ the bearer authenticates, attribution flows from the token's owner
 - **No per-page RBAC.** Every authenticated user sees every page in
   the workspace. All `/admin/*` endpoints are still root-only in
   multi-user mode. If you need data isolation, run separate
-  ai-memory servers (per-user data dirs) and front them with a reverse
+  sessionmunch servers (per-user data dirs) and front them with a reverse
   proxy.
 - **Native keys are not passwords.** `user add-human` never issues an `aim_`
   secret; `api-key add` never issues a login session. The deprecated `user add`
@@ -697,10 +697,10 @@ the bearer authenticates, attribution flows from the token's owner
   roots operate the console with a web session after password login.
 - **OIDC is request authentication, not page authorization.** Native hooks and
   thin-client CLI commands can send a per-developer OIDC bearer for an external
-  OIDC-aware gateway/bridge. Native ai-memory server auth still uses static root
+  OIDC-aware gateway/bridge. Native sessionmunch server auth still uses static root
   bearer / native `aim_` keys / web sessions, and `/admin/*` stays root-only unless a gateway
-  translates accepted OIDC auth into upstream auth that ai-memory accepts.
-  ai-memory still has one shared wiki per server and no
-  per-page RBAC. The Keycloak/OIDC `sid` claim is also not an ai-memory agent
+  translates accepted OIDC auth into upstream auth that sessionmunch accepts.
+  sessionmunch still has one shared wiki per server and no
+  per-page RBAC. The Keycloak/OIDC `sid` claim is also not an sessionmunch agent
   session id; session auto-scope needs the lifecycle-hook session id or explicit
   `workspace` + `project` / `scopes`.

@@ -1,9 +1,9 @@
 # Managed cross-harness workstreams
 
-`ai-memory run` is an opt-in launcher that lets one logical coding session move
+`sessionmunch run` is an opt-in launcher that lets one logical coding session move
 between Claude Code, Codex, OpenCode, OpenCode 2 beta, Pi, Crush, Kimi Code, Command Code, Kiro
 CLI v2/v3, OMP, Grok Build CLI, and Antigravity CLI. Direct agent launches
-keep their existing ai-memory behavior. There is no global mode toggle and no
+keep their existing sessionmunch behavior. There is no global mode toggle and no
 `switch` command: using `run` selects the current workstream and transparently
 creates or resumes the correct native session for the requested harness.
 
@@ -26,8 +26,8 @@ your shell history:
 # ~/bin/claude-corp and ~/bin/claude-personal are wrapper scripts (earlier on
 # PATH than the bare `claude`) that each exec the real claude binary with
 # that account's config/credentials directory.
-ai-memory run claude-corp --executable claude-corp --model opus
-ai-memory run claude-personal --executable claude-personal
+sessionmunch run claude-corp --executable claude-corp --model opus
+sessionmunch run claude-personal --executable claude-personal
 ```
 
 Only the `--executable` value matters for which binary actually runs; the
@@ -37,26 +37,26 @@ whatever reads clearly to you.
 ```bash
 cd /path/to/project
 
-ai-memory run claude
+sessionmunch run claude
 # quit Claude Code, then continue the same logical workstream in Codex
-ai-memory run codex --yolo
-# return to Claude Code later; ai-memory supplies Claude's native --resume
-ai-memory run claude --model opus
+sessionmunch run codex --yolo
+# return to Claude Code later; sessionmunch supplies Claude's native --resume
+sessionmunch run claude --model opus
 # any `claude*` name is accepted (see "Multiple Claude accounts" above)
-ai-memory run claude-corp
+sessionmunch run claude-corp
 # Kimi Code installs `kimi`; `kimi-cli` is accepted as a launcher alias
-ai-memory run kimi-cli
+sessionmunch run kimi-cli
 # Command Code uses `command-code` on Unix and `cmdc` on native Windows
-ai-memory run command-code
+sessionmunch run command-code
 # Kiro defaults to v2; select its incompatible v3 engine explicitly once
-ai-memory run kiro
-ai-memory run kiro --v3
+sessionmunch run kiro
+sessionmunch run kiro --v3
 # or omit the harness and continue the newest usable session automatically
-ai-memory run
+sessionmunch run
 ```
 
 Everything after the harness name is native argv except the wrapper-owned exact
-flags `--yolo` and `--fresh`. No `--` separator is needed, and ai-memory does
+flags `--yolo` and `--fresh`. No `--` separator is needed, and sessionmunch does
 not maintain a second copy of each harness's option schema. Other wrapper
 options come first:
 
@@ -68,7 +68,7 @@ Current system/developer/user instructions, the canonical project instruction
 file, and the current checkout remain authoritative.
 
 ```text
-ai-memory run [--workspace NAME] [--project NAME]
+sessionmunch run [--workspace NAME] [--project NAME]
               [--workstream NAME | --new NAME] [--executable PATH]
               [--yolo] [--fresh]
               [claude|claude*|codex|opencode|opencode2|pi|crush|omp|kimi|command-code|kiro|grok|antigravity]
@@ -83,8 +83,8 @@ branching controls, not harness-switch controls.
 List the workstreams available to those selectors without launching a harness:
 
 ```bash
-ai-memory workstreams [--workspace NAME] [--project NAME]
-ai-memory workstreams --limit 50 --json
+sessionmunch workstreams [--workspace NAME] [--project NAME]
+sessionmunch workstreams --limit 50 --json
 ```
 
 The list is scoped to the same `(workspace, project, repository, worktree)`
@@ -96,8 +96,8 @@ session ids.
 Names are chosen at `--new` time and can be corrected later:
 
 ```bash
-ai-memory rename-workstream --from typo-nmae --to refactor-db
-ai-memory rename-workstream --workstream-id 01a04092-… --to refactor-db
+sessionmunch rename-workstream --from typo-nmae --to refactor-db
+sessionmunch rename-workstream --workstream-id 01a04092-… --to refactor-db
 ```
 
 The two selectors are mutually exclusive; the id is the one `workstreams`
@@ -106,7 +106,7 @@ destination another workstream already holds is refused rather than merged,
 and the destination is validated exactly like a `--new` name. Because the
 ledger, linked harnesses, and managed runs all key on the workstream id rather
 than its name, nothing else moves — including which workstream a bare
-`ai-memory run` resumes, and the listing order, both of which stay put because
+`sessionmunch run` resumes, and the listing order, both of which stay put because
 a rename deliberately does not touch `selected_at` or `updated_at`. A run that
 is already live keeps displaying the name it launched with until it exits.
 
@@ -117,10 +117,10 @@ Probably not at first — hooks alone already carry most continuity.
 - **Skip it** when a handoff is all you want: you quit Claude Code
   mid-task, open Codex in the same directory, and the next session
   starts with "where you left off, what failed, what's open". That
-  works with nothing but `install-hooks`; no `ai-memory run` involved.
+  works with nothing but `install-hooks`; no `sessionmunch run` involved.
 - **Use it** when you want the harness's own native resume (`claude
   --resume` / the picker) to survive a harness SWITCH — the managed
-  ledger records the visible event stream portably, so `ai-memory
+  ledger records the visible event stream portably, so `sessionmunch
   continue` can reopen the same workstream in a different agent with
   the exact tool-call history, not just a summary.
 
@@ -129,16 +129,16 @@ simpler and loses you nothing.
 
 ## Project-first launcher
 
-`ai-memory show` reverses the usual `cd` then `run` flow: choose a local
+`sessionmunch show` reverses the usual `cd` then `run` flow: choose a local
 checkout, choose an installed managed harness, and launch from that checkout.
 
 ```bash
 cd ~/Projects
-ai-memory show
+sessionmunch show
 
 # Structured discovery only; never launches a harness.
-ai-memory show --json
-ai-memory show --json --no-scan
+sessionmunch show --json
+sessionmunch show --json --no-scan
 ```
 
 A successful managed prepare refreshes `<data_dir>/client-projects.json`, a
@@ -167,14 +167,14 @@ combined with launch arguments.
 
 ## Continuing from anywhere
 
-Bare `ai-memory run` continues the current checkout, but its workstream lookup
+Bare `sessionmunch run` continues the current checkout, but its workstream lookup
 is keyed by `(workspace, project, repo fingerprint, worktree fingerprint)`, so
-the caller must already be in the project. `ai-memory continue` supplies the
+the caller must already be in the project. `sessionmunch continue` supplies the
 missing step and needs no `cd`:
 
 ```bash
-ai-memory continue
-ai-memory continue --workspace work
+sessionmunch continue
+sessionmunch continue --workspace work
 ```
 
 The checkout is chosen entirely on the client, from the `linked_at` stamp that
@@ -191,25 +191,25 @@ next-newest link is tried. A corrupt `linked_at` timestamp is also reported and
 never considered launchable. Falling through is never silent: the selected
 project and path are always printed before the harness starts.
 
-Once a checkout is selected, the launch is exactly bare `ai-memory run` in that
+Once a checkout is selected, the launch is exactly bare `sessionmunch run` in that
 directory, including automatic harness selection. `continue` therefore accepts
 `--workspace`, `--yolo`, and `--fresh`, but not native harness arguments or
 `--executable`, whose meaning depends on a harness the user did not name.
 
 ## Picking a workstream
 
-`ai-memory resume` is the interactive counterpart to `continue`: it presents
+`sessionmunch resume` is the interactive counterpart to `continue`: it presents
 recent workstreams from every valid client-local managed checkout, then launches
 the selected named workstream without needing a `cd` first.
 
 ```bash
-ai-memory resume
-ai-memory resume --workspace work --limit 50
+sessionmunch resume
+sessionmunch resume --workspace work --limit 50
 ```
 
 Use Up/Down (or `j`/`k`) to move between workstreams and Left/Right to cycle the
 launch harness for the highlighted row. Each row remembers its choice while you
-navigate. `auto` is the initial choice and preserves bare `ai-memory run`'s
+navigate. `auto` is the initial choice and preserves bare `sessionmunch run`'s
 discovery of the newest usable session; the remaining choices are supported
 harness executables detected in the host `PATH`. Enter launches the displayed
 workstream/harness combination, while Escape or `q` cancels.
@@ -226,22 +226,22 @@ and resolved scope before it asks the server for that checkout's workstreams,
 and deduplicates the same workstream reached through both sources. The server
 receives only the repository/worktree fingerprints required for the existing
 checkout-local listing, never a host path. It needs an interactive terminal;
-scripts can continue to use `ai-memory workstreams --json` after selecting a
+scripts can continue to use `sessionmunch workstreams --json` after selecting a
 checkout themselves.
 
 ## Automatic harness selection
 
-With no harness name, `ai-memory run` inspects checkout-local sessions for
+With no harness name, `sessionmunch run` inspects checkout-local sessions for
 Claude Code, Codex, OpenCode, Pi, Crush, Kimi Code, Command Code, and both Kiro
 CLI engines. For an empty workstream it resumes
 the newest session automatically. For an established workstream, server state
-takes precedence: ai-memory resumes the most recently linked harness that still
+takes precedence: sessionmunch resumes the most recently linked harness that still
 has a usable local session. It never chooses a newer but obsolete session from
 another harness merely because that file has a later timestamp. Kiro's v2 and
 v3 candidates share one server agent identity, but the selected native engine
 flavor remains exact. OMP, Grok, and Antigravity remain available explicitly
 but are not in the automatic pool. OpenCode 2 is likewise explicit-only
-(`ai-memory run opencode2`): it shares v1's session store, so listing both
+(`sessionmunch run opencode2`): it shares v1's session store, so listing both
 would duplicate every candidate.
 
 OpenCode 2 sessions run inside a shared background service, so its plugin
@@ -258,12 +258,12 @@ than the ledger delta.
 Bare mode accepts wrapper options but not harness-native arguments or
 `--executable`, because their meaning depends on the selected harness. In a new
 directory with no session in the automatic pool, it exits without creating a
-workstream and suggests the explicit `ai-memory run <harness>` commands.
+workstream and suggests the explicit `sessionmunch run <harness>` commands.
 
 ## First managed launch
 
 An otherwise-empty workstream may adopt one of the requested harness's existing
-native sessions. On an interactive launch, ai-memory inspects that harness's
+native sessions. On an interactive launch, sessionmunch inspects that harness's
 store without modifying it and lists up to eight recent sessions whose recorded
 working directory matches the current checkout. Choose one to resume it, press
 Enter to accept the newest candidate, or choose `0` to start a new session.
@@ -272,7 +272,7 @@ Sessions from another checkout are never offered.
 Adoption is only a bootstrap operation. Once any harness has linked a native
 session or contributed portable message/tool/compaction history, the workstream
 is established. If Claude established it and Codex has not joined it yet, for
-example, `ai-memory run codex` creates a fresh Codex session and injects the
+example, `sessionmunch run codex` creates a fresh Codex session and injects the
 Claude workstream history. It does not inspect or select an older unrelated
 Codex session. Returning to Codex later resumes the Codex session already linked
 to that workstream.
@@ -283,12 +283,12 @@ launches without terminal input skip the chooser and start fresh. A launch that
 exits before producing either a native session or portable history does not
 consume the later adoption opportunity.
 
-Before adding an ai-memory-owned resume selector, the launcher checks the exact
+Before adding an sessionmunch-owned resume selector, the launcher checks the exact
 linked id in the harness's native store without modifying it. If the transcript
-was deleted, cleared, or lost with a sandbox overlay, ai-memory starts a fresh
+was deleted, cleared, or lost with a sandbox overlay, sessionmunch starts a fresh
 native session and repoints the same workstream when that session is observed.
 An unreadable or malformed store is reported but is not mistaken for a missing
-session. Use `ai-memory run --fresh <harness>` to deliberately skip the linked
+session. Use `sessionmunch run --fresh <harness>` to deliberately skip the linked
 session and the adoption chooser. `--fresh` cannot be combined with a native
 resume, continue, session, or fork selector.
 
@@ -302,7 +302,7 @@ resume, continue, session, or fork selector.
    an explicit interactive adapter can offer matching local sessions for
    one-time adoption. Otherwise the adapter passes native arguments through in
    order and adds a create/resume selector only when the user did not supply one.
-3. `AI_MEMORY_RUN_ID` marks lifecycle hooks as managed. SessionStart links the
+3. `SESSIONMUNCH_RUN_ID` marks lifecycle hooks as managed. SessionStart links the
    actual native session and injects only the portable events that session has
    not seen. Crush, which has no SessionStart hook, receives the same bounded
    packet through a temporary `options.global_context_paths` entry. Kimi Code
@@ -316,7 +316,7 @@ resume, continue, session, or fork selector.
    together only after the full handoff/packet/brief response is assembled.
    Direct launches continue to use the same handoff path without a managed
    packet.
-4. When the child exits, ai-memory reads the native transcript store without
+4. When the child exits, sessionmunch reads the native transcript store without
    modifying it. Visible user/assistant messages, completed tool calls/results,
    compaction summaries, and a non-mutating Git checkpoint enter an append-only
    workstream ledger. Hidden reasoning and unsupported/private records are
@@ -335,11 +335,11 @@ can safely absorb an unbounded transcript. The complete visible ledger remains
 searchable from inside a managed agent process:
 
 ```bash
-ai-memory workstream-search "scope resolver decision"
-ai-memory workstream-search --limit 50 --json "failed migration"
+sessionmunch workstream-search "scope resolver decision"
+sessionmunch workstream-search --limit 50 --json "failed migration"
 ```
 
-`AI_MEMORY_WORKSTREAM_ID` supplies the id automatically inside the child. From
+`SESSIONMUNCH_WORKSTREAM_ID` supplies the id automatically inside the child. From
 another shell, pass `--workstream-id <uuid>` explicitly. Search results preserve
 the source harness, role, event sequence, and content. Historical tool activity
 is labelled completed evidence and must never be replayed as a pending call.
@@ -377,7 +377,7 @@ The experimental unsandboxed Mod API is not used.
 
 An explicit native selector such as Claude's `--resume`, OpenCode's `--session`,
 Codex's `resume`, or Antigravity's `--conversation` / `--continue` wins.
-ai-memory links the selected native session and resets an unrelated adapter
+sessionmunch links the selected native session and resets an unrelated adapter
 cursor rather than assuming it belongs to the old session.
 Pi and OMP `--session-dir` values and Crush `--data-dir` values are passed
 through unchanged and used as the read-only import root. Native store
@@ -393,7 +393,7 @@ session flags. Claude/Pi/OMP print mode, Codex `exec`, OpenCode/Crush `run`,
 redirected input, and other noninteractive launches never open the adoption
 chooser.
 
-`ai-memory run --yolo <harness>` and `ai-memory run <harness> --yolo` both use
+`sessionmunch run --yolo <harness>` and `sessionmunch run <harness> --yolo` both use
 the harness's native dangerous mode. The translation is Claude Code
 `--dangerously-skip-permissions`, Codex
 `--dangerously-bypass-approvals-and-sandbox`, OpenCode `--auto`, Pi `--approve`,
@@ -401,8 +401,8 @@ Crush `--yolo`, Kimi Code `--yolo`, Command Code `--yolo`, Kiro CLI v2
 `--trust-all-tools`, Grok Build CLI `--yolo` (equivalent to its
 `--always-approve` option), and Antigravity CLI
 `--dangerously-skip-permissions`. Kiro v3 replaced the trust-all flag with
-`permissions.yaml`, so ai-memory prints a notice and adds no unverified flag.
-OMP currently needs no added flag. ai-memory does not add a duplicate when the
+`permissions.yaml`, so sessionmunch prints a notice and adds no unverified flag.
+OMP currently needs no added flag. sessionmunch does not add a duplicate when the
 translated native flag is already present.
 
 Managed support is intentionally narrower than the general integration matrix.
@@ -415,20 +415,20 @@ opt-in real-harness acceptance pass.
 
 ## Installation and recovery
 
-Managed runs need current ai-memory lifecycle hooks so SessionStart can receive
+Managed runs need current sessionmunch lifecycle hooks so SessionStart can receive
 the portable delta. Refresh them after upgrading:
 
 ```bash
-ai-memory install-hooks --agent claude-code --apply
-ai-memory install-hooks --agent codex --apply
-ai-memory install-hooks --agent opencode --apply
-ai-memory install-hooks --agent pi --apply
-ai-memory install-hooks --agent omp --apply
-ai-memory install-hooks --agent kimi-code --apply
-ai-memory install-hooks --agent kiro-cli --apply
+sessionmunch install-hooks --agent claude-code --apply
+sessionmunch install-hooks --agent codex --apply
+sessionmunch install-hooks --agent opencode --apply
+sessionmunch install-hooks --agent pi --apply
+sessionmunch install-hooks --agent omp --apply
+sessionmunch install-hooks --agent kimi-code --apply
+sessionmunch install-hooks --agent kiro-cli --apply
 ```
 
-Kimi Code hooks installed as native `ai-memory hook` commands automatically
+Kimi Code hooks installed as native `sessionmunch hook` commands automatically
 pick up the current delivery behavior when the binary is upgraded. A
 script-fallback installation must rerun the Kimi Code `install-hooks` command
 after upgrading so its staged scripts are refreshed. Current hooks deliver
@@ -446,7 +446,7 @@ only possible with identical content in the same millisecond, because Kimi
 Code stamps each record with `time` — collapse into a single ledger event.
 The incremental cursor stores both the complete-record byte offset and a
 SHA-256 of that imported prefix. Normal appends resume at the saved offset;
-if Kimi rewrites `wire.jsonl` in place, ai-memory resets to the beginning and
+if Kimi rewrites `wire.jsonl` in place, sessionmunch resets to the beginning and
 replays the file, with stable event ids deduplicating records already in the
 workstream.
 Legacy sessions that keep `wire.jsonl` directly in the session directory
@@ -474,11 +474,11 @@ linked `--resume-id` is injected, and the incompatible engine flavor is also
 stored in the opaque incremental cursor. Explicit `--v3`, v3-only `--mode`,
 or `--agent-engine v3` selects v3; explicit `--agent-engine v2` selects v2; an
 unknown engine value remains passthrough instead of being guessed. Once a v3
-session is linked, a later plain `ai-memory run kiro` recovers that engine
+session is linked, a later plain `sessionmunch run kiro` recovers that engine
 transparently. Kiro CLI 2.16.2 wrote v3 sessions below the default
-`~/.kiro/sessions` even when `KIRO_HOME` redirected other state, so ai-memory
+`~/.kiro/sessions` even when `KIRO_HOME` redirected other state, so sessionmunch
 checks the configured v3 root first and that default root as a compatibility
-fallback. If a linked session exists only in the fallback, ai-memory removes
+fallback. If a linked session exists only in the fallback, sessionmunch removes
 `KIRO_HOME` for that one resume so Kiro can find the session; Kiro consequently
 uses its default-home v3 settings/hooks for that process. Fresh launches and
 versions that store the session below the configured root keep `KIRO_HOME`
@@ -489,7 +489,7 @@ See Kiro's current
 [session management](https://kiro.dev/docs/cli/chat/session-management/) and
 [v3 compatibility](https://kiro.dev/docs/cli/v3/) references.
 
-Grok needs no ai-memory hook installation for managed delivery either. Grok
+Grok needs no sessionmunch hook installation for managed delivery either. Grok
 ignores `SessionStart` stdout and its `UserPromptSubmit` hook is passive, so
 the launcher fetches the bounded context packet from the server and passes it
 through Grok's native `--rules` flag, which appends the text to that session's
@@ -521,40 +521,40 @@ injects no selector and the id is linked by the hooks or discovered after exit; 
 linked resume passes `--conversation <id>`. `--continue` / `-c` is treated as an
 explicit user choice and is never overridden. `--yolo` maps to
 `--dangerously-skip-permissions`. Step payloads are undocumented, unversioned
-protobuf blobs, so ai-memory does not decode conversation text: the visible-event
+protobuf blobs, so sessionmunch does not decode conversation text: the visible-event
 ledger for this harness comes from lifecycle-hook capture, and transcript export
 fails with a message saying so. The managed launcher accepts `antigravity`,
 `antigravity-cli`, and `agy`. The native contract was verified against
 Antigravity CLI v1.1.7. Antigravity is not part of the no-argument
 auto-detection set; name it explicitly.
 
-Crush needs no ai-memory hook installation for managed mode. The launcher reads
+Crush needs no sessionmunch hook installation for managed mode. The launcher reads
 its one-time context from the server, copies the existing global Crush JSON into
 a private temporary directory, appends an ephemeral context path, and points the
 child at that directory with `CRUSH_GLOBAL_CONFIG`. Delivery is acknowledged
 only after the child starts, so a spawn failure cannot lose the packet. The
-original config is not modified. ai-memory opens the project database read-only;
+original config is not modified. sessionmunch opens the project database read-only;
 the launched Crush process continues its normal native session writes.
 
 The Linux/macOS Docker shell wrapper cannot inspect host projects or execute a
 host agent from inside its helper container. For `run`, `show`, `continue`,
 `resume`, and `workstreams`, it downloads the matching native release into
-`~/.cache/ai-memory/native-runner`, verifies the published SHA-256 checksum, and
-executes that host client. Set `AI_MEMORY_NATIVE_BIN=/path/to/ai-memory` to use a
+`~/.cache/sessionmunch/native-runner`, verifies the published SHA-256 checksum, and
+executes that host client. Set `SESSIONMUNCH_NATIVE_BIN=/path/to/sessionmunch` to use a
 specific native build. Native package, release, and source installs need no
-shim. On native Windows, use the published `ai-memory.exe` or a source build.
+shim. On native Windows, use the published `sessionmunch.exe` or a source build.
 
 The wrapper intercepts all five commands before Docker and preserves the host
-`PATH`, `AI_MEMORY_SERVER_URL`, and authentication environment. The native client's
+`PATH`, `SESSIONMUNCH_SERVER_URL`, and authentication environment. The native client's
 startup log shows `server_url` as well as its local config paths; `data_dir` and
 `bind` describe local defaults and do not override a configured remote server.
 If logs show
 `data_dir=/data` followed by `starting managed ... No such file or directory`,
 the installed wrapper is stale and sent the command into the helper container.
-Run `ai-memory upgrade` on the client machine. A remote/homelab server must be
+Run `sessionmunch upgrade` on the client machine. A remote/homelab server must be
 upgraded separately.
 
-On a normal exit, ai-memory imports the transcript and closes the lease before
+On a normal exit, sessionmunch imports the transcript and closes the lease before
 returning. Handled setup, launch, or import failures cancel the lease
 immediately. A new launch retries an active-workstream conflict briefly so a
 previous launcher can finish; if another harness is genuinely still running,
@@ -576,11 +576,11 @@ If the client is terminated without cleanup, such as with `kill -9`, its lease
 expires within 90 seconds. A later managed run starts from the last committed
 adapter cursor, so already linked native sessions can import the missing tail
 without duplicating earlier events. A server or authentication failure before
-process launch is fatal; ai-memory does not silently start an unmanaged agent.
+process launch is fatal; sessionmunch does not silently start an unmanaged agent.
 
 ## Privacy and storage boundaries
 
-ai-memory's managed adapters do not write to Claude, Codex, OpenCode, Pi, Crush,
+sessionmunch's managed adapters do not write to Claude, Codex, OpenCode, Pi, Crush,
 Kimi Code, Command Code, Kiro, OMP, Grok, or Antigravity private stores. The
 launched harness retains normal ownership of its own session writes. Adapters read only
 documented or observed local session formats. Provider credentials, encrypted
@@ -594,7 +594,7 @@ belong in wiki pages through consolidation or explicit durable writes.
 
 ## Project and directory renames
 
-`ai-memory rename-project --from OLD --to NEW` changes only the server-side
+`sessionmunch rename-project --from OLD --to NEW` changes only the server-side
 project name. Wiki paths are UUID-keyed, so it moves no server directory, source
 checkout, or native harness session. If the source checkout path itself is
 renamed, absolute-path session locators used by Claude Code, Codex, OpenCode,
@@ -605,7 +605,7 @@ Antigravity may still reference the old path; Crush's project-local `.crush`
 database moves with the checkout.
 
 There is no portable, supported API that rewrites every harness's private
-project locator. ai-memory therefore does not mutate those stores or silently
+project locator. sessionmunch therefore does not mutate those stores or silently
 equate a renamed checkout with another clone of the same remote. Explicit
 native selectors still win and can recover a session when that harness supports
 cross-directory resume; OpenCode also provides its own export/import flow. For
@@ -625,7 +625,7 @@ scripts/managed-workstream-acceptance.sh
 ```
 
 It is deliberately separate from CI because it uses local harness credentials
-and model calls. Hook configs, native session stores, the ai-memory server, and
+and model calls. Hook configs, native session stores, the sessionmunch server, and
 the Git fixture are isolated under a temporary directory. Claude, Codex, and
 OpenCode receive only copied authentication material; OMP receives a temporary
 agent directory with read-consistent credential/model database backups and
@@ -646,14 +646,14 @@ trip also deletes the linked native session and verifies automatic
 fresh-session recovery and repointing.
 Native session creation, read-only extraction, cross-harness injection, and
 returning resume paths are all exercised. Docker wrapper host execution and
-remote URL preservation are covered separately by the `ai-memory-cli`
+remote URL preservation are covered separately by the `sessionmunch-cli`
 packaging tests.
 
 Kiro is intentionally skipped in the scripted real-model loop. Its
 `--no-interactive` mode writes a different v1 SQLite store, while both managed
 adapters read the interactive v2/v3 journals. Logged-in Kiro acceptance
-therefore remains interactive. For v2, run `ai-memory run --new kiro-v2-accept
-kiro`, enter a unique prompt, quit normally, then run `ai-memory run
+therefore remains interactive. For v2, run `sessionmunch run --new kiro-v2-accept
+kiro`, enter a unique prompt, quit normally, then run `sessionmunch run
 --workstream kiro-v2-accept kiro-cli` and verify the same UUID resumes. For v3,
 repeat with a fresh workstream and `kiro --v3`; the second plain `kiro` launch
 must transparently add `--v3 --resume-id <sess_uuid>`. Search both workstream
@@ -676,13 +676,13 @@ Grok and Antigravity cross-harness fixtures exercise the same assertion helper
 without credentials or model calls.
 
 Set
-`AI_MEMORY_ACCEPTANCE_HARNESSES="command-code codex"` to select a
+`SESSIONMUNCH_ACCEPTANCE_HARNESSES="command-code codex"` to select a
 Command-Code-to-Codex-to-Command-Code round trip, or
-`AI_MEMORY_ACCEPTANCE_HARNESSES="antigravity codex"` to select an
+`SESSIONMUNCH_ACCEPTANCE_HARNESSES="antigravity codex"` to select an
 Antigravity-to-Codex-to-Antigravity round trip (`agy` and `antigravity-cli` are
-accepted aliases), `AI_MEMORY_ACCEPTANCE_DETERMINISTIC_ONLY=1` to skip model
+accepted aliases), `SESSIONMUNCH_ACCEPTANCE_DETERMINISTIC_ONLY=1` to skip model
 calls, or
-`AI_MEMORY_ACCEPTANCE_KEEP=1` to retain all temporary logs and data.
+`SESSIONMUNCH_ACCEPTANCE_KEEP=1` to retain all temporary logs and data.
 
 ## Running inside Herdr
 
@@ -691,14 +691,14 @@ agent runs in each pane. It identifies the agent from the pane's foreground
 process, falling back to matching the agent's own screen output against
 per-agent manifests.
 
-`ai-memory run` sits awkwardly between the two. The foreground process is the
+`sessionmunch run` sits awkwardly between the two. The foreground process is the
 wrapper and the agent is its child — one process group whose leader is
-`ai-memory` — so process detection does not find the agent. The pane resolves
+`sessionmunch` — so process detection does not find the agent. The pane resolves
 only once the harness paints a title Herdr recognizes, which can be well after
 launch and may never happen for a harness whose output matches no manifest.
 Until then Herdr's agents pane shows nothing for that pane.
 
-ai-memory does not try to fix this from the inside, deliberately. Herdr's hint
+sessionmunch does not try to fix this from the inside, deliberately. Herdr's hint
 for wrapper commands, `HERDR_AGENT`, is scoped to the pane's foreground
 process, and a process cannot amend its own environment after exec — so the
 wrapper has no way to describe itself to Herdr once it is already running.
@@ -710,7 +710,7 @@ Two things work today.
 **Name the agent on the command**, where Herdr does look:
 
 ```bash
-HERDR_AGENT=codex ai-memory run codex
+HERDR_AGENT=codex sessionmunch run codex
 ```
 
 **Or install Herdr's own agent integration**, which is the better answer:
@@ -728,8 +728,8 @@ which cannot reliably see `blocked` at all.
 
 These are separate mechanisms writing to separate files: Herdr's integration
 installs its own hook script (`~/.claude/hooks/herdr-agent-state.sh` for Claude
-Code, `~/.codex/herdr-agent-state.sh` for Codex), while ai-memory's lifecycle
-hooks live in the agent's own config. ai-memory's installer preserves foreign
-entries rather than replacing them, so re-running `ai-memory install-hooks`
+Code, `~/.codex/herdr-agent-state.sh` for Codex), while sessionmunch's lifecycle
+hooks live in the agent's own config. sessionmunch's installer preserves foreign
+entries rather than replacing them, so re-running `sessionmunch install-hooks`
 will not remove Herdr's. Back up the agent's config and diff it after
 installing either one if you want to be sure the other survived.

@@ -5,7 +5,7 @@ different people, so the multi-operator boundary can be exercised end to end
 rather than only in unit tests.
 
 ```sh
-docker build -f docker/Dockerfile -t ai-memory:multiuser-test .
+docker build -f docker/Dockerfile -t sessionmunch:multiuser-test .
 cd docker/multiuser-test && docker compose up -d && ./drive.sh
 ```
 
@@ -38,7 +38,7 @@ with 400, not silently resolve to one of the two identities).
 
 Section B (handoff ownership) is **skipped by default** so this harness can be
 used specifically for slot acceptance. Include it with
-`AI_MEMORY_TEST_HANDOFF_OWNERSHIP=1 ./drive.sh`.
+`SESSIONMUNCH_TEST_HANDOFF_OWNERSHIP=1 ./drive.sh`.
 
 `drive.sh` asserts against `/handoff?briefing=1`, not `memory_briefing`. The
 briefing tool returns paths and titles only, so asserting "no slot body leaked"
@@ -47,4 +47,4 @@ surface that carries slot **bodies** into an agent's context, which is the
 channel worth defending.
 
 The credentials in `config.toml` are throwaway strings for a loopback-only
-container. Generate real ones with `ai-memory generate-auth-token`.
+container. Generate real ones with `sessionmunch generate-auth-token`.

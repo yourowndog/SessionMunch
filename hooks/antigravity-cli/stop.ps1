@@ -1,4 +1,4 @@
-. "$PSScriptRoot\..\lib\ai-memory-hook.ps1"
-Invoke-AiMemoryHook -Event "stop" -Agent "antigravity-cli"
+. "$PSScriptRoot\..\lib\sessionmunch-hook.ps1"
+Invoke-SessionMunchHook -Event "stop" -Agent "antigravity-cli"
 [Console]::Out.WriteLine('{"decision":""}')
 exit 0

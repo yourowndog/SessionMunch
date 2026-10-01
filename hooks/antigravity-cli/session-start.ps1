@@ -1,3 +1,3 @@
-. "$PSScriptRoot\..\lib\ai-memory-hook.ps1"
-Invoke-AiMemoryHook -Event "session-start" -Agent "antigravity-cli" -FetchHandoff -AntigravityPreInvocationOutput
+. "$PSScriptRoot\..\lib\sessionmunch-hook.ps1"
+Invoke-SessionMunchHook -Event "session-start" -Agent "antigravity-cli" -FetchHandoff -AntigravityPreInvocationOutput
 exit 0

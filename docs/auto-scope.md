@@ -1,6 +1,6 @@
 # `[auto_scope]` isolation modes
 
-`ai-memory serve` publishes a process-shared "currently active project"
+`sessionmunch serve` publishes a process-shared "currently active project"
 pointer that MCP read tools consult when the caller omits `workspace` /
 `project`. The pointer is fed by foreground lifecycle hooks: session start,
 user prompt, and pre-tool events that resolve a `cwd` to a real project update
@@ -49,7 +49,7 @@ paths use find-only lookups so typos do not create empty scopes.
 
 ## Implementation contract
 
-Scope resolution is centralized in `ai_memory_store::ScopeResolver` and its
+Scope resolution is centralized in `sessionmunch_store::ScopeResolver` and its
 explicit helpers:
 
 - `lookup_existing_scope` for read, search, maintenance, retention, embed, and
@@ -76,12 +76,12 @@ max_entries = 4096        # hard cap; oldest insertions evicted first
 ```
 
 Environment-variable overrides follow the standard
-`AI_MEMORY_<SECTION>__<KEY>` shape:
+`SESSIONMUNCH_<SECTION>__<KEY>` shape:
 
 ```bash
-AI_MEMORY_AUTO_SCOPE__MODE=per_actor
-AI_MEMORY_AUTO_SCOPE__SESSION_TTL_SECS=7200
-AI_MEMORY_AUTO_SCOPE__MAX_ENTRIES=8192
+SESSIONMUNCH_AUTO_SCOPE__MODE=per_actor
+SESSIONMUNCH_AUTO_SCOPE__SESSION_TTL_SECS=7200
+SESSIONMUNCH_AUTO_SCOPE__MAX_ENTRIES=8192
 ```
 
 ## Where the actor identity comes from
@@ -99,19 +99,19 @@ AI_MEMORY_AUTO_SCOPE__MAX_ENTRIES=8192
 `X-Memory-Actor-Session-Id` means the agent-run session id from the
 lifecycle-hook payload. It is not an OIDC/Keycloak login session: the
 provider's JWT `sid` claim identifies an IdP browser/device session and
-must not be used as ai-memory's actor session key.
+must not be used as sessionmunch's actor session key.
 
 `per_session` reads from `session_id`; `per_actor` reads from both the
 qualified identity and `session_id`. In `per_actor`, a request that has identity but
 no session id can use that user's latest no-session slot instead of the
 process-wide single slot. A request that does carry a session id must
-match a hook-published keyed entry; if it does not, ai-memory falls back
+match a hook-published keyed entry; if it does not, sessionmunch falls back
 to the server's baked default rather than another session's latest
 project.
 
 The composite `(identity, session_id)` key namespaces only these active-project
 pointers. The durable `SessionId` stored for hook observations remains global:
-if another owner reuses an already-owned id, ai-memory drops that hook before it
+if another owner reuses an already-owned id, sessionmunch drops that hook before it
 can append observations or publish a pointer for the foreign actor.
 
 Owner and agent are what identify a session; scope is not. The same operator's
@@ -130,10 +130,10 @@ MCP client config files can only declare static URL/auth headers. Static
 configs cannot inject the current agent-run session id into every tool
 call.
 
-Claude Code can opt into ai-memory's session-aware stdio bridge:
+Claude Code can opt into sessionmunch's session-aware stdio bridge:
 
 ```bash
-ai-memory install-mcp --client claude-code --session-aware --apply
+sessionmunch install-mcp --client claude-code --session-aware --apply
 ```
 
 The bridge reads the `CLAUDE_CODE_SESSION_ID` that Claude supplies to its stdio
@@ -265,6 +265,6 @@ To restore the old behaviour exactly:
 mode = "single"
 ```
 
-or `AI_MEMORY_AUTO_SCOPE__MODE=single`. The effective mode is logged at
+or `SESSIONMUNCH_AUTO_SCOPE__MODE=single`. The effective mode is logged at
 startup (`active-project isolation mode mode=…`), which is the quickest way
 to confirm what a running server is using.

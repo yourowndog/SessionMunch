@@ -1,0 +1,27 @@
+post_install() {
+    cat <<'EOF'
+sessionmunch is installed.
+
+User service:
+  sessionmunch --data-dir "$HOME/.local/share/sessionmunch" --config "$HOME/.config/sessionmunch/config.toml" init
+  systemctl --user enable --now sessionmunch.service
+
+System service:
+  sudo systemd-sysusers /usr/lib/sysusers.d/sessionmunch.conf
+  sudo systemd-tmpfiles --create /usr/lib/tmpfiles.d/sessionmunch.conf
+  sudo -u sessionmunch sessionmunch --data-dir /var/lib/sessionmunch --config /etc/sessionmunch/config.toml init
+  sudo systemctl enable --now sessionmunch.service
+
+Configure LLM/API keys in ~/.config/sessionmunch/env for the user service, or
+/etc/sessionmunch/env for the system service. See docs/install.md for details.
+EOF
+}
+
+post_upgrade() {
+    cat <<'EOF'
+sessionmunch was upgraded.
+
+If you use lifecycle hooks, refresh staged hook scripts for each agent:
+  sessionmunch install-hooks --agent claude-code --apply
+EOF
+}
