@@ -1,0 +1,4 @@
+name: sessionmunch
+type: memory_provider
+version: "0.1.0"
+description: "SessionMunch MemoryProvider"

@@ -1,0 +1,12 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hermes-sessionmunch"
+version = "0.1.0"
+description = "SessionMunch MemoryProvider for Hermes Agent"
+dependencies = []
+
+[project.entry-points."hermes_agent.memory_providers"]
+sessionmunch = "hermes_sessionmunch.plugin:register"
