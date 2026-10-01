@@ -92,7 +92,7 @@ fn non_loopback_bind_requires_auth_or_explicit_override() {
 #[test]
 #[cfg(target_os = "linux")]
 fn local_only_mode_runtime_isolation_and_secret_redaction() {
-    use std::process::{Command, Stdio};
+    use std::process::Command;
     
     let bin = env!("CARGO_BIN_EXE_sessionmunch");
     let data_dir = tempfile::TempDir::new().expect("tempdir");
@@ -123,16 +123,22 @@ kill -INT $PID
 wait $PID || true
 "#, bin=bin, log_file=log_file.display(), search_file=search_file.display());
 
-    let status = Command::new("unshare")
+    let output = Command::new("unshare")
         .args(["-r", "-n", "sh", "-c", &script])
         .env("SESSIONMUNCH_DATA_DIR", data_dir.path())
         .env("RUST_LOG", "debug")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .status()
-        .expect("failed to spawn unshare");
+        .output()
+        .expect("failed to execute unshare");
 
-    assert!(status.success(), "isolated runtime test failed (outbound network access attempted or server crashed)");
+    if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let serve_log = fs::read_to_string(&log_file).unwrap_or_else(|_| "serve.log not found".into());
+        panic!(
+            "isolated runtime test failed (outbound network access attempted or server crashed)\nExit status: {}\n--- unshare stdout ---\n{}\n--- unshare stderr ---\n{}\n--- serve.log ---\n{}",
+            output.status, stdout, stderr, serve_log
+        );
+    }
 
     let logs = fs::read_to_string(&log_file).expect("read serve log");
     assert!(logs.contains("MCP HTTP server ready"), "Server must have started");
