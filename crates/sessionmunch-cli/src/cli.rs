@@ -213,6 +213,11 @@ pub enum Command {
     /// the root bearer token and `[auth].token_pepper`.
     #[command(name = "api-key")]
     ApiKey(ApiKeyArgs),
+    /// Detect and import a legacy ai-memory installation into SessionMunch.
+    /// Read-only detection by default; use `--apply` to copy pages.
+    /// Source files are never modified — integrity is verified via SHA-256.
+    #[command(name = "legacy-import")]
+    LegacyImport(LegacyImportArgs),
     /// Print a shell-completion script to stdout. Generated from this
     /// binary's own command tree, so it never drifts from the real CLI
     /// surface. See `docs/shell-completions.md` for install paths.
@@ -1244,6 +1249,34 @@ pub struct GenerateAuthTokenArgs {
     /// (256 bits) is plenty for any homelab threat model.
     #[arg(long, default_value_t = 32)]
     pub bytes: usize,
+}
+
+/// Arguments for `legacy-import`.
+#[derive(Debug, Args)]
+pub struct LegacyImportArgs {
+    /// Source legacy ai-memory data directory. Auto-detected from
+    /// `AI_MEMORY_DATA_DIR` env var or default paths when omitted.
+    #[arg(long)]
+    pub path: Option<PathBuf>,
+    /// Workspace name for the imported pages. Defaults to the one
+    /// declared in the source, or `"default"`.
+    #[arg(long)]
+    pub workspace: Option<String>,
+    /// Project name for the imported pages. Defaults to the one
+    /// declared in the source, or the source dir's basename.
+    #[arg(long)]
+    pub project: Option<String>,
+    /// Actually copy pages. Without this flag the command only
+    /// detects and prints an import plan (dry-run).
+    #[arg(long)]
+    pub apply: bool,
+    /// Path for the import manifest.
+    #[arg(long)]
+    pub manifest_out: Option<PathBuf>,
+    /// Create the destination workspace/project directory if it does
+    /// not already exist.
+    #[arg(long)]
+    pub create_destination: bool,
 }
 
 /// Arguments for `init`.

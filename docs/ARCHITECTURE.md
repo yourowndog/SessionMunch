@@ -462,6 +462,7 @@ wiki browser and JSON APIs stay behind the route class above.
 
 ```
 init                 status               run
+legacy-import
 show                 continue             resume
 workstreams          rename-workstream    workstream-search
 audit-contamination  search               read-page

@@ -36,6 +36,7 @@ pub mod install_hooks;
 pub mod install_instructions;
 pub mod install_mcp;
 pub mod install_skills;
+pub mod legacy_import;
 pub mod lint;
 pub mod llm_test;
 pub mod mcp_bridge;
