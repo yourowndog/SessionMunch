@@ -1,54 +1,42 @@
 # SessionMunch Quickstart
 
-Get SessionMunch up and running and perform your first useful retrieval in under two minutes.
+<p align="center">
+  <img alt="SessionMunch — Stop pasting handoff prompts" src="sessionmunch-hero.webp" width="1000">
+</p>
 
-SessionMunch gives AI coding agents persistent, shared memory across sessions, tools, and machines. Whether you switch between Claude Code, OpenAI Codex, or Hermes Agent, SessionMunch preserves decisions, failed attempts, and project context without manual note-taking.
+SessionMunch gives AI coding agents **one persistent, shared project memory** across sessions, tools, and machines. Claude Code can learn something today and Codex, Hermes, OpenCode, or another MCP client can retrieve it tomorrow.
+
+You do not need to understand vector databases to use it. You also do not need a generative LLM. SessionMunch runs locally with ordinary full-text/entity/graph retrieval and best-effort local embeddings for search-by-meaning; a generative summarizer is optional.
+
+The goal is pleasantly boring: **stop pasting handoff prompts and let the next agent ask the project memory instead.**
 
 ---
 
 ## 1. Prerequisites
 
 - **OS:** Linux, macOS, or Windows (WSL2 recommended).
-- **Runtime:** Native binary (recommended for Linux/macOS) or Docker/Podman.
-- **Hardware:** Works locally with zero API keys using fast in-process FTS5 search (and optional local embeddings via ONNX/nomic).
+- **Runtime:** Rust toolchain for the current source-build release candidate. Native archives and containers arrive with the first tagged release.
+- **Hardware:** Works locally with zero API keys using FTS5/entity/graph retrieval; Nomic Embed Text v1.5 can add local semantic search in-process.
 
 ---
 
 ## 2. Installation & Server Start
 
-### Option A: Arch Linux (AUR)
+SessionMunch is currently a **v0.1.0 release candidate**. Until the first public tag is cut, install from source rather than pretending an AUR package, Docker image, or prebuilt archive has already materialized from the future.
 
 ```bash
-yay -S sessionmunch-bin   # Prebuilt binary + systemd units
+git clone https://github.com/yourowndog/SessionMunch.git
+cd SessionMunch
+cargo build --release --workspace
+install -Dm755 target/release/sessionmunch ~/.local/bin/sessionmunch
 
-mkdir -p ~/.config/sessionmunch ~/.local/share/sessionmunch
-sessionmunch --data-dir ~/.local/share/sessionmunch \
-  --config ~/.config/sessionmunch/config.toml init
-
-# Start the background service (optional process supervision)
-systemctl --user enable --now sessionmunch.service
+sessionmunch init
+sessionmunch serve --transport http --bind 127.0.0.1:49374
 ```
 
-### Option B: Prebuilt Binary or Shell Wrapper (Linux / macOS)
+The repository already contains release machinery for native archives, Docker, systemd, and AUR packaging. Those become the easier install paths once `v0.1.0` is actually published.
 
-Download the latest release binary for your platform and place it on your `PATH` (e.g. `~/.local/bin/sessionmunch`). Then start the server on loopback:
-
-```bash
-sessionmunch --data-dir ~/.local/share/sessionmunch init
-sessionmunch serve --data-dir ~/.local/share/sessionmunch
-```
-
-### Option C: Docker Container
-
-```bash
-docker run -d --name sessionmunch \
-  --restart unless-stopped \
-  -p 127.0.0.1:49374:49374 \
-  -v sessionmunch-data:/data \
-  docker.io/yourowndog/sessionmunch:latest
-```
-
-By default, SessionMunch binds strictly to `127.0.0.1:49374` without authentication, ensuring loopback safety on single-user workstations.
+By default, SessionMunch binds strictly to `127.0.0.1:49374`, keeping the normal single-user setup on loopback.
 
 ---
 
