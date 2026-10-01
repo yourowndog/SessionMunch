@@ -119,9 +119,8 @@ Use this when developing sessionmunch itself. Requires Rust 1.95
 extra system libraries are needed.
 
 ```bash
-# Source checkout: the fork carries the SessionMunch line until the v0.1
-# release fixes the canonical repo URL (t_d85c39f4).
-git clone https://github.com/yourowndog/ai-memory sessionmunch
+# Source checkout for hacking on sessionmunch itself.
+git clone https://github.com/yourowndog/SessionMunch sessionmunch
 cd sessionmunch
 cargo build --release --workspace
 ./target/release/sessionmunch init

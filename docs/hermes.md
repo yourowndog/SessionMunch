@@ -1,6 +1,6 @@
 # Hermes Agent Integration: First-Class MemoryProvider
 
-SessionMunch features a native, flagship integration with [Hermes Agent](https://github.com/NousResearch/hermes-agent) via the `adapters/ai-memory` plugin.
+SessionMunch features a native, flagship integration with [Hermes Agent](https://github.com/NousResearch/hermes-agent) via the companion `sessionmunch` MemoryProvider plugin.
 
 Instead of treating Hermes as merely an external MCP client, SessionMunch plugs directly into Hermes's native `MemoryProvider` architecture, enabling cross-session memory consolidation, session checkpointing, and automatic scope management.
 
@@ -9,7 +9,7 @@ Instead of treating Hermes as merely an external MCP client, SessionMunch plugs 
 ## Architectural Overview
 
 ```text
-[Hermes Session] ──▶ [AiMemoryProvider] ──▶ [SessionMunch REST/MCP]
+[Hermes Session] ──▶ [SessionMunchProvider] ──▶ [SessionMunch REST/MCP]
          │                      │                          │
          ▼                      ▼                          ▼
 [Agent Turn/Tools]     [Context Injection]       [Git Markdown Wiki]
@@ -29,7 +29,7 @@ To enable SessionMunch as your primary memory provider in Hermes Agent:
 
 ```yaml
 memory:
-  provider: ai-memory
+  provider: sessionmunch
   endpoint: http://127.0.0.1:49374
   workspace: default
   project: hermes

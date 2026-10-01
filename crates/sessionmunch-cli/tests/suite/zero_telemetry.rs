@@ -67,3 +67,87 @@ fn default_configuration_is_strictly_local_only() {
         "Reranker must be disabled by default"
     );
 }
+
+#[test]
+fn non_loopback_bind_requires_auth_or_explicit_override() {
+    let bin = env!("CARGO_BIN_EXE_sessionmunch");
+    let data_dir = tempfile::TempDir::new().expect("tempdir");
+
+    let output = std::process::Command::new(bin)
+        .args(["serve", "--transport", "http", "--bind", "0.0.0.0:0"])
+        .env("SESSIONMUNCH_DATA_DIR", data_dir.path())
+        .env_remove("SESSIONMUNCH_AUTH_TOKEN")
+        .output()
+        .expect("failed to execute serve");
+
+    assert!(!output.status.success(), "must refuse to start on non-loopback without auth");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("refusing unauthenticated plain HTTP on non-loopback address"),
+        "must print the explicit refusal message, got: {stderr}"
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn local_only_mode_runtime_isolation_and_secret_redaction() {
+    use std::process::{Command, Stdio};
+    
+    let bin = env!("CARGO_BIN_EXE_sessionmunch");
+    let data_dir = tempfile::TempDir::new().expect("tempdir");
+    let log_file = data_dir.path().join("serve.log");
+    let search_file = data_dir.path().join("search.log");
+
+    let script = format!(r#"
+set -e
+ip link set lo up
+
+"{bin}" serve --transport http > "{log_file}" 2>&1 &
+PID=$!
+
+while ! grep -q "MCP HTTP server ready" "{log_file}"; do
+    sleep 0.1
+    if ! kill -0 $PID 2>/dev/null; then
+        echo "Server died unexpectedly"
+        cat "{log_file}"
+        exit 1
+    fi
+done
+
+"{bin}" write-page --workspace default --project scratch --tier episodic --path notes/test.md --body "My secret is OPENAI_API_KEY=sk-12345678901234567890"
+"{bin}" search --workspace default --project scratch "secret" > "{search_file}"
+"{bin}" status
+
+kill -INT $PID
+wait $PID || true
+"#, bin=bin, log_file=log_file.display(), search_file=search_file.display());
+
+    let status = Command::new("unshare")
+        .args(["-r", "-n", "sh", "-c", &script])
+        .env("SESSIONMUNCH_DATA_DIR", data_dir.path())
+        .env("RUST_LOG", "debug")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .status()
+        .expect("failed to spawn unshare");
+
+    assert!(status.success(), "isolated runtime test failed (outbound network access attempted or server crashed)");
+
+    let logs = fs::read_to_string(&log_file).expect("read serve log");
+    assert!(logs.contains("MCP HTTP server ready"), "Server must have started");
+    assert!(
+        !logs.contains("sk-12345678901234567890"),
+        "Secret must be redacted from logs"
+    );
+
+    let search_output = fs::read_to_string(&search_file).expect("read search output");
+    assert!(
+        search_output.contains("[REDACTED:env_secret]"),
+        "Secret must be redacted in persisted memory rows"
+    );
+    assert!(
+        !search_output.contains("sk-12345678901234567890"),
+        "Secret must not be visible in search output"
+    );
+}

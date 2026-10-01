@@ -39,9 +39,6 @@ const MANIFEST_FILE: &str = ".legacy-import-manifest.json";
 pub async fn run(config: &Config, args: LegacyImportArgs) -> Result<()> {
     let source_dir = resolve_source_dir(&args)?;
     let dest_data_dir = &config.data_dir;
-    let workspace = args.workspace.clone().unwrap_or_else(|| DEFAULT_WORKSPACE.into());
-    let project = args.project.clone().unwrap_or_else(||
-        dest_data_dir.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or("imported".to_string()));
 
     if !source_dir.is_dir() {
         bail!("source path is not a directory: {}", source_dir.display());
@@ -54,12 +51,18 @@ pub async fn run(config: &Config, args: LegacyImportArgs) -> Result<()> {
         return Ok(());
     }
 
+    let workspace = args.workspace.clone().unwrap_or_else(||
+        detection.config_workspace.clone().unwrap_or_else(|| DEFAULT_WORKSPACE.into()));
+    let project = args.project.clone().unwrap_or_else(||
+        detection.config_project.clone().unwrap_or_else(||
+            source_dir.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or("imported".to_string())));
+
     let dest_wiki = dest_data_dir.join("wiki").join(&workspace).join(&project);
     let mut manifest_path = source_dir.join(MANIFEST_FILE);
     if let Some(p) = &args.manifest_out { manifest_path = p.clone(); }
 
     let entries = plan_import(&source_dir, &detection, args.apply)?;
-    if entries.is_empty() {
+    if entries.is_empty() || entries.iter().all(|e| e.status != PageStatus::Planned) {
         println!("all pages already imported and verified; nothing to do");
         return Ok(());
     }
@@ -70,8 +73,14 @@ pub async fn run(config: &Config, args: LegacyImportArgs) -> Result<()> {
     }
 
     println!("importing {} pages to {}", entries.len(), dest_wiki.display());
-    fs::create_dir_all(&dest_wiki)
-        .with_context(|| format!("create destination {}", dest_wiki.display()))?;
+    if dest_wiki.is_dir() {
+        // exists — nothing to create
+    } else if args.create_destination {
+        fs::create_dir_all(&dest_wiki)
+            .with_context(|| format!("create destination {}", dest_wiki.display()))?;
+    } else {
+        bail!("destination {} does not exist; pass --create-destination to auto-create it", dest_wiki.display());
+    }
 
     let mut manifest = ImportManifest {
         import_version: IMPORT_VERSION.into(),
@@ -96,6 +105,11 @@ pub async fn run(config: &Config, args: LegacyImportArgs) -> Result<()> {
         }
         let content = fs::read(&source_abs)
             .with_context(|| format!("read {}", source_abs.display()))?;
+        // Ensure parent directory of destination exists
+        if let Some(parent) = dest_abs.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("create parent dir {}", parent.display()))?;
+        }
         fs::write(&dest_abs, &content)
             .with_context(|| format!("write {}", dest_abs.display()))?;
         let post_hash = file_sha256(&dest_abs)?;
@@ -133,6 +147,7 @@ struct LegacyDetection {
     wiki_pages: Vec<PathBuf>,
     marker_name: Option<String>,
     config_workspace: Option<String>,
+    config_project: Option<String>,
 }
 
 fn detect_legacy_installation(path: &Path) -> Result<LegacyDetection> {
@@ -140,16 +155,60 @@ fn detect_legacy_installation(path: &Path) -> Result<LegacyDetection> {
         path: path.to_path_buf(),
         has_wiki: false, has_config: false, has_db: false, has_marker: false,
         wiki_pages: Vec::new(), marker_name: None, config_workspace: None,
+        config_project: None,
     };
     let cp = path.join("config.toml");
     if cp.is_file() {
         d.has_config = true;
+        // Try flat format first: workspace = "name"
         for line in fs::read_to_string(&cp).ok().unwrap_or("".to_string()).lines() {
             let t = line.trim_start();
             let Some(r) = t.strip_prefix("workspace") else { continue; };
             let Some(r) = r.trim_start().strip_prefix('=') else { continue; };
             let Some(q) = r.trim_start().strip_prefix('"') else { continue; };
             if let Some(end) = q.find('"') { d.config_workspace = Some(q[..end].to_string()); break; }
+        }
+        // Fallback: TOML section format [workspace]\nname = "..."
+        if d.config_workspace.is_none() {
+            let text = fs::read_to_string(&cp).ok().unwrap_or("".to_string());
+            let mut in_ws_section = false;
+            for line in text.lines() {
+                let t = line.trim();
+                if t == "[workspace]" { in_ws_section = true; continue; }
+                if t.starts_with('[') && t != "[workspace]" { in_ws_section = false; continue; }
+                if in_ws_section {
+                    let Some(r) = t.strip_prefix("name") else { continue; };
+                    let Some(r) = r.trim_start().strip_prefix('=') else { continue; };
+                    let Some(q) = r.trim_start().strip_prefix('"') else { continue; };
+                    if let Some(end) = q.find('"') { d.config_workspace = Some(q[..end].to_string()); break; }
+                }
+            }
+        }
+        // Try flat format for project: project = "name"
+        if d.config_project.is_none() {
+            for line in fs::read_to_string(&cp).ok().unwrap_or("".to_string()).lines() {
+                let t = line.trim_start();
+                let Some(r) = t.strip_prefix("project") else { continue; };
+                let Some(r) = r.trim_start().strip_prefix('=') else { continue; };
+                let Some(q) = r.trim_start().strip_prefix('"') else { continue; };
+                if let Some(end) = q.find('"') { d.config_project = Some(q[..end].to_string()); break; }
+            }
+        }
+        // Fallback: TOML section format [project]\nname = "..."
+        if d.config_project.is_none() {
+            let text = fs::read_to_string(&cp).ok().unwrap_or("".to_string());
+            let mut in_pr_section = false;
+            for line in text.lines() {
+                let t = line.trim();
+                if t == "[project]" { in_pr_section = true; continue; }
+                if t.starts_with('[') && t != "[project]" { in_pr_section = false; continue; }
+                if in_pr_section {
+                    let Some(r) = t.strip_prefix("name") else { continue; };
+                    let Some(r) = r.trim_start().strip_prefix('=') else { continue; };
+                    let Some(q) = r.trim_start().strip_prefix('"') else { continue; };
+                    if let Some(end) = q.find('"') { d.config_project = Some(q[..end].to_string()); break; }
+                }
+            }
         }
     }
     if path.join(".sessionmunch.toml").is_file() {
@@ -186,6 +245,7 @@ fn print_detection(d: &LegacyDetection) {
     println!("  path: {}", d.path.display());
     println!("  has config.toml: {}", d.has_config);
     if let Some(ws) = &d.config_workspace { println!("  config workspace: {}", ws); }
+    if let Some(pr) = &d.config_project { println!("  config project: {}", pr); }
     println!("  has marker: {}", d.has_marker);
     if let Some(m) = &d.marker_name { println!("  marker: {}", m); }
     println!("  has wiki: {}", d.has_wiki);

@@ -11,6 +11,7 @@ mod branding;
 mod completions;
 mod hook_drain;
 mod hook_payload;
+mod legacy_import_e2e;
 mod marker_scope;
 mod packaging;
 mod removal;

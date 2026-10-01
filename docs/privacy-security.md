@@ -24,10 +24,12 @@ Before observations or markdown files are committed to disk, SessionMunch passes
 
 ## 3. Remote Provider Egress Disclosure
 
-The **only** outbound connections ever initiated by SessionMunch are explicitly configured remote model providers:
+The **only** outbound connections initiated by SessionMunch occur when you explicitly configure optional remote operations. These operations leave the machine and are **not** local/private:
 - Remote embedding calls (`embedding_provider = "openai" | "voyage" | "google" | "openai-compat"`)
 - Remote summarization calls (`summarizer_provider = "anthropic" | "openai" | "google" | "openai-compat"`)
 - Remote LLM reranking (`SESSIONMUNCH_RERANKER=llm`)
+- JEV (Justification/Evaluation/Verification) webhook calls
+- API integrations (e.g. Jira/GitHub issue sync hooks)
 
 When a remote provider is configured, payloads travel directly and exclusively over encrypted HTTPS to that provider's configured endpoint. No secondary telemetry or payload mirror exists.
 

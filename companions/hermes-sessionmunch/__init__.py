@@ -14,7 +14,7 @@ daemon so a stuck HTTP call never blocks interpreter exit.
 """
 
 from __future__ import annotations
-from hermes_sessionmunch import schema, scope
+from . import schema, scope
 
 import hashlib
 import json
@@ -37,16 +37,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # Default sessionmunch MCP server address.
-#
-# NOTE (2026-09-25 triage, re-verified 2026-09-30 against live Weakling):
-# this used to default to a local loopback address, which pointed at whatever
-# stale local sessionmunch binary (if any) happened to be running on the host --
-# never correct for a shared deployment. The single enabled sessionmunch.service
-# (v2.2.1, retrieval-section-index) is Weakling's Tailscale-only listener;
-# every CLI-agent node reaches that one shared instance, not a per-host copy.
-# Confirm this address against cluster-specs before relying on it long-term --
-# addresses on a Tailscale mesh are current operational state, not a stable
-# contract.
 _DEFAULT_MCP_URL = os.environ.get("SESSIONMUNCH_MCP_URL", "http://127.0.0.1:49374/mcp")
 
 # Config file basename written to $HERMES_HOME.
@@ -628,7 +618,7 @@ class SessionMunchProvider(MemoryProvider):
         return [
             {
                 "key": "mcp_url",
-                "description": "sessionmunch MCP server URL (default: http://100.109.145.90:49374/mcp)",
+                "description": "sessionmunch MCP server URL (default: http://127.0.0.1:49374/mcp)",
                 "default": _DEFAULT_MCP_URL,
                 "env_var": "SESSIONMUNCH_MCP_URL",
             },

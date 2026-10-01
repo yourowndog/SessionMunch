@@ -32,6 +32,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   separate card and `AI_MEMORY_RERANKER` still accepts only `llm`
   (#t_c51f1a51).
 
+### Fixed
+- `sessionmunch legacy-import --create-destination` flag now correctly gated:
+  previously it was a no-op (destination always created). Without the flag and
+  with a missing destination the command now bails with a clear error, working
+  as documented. (#t_83378b5e)
+- Legacy config workspace/project detection now handles both flat
+  (`workspace = "name"`) and TOML section (`[workspace]\nname = "name"`)
+  formats. Without this the fixture's config workspace was silently ignored.
+  (#t_83378b5e)
+- Nested subdirectories in legacy wiki pages (e.g. `notes/team.md`) are now
+  created during import. Previously only the project root was ensured; pages
+  in subdirectories failed silently. (#t_83378b5e)
+- Re-import idempotency check now correctly detects when all pages are already
+  copied (manifest-based), printing "nothing to do" instead of re-running the
+  full cycle. (#t_83378b5e)
+- `docs/legacy-import.md` rewritten to document the `sessionmunch legacy-import`
+  command (detection, plan, import with --apply, integrity checks, rollback,
+  resume). Previously it only covered the companion ai-memory-importer crate.
+  (#t_83378b5e)
+
 ## [2.2.1] - 2026-09-12
 
 ### Fixed
