@@ -65,6 +65,23 @@ jobs:
       - name: Use macOS PEM bundle
         if: matrix.os == 'macos-latest'
         run: echo "SSL_CERT_FILE=/etc/ssl/cert.pem" >> "$GITHUB_ENV"
+      # Linux: install uidmap so `unshare -r -n` works for the
+      # zero-telemetry isolation test.  `unshare -r` (--map-root-user)
+      # requires newuidmap/newgidmap setuid helpers with /etc/subuid entries
+      # for the runner user — neither is present on default GH runners.
+      # Without this step the zero_telemetry isolation test panics because
+      # `-r` cannot map the runner to root inside the namespace (and lo
+      # needs root to bring up, which the test needs for loopback traffic).
+      - name: Enable unshare -r -n for zero-telemetry test
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq uidmap
+          CURRENT_USER=$(whoami)
+          grep -q "^${CURRENT_USER}:" /etc/subuid 2>/dev/null \
+            || echo "${CURRENT_USER}:100000:65536" | sudo tee -a /etc/subuid
+          grep -q "^${CURRENT_USER}:" /etc/subgid 2>/dev/null \
+            || echo "${CURRENT_USER}:100000:65536" | sudo tee -a /etc/subgid
       # Linux regenerates the web stylesheet from source, so a stale vendored
       # static/tailwind.css fails here instead of shipping.
       - name: Regenerate the Tailwind bundle
