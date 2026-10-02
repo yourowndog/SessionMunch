@@ -125,6 +125,110 @@ async fn search_passages_lexical_only_returns_results() {
     }
 }
 
+/// Regression: BM25 ordering from `page_passages_fts.rank` must survive into
+/// `lexical_rank` and therefore into RRF fusion. `search_passages_lexical`
+/// previously re-sorted hits by passage UUID after the SQL `ORDER BY ... rank`,
+/// so `lexical_rank` (and the lexical RRF score derived from it) reflected UUID
+/// order instead of relevance. This test creates passages with clearly
+/// distinct BM25 scores, reads the raw lexical query to get the true relevance
+/// order, and asserts the hybrid lexical-only result comes back in that same
+/// order. It fails when passage-UUID ordering is reintroduced.
+#[tokio::test]
+async fn lexical_only_hits_keep_bm25_rank_order() {
+    let (_tmp, store) = make_store();
+    let (ws, proj) = make_scope(&store).await;
+
+    // Several passages with strictly decreasing "plum" term frequency, so BM25
+    // gives each a distinct, monotonically-related score (more repetitions =>
+    // lower FTS rank => higher relevance). With this many scored passages, the
+    // deterministic content-hash passage-UUID order coincides with the BM25
+    // order with probability ~1/(6!) — so any re-sort by passage id (the bug
+    // under test) flips this assertion with near-certainty.
+    for (i, count) in [70_u8, 40_u8, 22_u8, 11_u8, 5_u8, 2_u8]
+        .into_iter()
+        .enumerate()
+    {
+        let body: String = format!(
+            "# Fruits\n\n{}",
+            "plum ".repeat(count as usize) + "harvest."
+        );
+        let path: String = format!("notes/plum-{}.md", i);
+        store
+            .writer
+            .upsert_page(make_page(ws, proj, &path, &body))
+            .await
+            .unwrap();
+    }
+    // A page with no "plum" must never surface for this query.
+    store
+        .writer
+        .upsert_page(make_page(
+            ws,
+            proj,
+            "notes/botanics.md",
+            "# Botanics\n\nZephyr quinoa nebula.",
+        ))
+        .await
+        .unwrap();
+
+    // Ground truth: the raw lexical query's BM25 order (rank ascending = best
+    // first, ties broken by passage id — mirroring the fixed query).
+    let conn = Connection::open(store.db_path()).unwrap();
+    let sql = "SELECT p.id \
+         FROM page_passages_fts \
+         JOIN page_passages p ON p.rowid = page_passages_fts.rowid \
+         JOIN pages ON pages.id = p.page_id \
+         WHERE page_passages_fts MATCH ?1 \
+           AND p.workspace_id = ?2 \
+           AND p.project_id = ?3 \
+         ORDER BY page_passages_fts.rank ASC, p.id ASC"
+        .to_string();
+    let mut stmt = conn.prepare(&sql).unwrap();
+    let rows = stmt
+        .query_map(
+            rusqlite::params!["plum", ws.as_bytes(), proj.as_bytes()],
+            |row| {
+                let id: Vec<u8> = row.get(0).unwrap();
+                Ok(id)
+            },
+        )
+        .unwrap();
+    let mut ground_truth: Vec<Vec<u8>> = Vec::new();
+    for row in rows {
+        ground_truth.push(row.unwrap());
+    }
+
+    assert!(
+        ground_truth.len() >= 2,
+        "test needs at least two matching passages to prove ordering"
+    );
+
+    let hits = store
+        .reader
+        .search_passages_hybrid(
+            ws,
+            proj,
+            "plum".to_string(),
+            None,
+            "test".to_string(),
+            "model".to_string(),
+            768,
+            10,
+        )
+        .await
+        .unwrap();
+    let rank_order: Vec<Vec<u8>> = hits
+        .iter()
+        .map(|h| h.passage_id.as_bytes().to_vec())
+        .collect::<Vec<Vec<u8>>>();
+    assert_eq!(
+        rank_order, ground_truth,
+        "lexical-only hit order must match raw BM25 rank order; the top hit \
+         must be the strongest 'plum' passage, not whichever passage id sorts \
+         first"
+    );
+}
+
 #[tokio::test]
 async fn search_passages_hybrid_empty_query_returns_empty() {
     let (_tmp, store) = make_store();

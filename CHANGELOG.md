@@ -36,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `rustls` to >=0.23.45 (and `rustls-webpki` to 0.103.15) across the
   workspace and the companion importer, resolving the RUSTSEC-2026-0285
   advisory. No advisory ignore added. (#t_93c1c58c)
+- Lexical passage ranking now preserves BM25 relevance order into
+  `lexical_rank` and RRF fusion. `search_passages_lexical` re-sorted hits by
+  passage UUID after the SQL `ORDER BY page_passages_fts.rank`, so the
+  top-ranked lexical passage was whichever id sorted first rather than the
+  strongest BM25 match (regression-covered). (#t_cfa1bfde)
 - `sessionmunch legacy-import --create-destination` flag now correctly gated:
   previously it was a no-op (destination always created). Without the flag and
   with a missing destination the command now bails with a clear error, working

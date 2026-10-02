@@ -2042,7 +2042,7 @@ impl ReaderPool {
                  WHERE page_passages_fts MATCH ?1 \
                    AND page_passages.workspace_id = ?2 \
                    AND page_passages.project_id = ?3 \
-                 ORDER BY page_passages_fts.rank \
+                 ORDER BY page_passages_fts.rank, page_passages.id \
                  LIMIT ?4"
                 .to_string();
             let mut stmt = conn.prepare(&sql)?;
@@ -2104,7 +2104,10 @@ impl ReaderPool {
                     rrf_score: None,
                 });
             }
-            hits.sort_by(|a, b| a.passage_id.as_bytes().cmp(b.passage_id.as_bytes()));
+            // SQL rows already arrive in BM25 order (`page_passages_fts.rank`
+            // ascending, best first) with a deterministic UUID tie-break —
+            // do NOT re-sort by passage id here, which would overwrite the
+            // BM25 ordering and corrupt the `lexical_rank` fed into RRF.
             for (i, hit) in hits.iter_mut().enumerate() {
                 hit.lexical_rank = Some(i + 1);
             }
