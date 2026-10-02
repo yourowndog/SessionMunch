@@ -34,12 +34,13 @@ fn create_legacy_fixture(root: &Path) -> PathBuf {
     std::fs::create_dir_all(&dd).unwrap();
 
     // Config file
-    let config = "\n[workspace]\nname = \"fw\"\n\n[project]\nname = \"fp\"\n\n[llm]\nprovider = \"none\"\n";
-    std::fs::write(&dd.join("config.toml"), config.as_bytes()).unwrap();
+    let config =
+        "\n[workspace]\nname = \"fw\"\n\n[project]\nname = \"fp\"\n\n[llm]\nprovider = \"none\"\n";
+    std::fs::write(dd.join("config.toml"), config.as_bytes()).unwrap();
 
     // Marker
     std::fs::write(
-        &dd.join(".ai-memory.toml"),
+        dd.join(".ai-memory.toml"),
         "workspace = \"fw\"\nproject = \"fp\"\n".as_bytes(),
     )
     .unwrap();
@@ -47,16 +48,32 @@ fn create_legacy_fixture(root: &Path) -> PathBuf {
     // Wiki pages under wiki/fw/fp/
     let wd = dd.join("wiki").join("fw").join("fp");
     std::fs::create_dir_all(&wd).unwrap();
-    std::fs::write(&wd.join("architecture.md"), "# Architecture\n\nLegacy design notes.\n".as_bytes()).unwrap();
-    std::fs::write(&wd.join("decisions.md"), "# Decisions\n\nADR-001: Use SQLite.\n".as_bytes()).unwrap();
+    std::fs::write(
+        wd.join("architecture.md"),
+        "# Architecture\n\nLegacy design notes.\n".as_bytes(),
+    )
+    .unwrap();
+    std::fs::write(
+        wd.join("decisions.md"),
+        "# Decisions\n\nADR-001: Use SQLite.\n".as_bytes(),
+    )
+    .unwrap();
     let notes_dir = wd.join("notes");
     std::fs::create_dir_all(&notes_dir).unwrap();
-    std::fs::write(&notes_dir.join("team.md"), "# Team\n\nAlice, Bob.\n".as_bytes()).unwrap();
+    std::fs::write(
+        notes_dir.join("team.md"),
+        "# Team\n\nAlice, Bob.\n".as_bytes(),
+    )
+    .unwrap();
 
     // Nested subdirectory
     let nested = wd.join("deep").join("sub");
     std::fs::create_dir_all(&nested).unwrap();
-    std::fs::write(&nested.join("detail.md"), "# Detail\n\nDeep page.\n".as_bytes()).unwrap();
+    std::fs::write(
+        nested.join("detail.md"),
+        "# Detail\n\nDeep page.\n".as_bytes(),
+    )
+    .unwrap();
 
     dd
 }
@@ -66,7 +83,10 @@ fn walk_rel(root: &Path) -> Vec<String> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display())).flatten() {
+        for entry in std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display()))
+            .flatten()
+        {
             let p = entry.path();
             if p.is_dir() {
                 stack.push(p);
@@ -122,8 +142,14 @@ fn detection_is_read_only() {
         "detection must exit 0, stderr: {}",
         String::from_utf8_lossy(&output.stderr),
     );
-    assert!(stdout.contains("ai-memory detection"), "detection header missing");
-    assert!(stdout.contains("wiki pages: 4"), "should find 4 wiki pages, got: {stdout:?}");
+    assert!(
+        stdout.contains("ai-memory detection"),
+        "detection header missing"
+    );
+    assert!(
+        stdout.contains("wiki pages: 4"),
+        "should find 4 wiki pages, got: {stdout:?}"
+    );
 
     // Prove no files written by detection
     for (ph, r) in pre_hashes {
@@ -146,7 +172,11 @@ fn full_import_cycle_with_integrity_check() {
         .arg("init")
         .output()
         .expect("init should succeed");
-    assert!(init.status.success(), "init failed: {}", String::from_utf8_lossy(&init.stderr));
+    assert!(
+        init.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
 
     // Pre-hashes of source files
     let src_files = walk_rel(&fixture)
@@ -167,7 +197,10 @@ fn full_import_cycle_with_integrity_check() {
         .output()
         .expect("dry-run should succeed");
     let dry_stdout = String::from_utf8_lossy(&dry.stdout);
-    assert!(dry_stdout.contains("dry-run"), "dry-run should say 'dry-run': {dry_stdout:?}");
+    assert!(
+        dry_stdout.contains("dry-run"),
+        "dry-run should say 'dry-run': {dry_stdout:?}"
+    );
     assert!(
         !data.join("wiki").join("fw").join("fp").exists(),
         "dry-run must not create import destination: {}",
@@ -274,7 +307,10 @@ fn fresh_install_creates_no_legacy_compat_dirs() {
 
     // Also check that no .ai-memory.toml marker was created
     let old_marker = data.join(".ai-memory.toml");
-    assert!(!old_marker.exists(), "fresh install must not create .ai-memory.toml");
+    assert!(
+        !old_marker.exists(),
+        "fresh install must not create .ai-memory.toml"
+    );
 }
 
 #[test]
@@ -350,16 +386,24 @@ fn interrupted_import_is_resumable() {
         .output()
         .expect("first import should succeed");
     let first_stdout = String::from_utf8_lossy(&first.stdout);
-    assert!(first_stdout.contains("import complete"), "first import: {first_stdout:?}");
+    assert!(
+        first_stdout.contains("import complete"),
+        "first import: {first_stdout:?}"
+    );
 
     // Verify all files are in place
     let wiki_root = data.join("wiki").join("fw").join("fp");
     let dest_files = walk_rel(&wiki_root);
-    assert_eq!(dest_files.len(), 4, "all 4 pages should be present: {:?}", dest_files);
+    assert_eq!(
+        dest_files.len(),
+        4,
+        "all 4 pages should be present: {:?}",
+        dest_files
+    );
 
     // Add a new page to source to test that only NEW pages are imported
     let wd = fixture.join("wiki").join("fw").join("fp");
-    std::fs::write(&wd.join("new.md"), "# New page\n".as_bytes()).unwrap();
+    std::fs::write(wd.join("new.md"), "# New page\n".as_bytes()).unwrap();
 
     // Re-run: should only import the new page
     let resume_output = child(&data, &home)
@@ -377,7 +421,12 @@ fn interrupted_import_is_resumable() {
 
     // Now all 5 pages should be present
     let dest_files2 = walk_rel(&wiki_root);
-    assert_eq!(dest_files2.len(), 5, "after resume all 5 pages should be present: {:?}", dest_files2);
+    assert_eq!(
+        dest_files2.len(),
+        5,
+        "after resume all 5 pages should be present: {:?}",
+        dest_files2
+    );
 }
 
 #[test]

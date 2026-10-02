@@ -65,6 +65,23 @@ jobs:
       - name: Use macOS PEM bundle
         if: matrix.os == 'macos-latest'
         run: echo "SSL_CERT_FILE=/etc/ssl/cert.pem" >> "$GITHUB_ENV"
+      # Linux: install uidmap so `unshare -r -n` works for the
+      # zero-telemetry isolation test.  `unshare -r` (--map-root-user)
+      # requires newuidmap/newgidmap setuid helpers with /etc/subuid entries
+      # for the runner user — neither is present on default GH runners.
+      # Without this step the zero_telemetry isolation test panics because
+      # `-r` cannot map the runner to root inside the namespace (and lo
+      # needs root to bring up, which the test needs for loopback traffic).
+      - name: Enable unshare -r -n for zero-telemetry test
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq uidmap
+          CURRENT_USER=$(whoami)
+          grep -q "^${CURRENT_USER}:" /etc/subuid 2>/dev/null \
+            || echo "${CURRENT_USER}:100000:65536" | sudo tee -a /etc/subuid
+          grep -q "^${CURRENT_USER}:" /etc/subgid 2>/dev/null \
+            || echo "${CURRENT_USER}:100000:65536" | sudo tee -a /etc/subgid
       # Linux regenerates the web stylesheet from source, so a stale vendored
       # static/tailwind.css fails here instead of shipping.
       - name: Regenerate the Tailwind bundle
@@ -85,12 +102,12 @@ jobs:
   # file locking, or git plumbing.
 
   # The companion importer is deliberately outside the root workspace
-  # (its own [workspace] in companions/sessionmunch-importer/Cargo.toml), so
+  # (its own [workspace] in companions/ai-memory-importer/Cargo.toml), so
   # none of the jobs above compile it. Gate it here with the same
   # fmt/clippy/test trio docs/companion-crates.md prescribes, or a
   # toolchain bump / convention change rots it silently.
   companions:
-    name: companions (sessionmunch-importer)
+    name: companions (ai-memory-importer)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -99,10 +116,10 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          workspaces: companions/sessionmunch-importer
-      - run: cargo fmt --check --manifest-path companions/sessionmunch-importer/Cargo.toml
-      - run: cargo clippy --manifest-path companions/sessionmunch-importer/Cargo.toml --all-targets -- -D warnings
-      - run: cargo test --manifest-path companions/sessionmunch-importer/Cargo.toml
+          workspaces: companions/ai-memory-importer
+      - run: cargo fmt --check --manifest-path companions/ai-memory-importer/Cargo.toml
+      - run: cargo clippy --manifest-path companions/ai-memory-importer/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path companions/ai-memory-importer/Cargo.toml
 
   # Build the release binary on its own so a release-only failure
   # (LTO crash, codegen issue, dead-code-with-debug-assertions) doesn't
@@ -208,6 +225,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # 1.95
+        with:
+          toolchain: "1.95"
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
           log-level: warn
