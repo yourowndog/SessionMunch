@@ -58,10 +58,10 @@ mutation broker. Browsers should talk to the companion; the companion should tal
 to sessionmunch with an operator token. That keeps CSRF, confirmation, audit, rate
 limits, and UI-specific policy outside the core server.
 
-## `sessionmunch-importer`: migration and ingestion companion
+## `ai-memory-importer`: migration and ingestion companion
 
 This is the companion shape for PR #118. The first implemented companion lives
-at [`companions/sessionmunch-importer`](../companions/sessionmunch-importer) as a
+at [`companions/ai-memory-importer`](../companions/ai-memory-importer) as a
 standalone Cargo package with its own `[workspace]`; it is not a member of the
 root workspace and is not covered by root `cargo test --workspace`.
 
@@ -91,9 +91,9 @@ Future sources can include:
 Run companion checks explicitly from the repository root:
 
 ```bash
-cargo fmt --check --manifest-path companions/sessionmunch-importer/Cargo.toml
-cargo test --manifest-path companions/sessionmunch-importer/Cargo.toml
-cargo clippy --manifest-path companions/sessionmunch-importer/Cargo.toml --all-targets -- -D warnings
+cargo fmt --check --manifest-path companions/ai-memory-importer/Cargo.toml
+cargo test --manifest-path companions/ai-memory-importer/Cargo.toml
+cargo clippy --manifest-path companions/ai-memory-importer/Cargo.toml --all-targets -- -D warnings
 ```
 
 Root hygiene checks remain separate:
@@ -108,7 +108,7 @@ git diff --check
 Prefer a separate repository and binary crate, for example:
 
 ```text
-companions/sessionmunch-importer/
+companions/ai-memory-importer/
 ├── Cargo.toml
 ├── src/main.rs
 └── README.md
@@ -279,7 +279,7 @@ This plan is intentionally parked until the benefit is clearer.
 
 ## Two kinds of companion: data-seam vs. independent hook consumer
 
-`sessionmunch-importer` and `sessionmunch-web-editor` are *data-seam* companions: they
+`ai-memory-importer` and `sessionmunch-web-editor` are *data-seam* companions: they
 talk to sessionmunch's public HTTP/MCP surfaces and build on the data it stores.
 Not every adjacent tool is that shape.
 

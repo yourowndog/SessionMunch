@@ -85,12 +85,12 @@ jobs:
   # file locking, or git plumbing.
 
   # The companion importer is deliberately outside the root workspace
-  # (its own [workspace] in companions/sessionmunch-importer/Cargo.toml), so
+  # (its own [workspace] in companions/ai-memory-importer/Cargo.toml), so
   # none of the jobs above compile it. Gate it here with the same
   # fmt/clippy/test trio docs/companion-crates.md prescribes, or a
   # toolchain bump / convention change rots it silently.
   companions:
-    name: companions (sessionmunch-importer)
+    name: companions (ai-memory-importer)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -99,10 +99,10 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          workspaces: companions/sessionmunch-importer
-      - run: cargo fmt --check --manifest-path companions/sessionmunch-importer/Cargo.toml
-      - run: cargo clippy --manifest-path companions/sessionmunch-importer/Cargo.toml --all-targets -- -D warnings
-      - run: cargo test --manifest-path companions/sessionmunch-importer/Cargo.toml
+          workspaces: companions/ai-memory-importer
+      - run: cargo fmt --check --manifest-path companions/ai-memory-importer/Cargo.toml
+      - run: cargo clippy --manifest-path companions/ai-memory-importer/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path companions/ai-memory-importer/Cargo.toml
 
   # Build the release binary on its own so a release-only failure
   # (LTO crash, codegen issue, dead-code-with-debug-assertions) doesn't
@@ -208,6 +208,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # 1.95
+        with:
+          toolchain: "1.95"
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
           log-level: warn
