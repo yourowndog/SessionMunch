@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#t_c51f1a51).
 
 ### Fixed
+- Updated `rustls` to >=0.23.45 (and `rustls-webpki` to 0.103.15) across the
+  workspace and the companion importer, resolving the RUSTSEC-2026-0285
+  advisory. No advisory ignore added. (#t_93c1c58c)
 - `sessionmunch legacy-import --create-destination` flag now correctly gated:
   previously it was a no-op (destination always created). Without the flag and
   with a missing destination the command now bails with a clear error, working
