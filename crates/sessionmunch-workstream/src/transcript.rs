@@ -2894,7 +2894,7 @@ fn crush_updated(cwd: &Path, session_dir: Option<&Path>, session: &str) -> Resul
     }
 }
 
-fn crush_db(cwd: &Path, session_dir: Option<&Path>) -> PathBuf {
+pub(crate) fn crush_db(cwd: &Path, session_dir: Option<&Path>) -> PathBuf {
     session_dir.unwrap_or(&cwd.join(".crush")).join("crush.db")
 }
 
@@ -2927,7 +2927,7 @@ fn opencode_updated(home: &Path, session_dir: Option<&Path>, session: &str) -> R
     }
 }
 
-fn opencode_db(home: &Path, session_dir: Option<&Path>) -> PathBuf {
+pub(crate) fn opencode_db(home: &Path, session_dir: Option<&Path>) -> PathBuf {
     session_dir.map_or_else(
         || home.join(".local/share/opencode/opencode.db"),
         |dir| dir.join("opencode.db"),
@@ -3212,7 +3212,11 @@ fn opencode2_updated(
     }
 }
 
-fn session_root(harness: ManagedHarness, home: &Path, override_dir: Option<&Path>) -> PathBuf {
+pub(crate) fn session_root(
+    harness: ManagedHarness,
+    home: &Path,
+    override_dir: Option<&Path>,
+) -> PathBuf {
     if let Some(override_dir) = override_dir {
         return override_dir.to_path_buf();
     }
@@ -3236,7 +3240,7 @@ fn session_root(harness: ManagedHarness, home: &Path, override_dir: Option<&Path
 /// to the default home during acceptance. Scan the configured root first and
 /// the default root as a compatibility fallback; every result still passes
 /// strict metadata and checkout validation.
-fn session_roots(
+pub(crate) fn session_roots(
     harness: ManagedHarness,
     home: &Path,
     override_dir: Option<&Path>,
@@ -3252,7 +3256,7 @@ fn session_roots(
     roots
 }
 
-fn collect_session_files(
+pub(crate) fn collect_session_files(
     harness: ManagedHarness,
     home: &Path,
     override_dir: Option<&Path>,

@@ -222,6 +222,35 @@ pub enum Command {
     /// binary's own command tree, so it never drifts from the real CLI
     /// surface. See `docs/shell-completions.md` for install paths.
     Completions(CompletionsArgs),
+    /// Snapshot perishable native harness transcript stores into hashed,
+    /// content-addressed, read-only artifacts so a future importer can replay
+    /// from the original bytes (North Star §5.9 — P0 "stop losing history").
+    /// Sources are never modified; re-running from an unchanged store writes no
+    /// new blobs. Mirrors the transcript files the existing readers use.
+    #[command(name = "snapshot-harness-history")]
+    SnapshotHarnessHistory(SnapshotHarnessHistoryArgs),
+}
+
+/// Arguments for `snapshot-harness-history`.
+#[derive(Debug, Args)]
+pub struct SnapshotHarnessHistoryArgs {
+    /// Only snapshot this harness's store (defaults to every known harness).
+    #[arg(long, value_enum)]
+    pub harness: Option<RunHarnessChoice>,
+    /// Override the native harness home directory (defaults to the OS user
+    /// home, as resolved by the config/runtime environment).
+    #[arg(long)]
+    pub home: Option<PathBuf>,
+    /// Override the harness session-store root (as `run` resolves it).
+    #[arg(long)]
+    pub session_dir: Option<PathBuf>,
+    /// Destination root for the content-addressed snapshot blobs (defaults to
+    /// `<data_dir>/snapshots`).
+    #[arg(long, short = 'o')]
+    pub to: Option<PathBuf>,
+    /// Emit the report as JSON instead of human-readable text.
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for `run`. Wrapper-owned flags must precede `harness`; the

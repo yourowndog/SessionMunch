@@ -22,6 +22,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   API-key prefixes are unchanged (credential contract, not branding).
 
 ### Added
+- New `sessionmunch snapshot-harness-history` command that snapshots perishable
+  native harness transcript stores into hashed, content-addressed, read-only
+  artifacts (North Star §5.9, P0 "stop losing history"). It reuses the existing
+  transcript discovery/readers (`claude`, `codex`, `opencode`/`opencode2`,
+  `pi`, `omp`, `crush`, `kimi`, `command-code`, `kiro`/`kiro-v3`, `grok`),
+  opens sources read-only so they are never modified, stores each discovered
+  transcript file as a SHA-256-named blob under `<data_dir>/snapshots/<harness>/`
+  (default; `--to` to relocate), deduplicates identical content (re-running an
+  unchanged store writes no new blobs and produces a byte-identical
+  per-harness `index.json`), and reports per harness the discovered, snapshotted,
+  already-known, unreadable, missing, and unsupported sources so no loss is
+  silent. SQLite-backed stores (opencode/opencode2/crush) snapshot the store
+  database file; Antigravity's id-addressed per-conversation stores are reported
+  unsupported. `--harness` limits to one harness; `--json` emits a structured
+  report. (#t_0bbcdf6b)
 - New opt-in local cross-encoder reranker behind the existing
   `ai_memory_core::CrossEncoder` trait: `ai_memory_llm::CrossEncoderReranker`
   runs the pinned `cross-encoder/ms-marco-MiniLM-L-6-v2` candle model locally,

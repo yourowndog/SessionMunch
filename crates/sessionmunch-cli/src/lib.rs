@@ -167,6 +167,9 @@ pub async fn run() -> Result<()> {
         Command::User(args) => commands::user::run(&config, args).await,
         Command::ApiKey(args) => commands::api_key::run(&config, args).await,
         Command::LegacyImport(args) => commands::legacy_import::run(&config, args).await,
+        Command::SnapshotHarnessHistory(args) => {
+            commands::snapshot_harness_history::run(&config, args).await
+        }
         // `Completions` is handled in the fast-path above (before config/tracing).
         Command::Completions(args) => commands::completions::run(args),
     }

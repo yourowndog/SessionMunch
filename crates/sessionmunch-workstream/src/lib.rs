@@ -2,6 +2,7 @@
 
 mod harness;
 mod repository;
+mod snapshot;
 mod transcript;
 
 pub use harness::{
@@ -10,6 +11,10 @@ pub use harness::{
     kiro_selects_non_default_engine, kiro_selects_v2_engine, kiro_selects_v3_engine,
 };
 pub use repository::{RepositoryIdentity, inspect_repository};
+pub use snapshot::{
+    HarnessSnapshot, SnapshotOutcome, SnapshotReport, SnapshotSource, snapshot_all_harnesses,
+    snapshot_store,
+};
 pub use transcript::{
     ExportedTranscript, NativeSessionCandidate, discover_native_session, export_transcript,
     kiro_harness_from_source_cursor, kiro_v3_resume_uses_default_store, list_native_sessions,

@@ -63,6 +63,7 @@ pub mod search;
 pub mod serve;
 pub mod setup_agent;
 pub mod show;
+pub mod snapshot_harness_history;
 pub mod status;
 pub mod uninstall;
 pub mod user;

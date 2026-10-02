@@ -480,7 +480,7 @@ reorg                purge-project        rename-project
 move-project         move-session         uninstall
 auth                 user                 completions
 handoffs             purge-session        compact
-api-key              export-okf
+api-key              export-okf            snapshot-harness-history
 ```
 
 Run `sessionmunch --help` for the full tree.
