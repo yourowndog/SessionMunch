@@ -203,9 +203,9 @@ crates/
 ├── sessionmunch-workstream/  read-only native transcript + launch adapters (`sessionmunch run`).
 └── sessionmunch-cli/         `sessionmunch` binary entry point + thin HTTP subcommands.
 evals/                     live A/B harness; workspace member, not shipped.
-companions/sessionmunch-importer/  standalone OMC + external-conversation importer; NOT a root
+companions/ai-memory-importer/  standalone OMC + external-conversation importer; NOT a root
                            workspace member — build/test it with
-                           `--manifest-path companions/sessionmunch-importer/Cargo.toml`.
+                           `--manifest-path companions/ai-memory-importer/Cargo.toml`.
 hooks/                     per-agent lifecycle hook bundles (shell/native).
 bin/                       host wrapper scripts (`sessionmunch`, `deploy`, `release`).
 docker/                    Dockerfile, compose files, TLS proxy templates.
@@ -278,7 +278,7 @@ no tiers.
   `static/tailwind.css`; commit the result. CI regenerates it on Linux and
   fails if the committed file is stale, so nothing else needs the download.
 - Run the companion importer separately:
-  `cargo test --manifest-path companions/sessionmunch-importer/Cargo.toml`
+  `cargo test --manifest-path companions/ai-memory-importer/Cargo.toml`
   (plus fmt/clippy on the same manifest). Root `--workspace` commands do
   not cover it.
 

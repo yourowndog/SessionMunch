@@ -23,7 +23,7 @@ use std::sync::Arc;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::nomic_bert::{
-    mean_pooling, l2_normalize, NomicBertModel, Config as NomicBertConfig,
+    Config as NomicBertConfig, NomicBertModel, l2_normalize, mean_pooling,
 };
 use sha2::{Digest, Sha256};
 use tokenizers::Tokenizer;
@@ -58,8 +58,7 @@ pub const MODEL_FILES: [(&str, &str); 3] = [
     ),
 ];
 
-const MODEL_BASE_URL: &str =
-    "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main";
+const MODEL_BASE_URL: &str = "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main";
 
 /// Directory the model lives in under the data dir's `models/` root.
 #[must_use]
