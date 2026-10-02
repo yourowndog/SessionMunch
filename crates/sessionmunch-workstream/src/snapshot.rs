@@ -12,31 +12,50 @@
 //! Design:
 //! - Sources are opened read-only and never modified. Nothing in this module
 //!   opens a harness store for writing.
-//! - Each discovered transcript file is streamed into a blob named by its
-//!   SHA-256 under `<artifact_root>/<harness>/<sha256>`. The store is therefore
-//!   content-addressed: identical bytes deduplicate to one blob.
+//! - North Star invariant 7 (sanitize-before-persistence) is enforced at the
+//!   artifact boundary: the canonical [`sessionmunch_core::Sanitizer`] is applied
+//!   to a source's bytes before they are hashed, written, deduplicated, or
+//!   indexed. Text transcripts are scrubbed as UTF-8; SQLite-backed stores
+//!   (OpenCode/Crush) are scrubbed per text cell via a transactionally
+//!   consistent online-backup copy, so the preserved database stays valid and
+//!   reopenable.
+//! - SQLite-backed stores are snapshotted transactionally: the online backup
+//!   API copies the live database (including committed WAL-resident data) so a
+//!   raw `opencode.db`/`crush.db` file copy never silently drops rows that live
+//!   only in the WAL.
+//! - Each discovered transcript file is stored as a blob named by the SHA-256 of
+//!   its *sanitized* bytes under `<artifact_root>/<harness>/<sha256>`. The store
+//!   is therefore content-addressed: identical sanitized bytes deduplicate to
+//!   one blob.
 //! - Re-running against an unchanged store writes no new blobs (every source is
 //!   reported `already-known`), and the per-harness `index.json` is rewritten
 //!   deterministically, so repeated snapshots are byte-for-byte identical.
 //! - Every source is reported with an explicit outcome (`snapshotted`,
 //!   `already-known`, `unreadable`) and every absent/unsupported store is
 //!   reported explicitly. Nothing is dropped silently.
+//! - Durable provenance — machine identity, harness, absolute source/store
+//!   identity, capture time, and best-effort repository HEAD/branch — is
+//!   appended to a per-run ledger so snapshots stay attributable and replayable
+//!   across machines and runs without disturbing deterministic content identity.
 
-use std::fs::{self, File, OpenOptions};
-use std::io::Read as _;
-use std::io::Write as _;
+use std::fs::{self, File};
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, anyhow};
+use rusqlite::{Connection, DatabaseName, OpenFlags, params};
 use serde::{Deserialize, Serialize};
+use sessionmunch_core::Sanitizer;
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
 use crate::ManagedHarness;
+use crate::repository::inspect_repository;
 use crate::transcript::{collect_session_files, crush_db, opencode_db, session_roots};
 
 const SNAPSHOT_VERSION: &str = "harness-store-v1";
 const INDEX_FILE: &str = "index.json";
+const PROVENANCE_LEDGER: &str = "provenance.jsonl";
 
 /// Why a single source file was or was not preserved.
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -57,9 +76,9 @@ pub struct SnapshotSource {
     pub source: String,
     /// Path relative to the harness store root (stable across machines).
     pub rel: String,
-    /// SHA-256 hex of the source content (empty when unreadable).
+    /// SHA-256 hex of the sanitized source content (empty when unreadable).
     pub sha256: String,
-    /// Byte length of the source (0 when unreadable).
+    /// Byte length of the sanitized source (0 when unreadable).
     pub size: u64,
     /// How this source was handled.
     pub outcome: SnapshotOutcome,
@@ -158,17 +177,29 @@ impl SnapshotReport {
 
 /// Snapshot one harness's transcript store into content-addressed blobs under
 /// `artifact_root`. Source files are opened read-only and never modified.
+///
+/// `machine_id` is a stable machine identifier recorded into durable
+/// provenance. `sanitizer` is the canonical privacy strip applied before any
+/// source bytes are hashed, written, deduplicated, or indexed.
 pub async fn snapshot_store(
     harness: ManagedHarness,
     artifact_root: &Path,
     home: &Path,
     cwd: &Path,
     session_dir: Option<&Path>,
+    machine_id: &str,
+    sanitizer: &Sanitizer,
 ) -> Result<HarnessSnapshot> {
     let discovered = discover_sources(harness, home, cwd, session_dir)?;
     let mut sources = Vec::with_capacity(discovered.files.len());
     for (source, root) in discovered.files {
-        sources.push(snapshot_file(harness, artifact_root, &source, &root)?);
+        sources.push(snapshot_source(
+            harness,
+            artifact_root,
+            &source,
+            &root,
+            sanitizer,
+        )?);
     }
     let present_roots = discovered
         .present_roots
@@ -183,6 +214,7 @@ pub async fn snapshot_store(
         unsupported: discovered.unsupported,
     };
     write_index(&snap, artifact_root)?;
+    append_provenance(&snap, artifact_root, cwd, machine_id)?;
     Ok(snap)
 }
 
@@ -191,6 +223,8 @@ pub async fn snapshot_all_harnesses(
     artifact_root: &Path,
     home: &Path,
     cwd: &Path,
+    machine_id: &str,
+    sanitizer: &Sanitizer,
 ) -> Result<SnapshotReport> {
     let mut harnesses = Vec::with_capacity(13);
     for harness in [
@@ -208,7 +242,18 @@ pub async fn snapshot_all_harnesses(
         ManagedHarness::Grok,
         ManagedHarness::Antigravity,
     ] {
-        harnesses.push(snapshot_store(harness, artifact_root, home, cwd, None).await?);
+        harnesses.push(
+            snapshot_store(
+                harness,
+                artifact_root,
+                home,
+                cwd,
+                None,
+                machine_id,
+                sanitizer,
+            )
+            .await?,
+        );
     }
     Ok(SnapshotReport { harnesses })
 }
@@ -295,13 +340,42 @@ fn introduce_single_file_store(db: &Path) -> Result<Discovered> {
     }
 }
 
-/// Stream one source file read-only into a content-addressed blob, deduplicating
-/// on identical bytes. The source is never opened for writing.
-fn snapshot_file(
+/// Whether this harness's transcript store is the OpenCode/Crush SQLite
+/// database, which must be snapshotted transactionally (online backup) rather
+/// than as a raw file copy.
+fn is_sqlite_backed(harness: ManagedHarness) -> bool {
+    matches!(
+        harness,
+        ManagedHarness::OpenCode | ManagedHarness::OpenCode2 | ManagedHarness::Crush
+    )
+}
+
+/// Produce one source's snapshot verdict. Routes OpenCode/Crush SQLite stores
+/// through the transactional online-backup path; all other harnesses stream
+/// their text bytes directly. Both paths sanitize before hashing/persistence.
+fn snapshot_source(
     harness: ManagedHarness,
     artifact_root: &Path,
     source: &Path,
     root: &Path,
+    sanitizer: &Sanitizer,
+) -> Result<SnapshotSource> {
+    if is_sqlite_backed(harness) {
+        snapshot_sqlite_store(harness, artifact_root, source, root, sanitizer)
+    } else {
+        snapshot_text_store(harness, artifact_root, source, root, sanitizer)
+    }
+}
+
+/// Stream one text source file read-only into a content-addressed blob of its
+/// sanitized bytes, deduplicating on identical sanitized content. The source
+/// is never opened for writing.
+fn snapshot_text_store(
+    harness: ManagedHarness,
+    artifact_root: &Path,
+    source: &Path,
+    root: &Path,
+    sanitizer: &Sanitizer,
 ) -> Result<SnapshotSource> {
     let source_text = source.to_string_lossy().to_string();
     let rel = relative_to(source, root);
@@ -323,11 +397,9 @@ fn snapshot_file(
         }
     };
 
-    let temp = dest_dir.join(format!(".blob-{}.tmp", Uuid::new_v4()));
-    let hashed = match hash_stream(&mut reader, &temp) {
-        Ok(value) => value,
+    let sanitized = match read_and_scrub(&mut reader, sanitizer) {
+        Ok(bytes) => bytes,
         Err(error) => {
-            fs::remove_file(&temp).ok();
             return Ok(SnapshotSource {
                 source: source_text,
                 rel,
@@ -338,9 +410,182 @@ fn snapshot_file(
             });
         }
     };
-    let (sha, size) = hashed;
-    let blob = dest_dir.join(&sha);
+    let sha = format!("{:x}", Sha256::digest(&sanitized));
+    let size = sanitized.len() as u64;
 
+    let temp = dest_dir.join(format!(".blob-{}.tmp", Uuid::new_v4()));
+    fs::write(&temp, &sanitized)
+        .with_context(|| format!("writing temp blob {}", temp.display()))?;
+    let published = publish_blob(&dest_dir, &sha, &temp)?;
+
+    Ok(SnapshotSource {
+        source: source_text,
+        rel,
+        sha256: sha,
+        size,
+        outcome: if published {
+            SnapshotOutcome::Snapshotted
+        } else {
+            SnapshotOutcome::AlreadyKnown
+        },
+        detail: None,
+    })
+}
+
+/// Snapshot a SQLite-backed store (OpenCode/Crush) transactionally: the online
+/// backup API produces a consistent, WAL-complete copy of the live database,
+/// then its text content is scrubbed in place with the canonical sanitizer so
+/// the preserved file carries no secrets and stays reopenable.
+fn snapshot_sqlite_store(
+    harness: ManagedHarness,
+    artifact_root: &Path,
+    source: &Path,
+    root: &Path,
+    sanitizer: &Sanitizer,
+) -> Result<SnapshotSource> {
+    let source_text = source.to_string_lossy().to_string();
+    let rel = relative_to(source, root);
+    let dest_dir = artifact_root.join(harness.as_str());
+    fs::create_dir_all(&dest_dir)
+        .with_context(|| format!("creating snapshot dir {}", dest_dir.display()))?;
+
+    let consistent = dest_dir.join(format!(".consistent-{}.db", Uuid::new_v4()));
+    let (sha, size, published) = match (|| -> Result<(String, u64, bool)> {
+        // Open the source read-only (never for writing) and run the online
+        // backup API so committed WAL-resident rows are included.
+        let connection = Connection::open_with_flags(
+            source,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .with_context(|| format!("opening SQLite store {} read-only", source.display()))?;
+        connection
+            .backup(DatabaseName::Main, &consistent, None)
+            .with_context(|| format!("online-backup of {}", source.display()))?;
+
+        // Scrub every text cell in the consistent copy, then hash, dedupe and
+        // publish.
+        sanitize_sqlite_text(&consistent, sanitizer)?;
+        let sanitized = fs::read(&consistent)
+            .with_context(|| format!("reading consistent snapshot {}", consistent.display()))?;
+        let sha = format!("{:x}", Sha256::digest(&sanitized));
+        let size = sanitized.len() as u64;
+        let published = publish_blob(&dest_dir, &sha, &consistent)?;
+        Ok((sha, size, published))
+    })() {
+        Ok(value) => value,
+        Err(error) => {
+            fs::remove_file(&consistent).ok();
+            return Ok(SnapshotSource {
+                source: source_text,
+                rel,
+                sha256: String::new(),
+                size: 0,
+                outcome: SnapshotOutcome::Unreadable,
+                detail: Some(format!("SQLite snapshot failed: {error}")),
+            });
+        }
+    };
+    Ok(SnapshotSource {
+        source: source_text,
+        rel,
+        sha256: sha,
+        size,
+        outcome: if published {
+            SnapshotOutcome::Snapshotted
+        } else {
+            SnapshotOutcome::AlreadyKnown
+        },
+        detail: None,
+    })
+}
+
+/// Sanitize a SQLite database's text content in place using the canonical
+/// sanitizer. Text-affinity columns across every user table are scrubbed;
+/// INTEGER/BLOB/REAL and primary-key columns are left untouched so the
+/// database remains structurally valid and reopenable.
+fn sanitize_sqlite_text(path: &Path, sanitizer: &Sanitizer) -> Result<()> {
+    let connection = Connection::open(path)
+        .with_context(|| format!("opening SQLite snapshot {} for scrubbing", path.display()))?;
+    // Force writes straight into the main database file (not a rollback/WAL
+    // journal) so the scrubbed copy is what we read back and publish.
+    connection.pragma_update(None, "journal_mode", "DELETE")?;
+
+    let table_names: Vec<String> = {
+        let mut stmt = connection.prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+
+    for table in &table_names {
+        let qt = quote_ident(table);
+        // Column (id, name, type).
+        let columns: Vec<(String, String)> = {
+            let mut stmt = connection.prepare(&format!("PRAGMA table_info({qt})"))?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        for (column, declared_type) in columns {
+            if !text_affinity(&declared_type) {
+                continue;
+            }
+            let qc = quote_ident(&column);
+            // Read candidate text cells, scrub, and write back with UPDATE.
+            let select = format!("SELECT rowid, {qc} FROM {qt} WHERE typeof({qc}) = 'text'");
+            let mut stmt = connection.prepare(&select)?;
+            let rows: Vec<(i64, String)> = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(stmt);
+            if rows.is_empty() {
+                continue;
+            }
+            let update = format!("UPDATE {qt} SET {qc} = ?1 WHERE rowid = ?2");
+            let mut stmt = connection.prepare(&update)?;
+            for (rowid, value) in rows {
+                let scrubbed = sanitizer.scrub(&value);
+                if scrubbed != value {
+                    stmt.execute(params![scrubbed, rowid])?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Quote a SQLite identifier safely by doubling embedded double-quotes.
+fn quote_ident(value: &str) -> String {
+    format!("\"{}\"", value.replace('"', "\"\""))
+}
+
+/// SQLite affinity → is this a text column worth scrubbing?
+fn text_affinity(declared: &str) -> bool {
+    let upper = declared.trim().to_ascii_uppercase();
+    upper.is_empty() || upper.contains("TEXT") || upper.contains("CHAR") || upper.contains("CLOB")
+}
+
+/// Read a whole source file, scrubbing its text through the canonical
+/// sanitizer so secrets are removed before any hashing, writing,
+/// deduplication, or indexing happens.
+fn read_and_scrub(reader: &mut File, sanitizer: &Sanitizer) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes)?;
+    // Lossy UTF-8 keeps the artifact textual (JSONL) while guaranteeing the
+    // scrubber never sees invalid UTF-8 bytes.
+    let text = String::from_utf8_lossy(&bytes);
+    Ok(sanitizer.scrub(&text).into_bytes())
+}
+
+/// Publish `temp` as `<dir>/<sha>`, deduplicating on identical sanitized
+/// content. A pre-existing intact blob makes this a no-write run; a corrupt
+/// named blob is repaired. Returns whether a new blob was written.
+fn publish_blob(dir: &Path, sha: &str, temp: &Path) -> Result<bool> {
+    let blob = dir.join(sha);
     let published = match fs::metadata(&blob).ok() {
         Some(_) => {
             // A blob already exists for this content. Verify it rather than
@@ -350,17 +595,17 @@ fn snapshot_file(
                 .with_context(|| format!("verifying existing blob {}", blob.display()))?
                 == sha;
             if intact {
-                fs::remove_file(&temp)
+                fs::remove_file(temp)
                     .with_context(|| format!("removing temp {}", temp.display()))?;
                 false
             } else {
-                fs::rename(&temp, &blob)
+                fs::rename(temp, &blob)
                     .with_context(|| format!("repairing blob {}", blob.display()))?;
                 true
             }
         }
         None => {
-            fs::rename(&temp, &blob)
+            fs::rename(temp, &blob)
                 .with_context(|| format!("publishing blob {}", blob.display()))?;
             true
         }
@@ -377,43 +622,7 @@ fn snapshot_file(
             blob.display()
         ));
     }
-
-    Ok(SnapshotSource {
-        source: source_text,
-        rel,
-        sha256: sha,
-        size,
-        outcome: if published {
-            SnapshotOutcome::Snapshotted
-        } else {
-            SnapshotOutcome::AlreadyKnown
-        },
-        detail: None,
-    })
-}
-
-/// Stream `source` (opened read-only) into `dest`, hashing as it goes.
-fn hash_stream(source: &mut File, dest: &Path) -> Result<(String, u64)> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    let mut writer = options
-        .open(dest)
-        .with_context(|| format!("creating temp blob {}", dest.display()))?;
-    let mut hasher = Sha256::new();
-    let mut size: u64 = 0;
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let read = source.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-        size += read as u64;
-        writer
-            .write_all(&buffer[..read])
-            .with_context(|| format!("writing temp blob {}", dest.display()))?;
-    }
-    Ok((format!("{:x}", hasher.finalize()), size))
+    Ok(published)
 }
 
 /// SHA-256 hex of a file (used to verify stored blobs).
@@ -448,6 +657,8 @@ fn relative_to(path: &Path, root: &Path) -> String {
 #[derive(Debug, Serialize, Deserialize)]
 struct SnapshotIndexEntry {
     rel: String,
+    /// Absolute source identity (durable provenance, machine-local path).
+    source: String,
     sha256: String,
     size: u64,
     blob: String,
@@ -475,6 +686,7 @@ fn write_index(snap: &HarnessSnapshot, artifact_root: &Path) -> Result<()> {
         .filter(|s| s.outcome != SnapshotOutcome::Unreadable && !s.sha256.is_empty())
         .map(|s| SnapshotIndexEntry {
             rel: s.rel.clone(),
+            source: s.source.clone(),
             sha256: s.sha256.clone(),
             size: s.size,
             blob: s.sha256.clone(),
@@ -489,6 +701,75 @@ fn write_index(snap: &HarnessSnapshot, artifact_root: &Path) -> Result<()> {
     };
     let serialized = serde_json::to_string_pretty(&index)?;
     atomic_write(&dir.join(INDEX_FILE), serialized.as_bytes())?;
+    Ok(())
+}
+
+/// Durable provenance for one snapshot run/harness: machine identity, harness,
+/// absolute source/store identity, capture time, and best-effort repo
+/// HEAD/branch. Appended to `<artifact_root>/provenance.jsonl` (newline
+/// delimited) so every run is attributable without perturbing the
+/// byte-deterministic `index.json`.
+#[derive(Debug, Serialize)]
+struct ProvenanceRecord {
+    snapshot_version: String,
+    machine_id: String,
+    capture_time: String,
+    harness: String,
+    store_roots: Vec<String>,
+    missing_roots: Vec<String>,
+    unsupported: Option<String>,
+    repo_head: Option<String>,
+    repo_branch: Option<String>,
+    sources: Vec<SnapshotIndexEntry>,
+}
+
+fn append_provenance(
+    snap: &HarnessSnapshot,
+    artifact_root: &Path,
+    cwd: &Path,
+    machine_id: &str,
+) -> Result<()> {
+    let (repo_head, repo_branch) = match inspect_repository(cwd) {
+        Ok(identity) => (identity.checkpoint.head, identity.checkpoint.branch),
+        Err(_) => (None, None),
+    };
+    let sources = snap
+        .sources
+        .iter()
+        .filter(|s| s.outcome != SnapshotOutcome::Unreadable)
+        .map(|s| SnapshotIndexEntry {
+            rel: s.rel.clone(),
+            source: s.source.clone(),
+            sha256: s.sha256.clone(),
+            size: s.size,
+            blob: s.sha256.clone(),
+        })
+        .collect::<Vec<_>>();
+    let record = ProvenanceRecord {
+        snapshot_version: SNAPSHOT_VERSION.into(),
+        machine_id: machine_id.to_string(),
+        capture_time: jiff::Timestamp::now().to_string(),
+        harness: snap.harness.as_str().to_string(),
+        store_roots: snap.store_roots.clone(),
+        missing_roots: snap.missing_roots.clone(),
+        unsupported: snap.unsupported.clone(),
+        repo_head,
+        repo_branch,
+        sources,
+    };
+    let mut line = serde_json::to_string(&record)?;
+    line.push('\n');
+    let ledger = artifact_root.join(PROVENANCE_LEDGER);
+    if let Some(parent) = ledger.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&ledger)
+        .with_context(|| format!("opening provenance ledger {}", ledger.display()))?;
+    file.write_all(line.as_bytes())
+        .with_context(|| format!("appending provenance for {}", snap.harness.as_str()))?;
     Ok(())
 }
 
@@ -516,11 +797,17 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    const TEST_MACHINE: &str = "test-machine";
+
+    fn sanitizer() -> Sanitizer {
+        Sanitizer::builtin()
+    }
+
     /// Write a fake Claude JSONL transcript store under `store`.
     fn write_claude_store(store: &Path, session_id: &str, body: &str) -> PathBuf {
         fs::create_dir_all(store).unwrap();
         let path = store.join(format!("{session_id}.jsonl"));
-        fs::write(&path, format!("{}\n", body).as_bytes()).unwrap();
+        fs::write(&path, format!("{body}\n").as_bytes()).unwrap();
         path.to_path_buf()
     }
 
@@ -536,6 +823,8 @@ mod tests {
             home,
             cwd,
             Some(store),
+            TEST_MACHINE,
+            &sanitizer(),
         )
         .await
         .unwrap()
@@ -572,6 +861,8 @@ mod tests {
         let sha = snap.sources[0].sha256.clone();
         let blob = artifact.join("claude").join(&sha);
         assert!(blob.is_file(), "blob exists at {}", blob.display());
+        // Content-addressed over the SANITIZED bytes (no secrets here, so the
+        // sanitized bytes equal the source bytes).
         assert_eq!(sha, format!("{:x}", Sha256::digest(before.clone())));
 
         // Source bytes and mtime unchanged — the store was only ever read.
@@ -589,7 +880,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn repeated_snapshot_dedupes_and_is_deterministic() {
+    async fn repeated_snapshot_on_unchanged_store_is_idempotent_and_deterministic() {
         let td = tempdir().unwrap();
         let home = td.path().join("home");
         fs::create_dir_all(&home).unwrap();
@@ -603,31 +894,119 @@ mod tests {
         );
         let artifact = td.path().join("snapshots");
 
-        let first = claude_snapshot(&artifact, &home, &cwd, &store).await;
-        // A second, distinct session with identical content maps to the SAME
-        // blob (content addressing), and re-running writes no new blobs.
+        let _first = claude_snapshot(&artifact, &home, &cwd, &store).await;
+        let index_first = fs::read(artifact.join("claude").join("index.json")).unwrap();
+
+        // Rerun an UNCHANGED source set: no new blobs, all already-known.
+        let second = claude_snapshot(&artifact, &home, &cwd, &store).await;
+        assert_eq!(second.snapshotted(), 0, "no new blobs on unchanged rerun");
+        assert_eq!(second.already_known(), 1, "sole source dedupes");
+
+        // Byte-identical index across the two runs.
+        let index_second = fs::read(artifact.join("claude").join("index.json")).unwrap();
+        assert_eq!(
+            index_first, index_second,
+            "index must be byte-identical across unchanged reruns"
+        );
+
+        // Blob count unchanged: exactly one blob for the one source.
+        let dir = artifact.join("claude");
+        let blob_count = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                name != "index.json" && !name.starts_with('.')
+            })
+            .count();
+        assert_eq!(blob_count, 1, "unchanged store rewrites no blobs");
+    }
+
+    #[tokio::test]
+    async fn same_content_two_paths_dedupe_to_one_blob() {
+        let td = tempdir().unwrap();
+        let home = td.path().join("home");
+        fs::create_dir_all(&home).unwrap();
+        let cwd = td.path().join("repo");
+        fs::create_dir_all(&cwd).unwrap();
+        let store = td.path().join("claude-store");
+        // Two distinct sessions with IDENTICAL content.
+        write_claude_store(
+            &store,
+            "sess-1",
+            "{\"sessionId\":\"sess-1\",\"cwd\":\"/repo\"}",
+        );
         write_claude_store(
             &store,
             "sess-2",
             "{\"sessionId\":\"sess-1\",\"cwd\":\"/repo\"}",
         );
+        let artifact = td.path().join("snapshots");
 
-        let second = claude_snapshot(&artifact, &home, &cwd, &store).await;
-        assert_eq!(second.snapshotted(), 0, "no new blobs on rerun");
-        assert_eq!(second.already_known(), 2, "both sources dedupe");
-        assert!(
-            second
-                .sources
-                .iter()
-                .all(|s| s.sha256 == first.sources[0].sha256.clone())
-        );
-
-        // Deterministic index: identical bytes across runs.
-        let index_first = fs::read(artifact.join("claude").join("index.json")).unwrap();
-        let index_second = fs::read(artifact.join("claude").join("index.json")).unwrap();
+        let snap = claude_snapshot(&artifact, &home, &cwd, &store).await;
+        // Same content on a second path dedupes: one fresh snapshot, one
+        // already-known, one shared blob.
+        assert_eq!(snap.snapshotted(), 1, "first path writes the blob");
+        assert_eq!(snap.already_known(), 1, "second identical path dedupes");
+        // Identical sanitized content → one content-addressed blob address.
         assert_eq!(
-            index_first, index_second,
-            "index must be byte-deterministic"
+            snap.sources[0].sha256, snap.sources[1].sha256,
+            "identical content must dedupe to one blob address"
+        );
+        let blob = artifact.join("claude").join(&snap.sources[0].sha256);
+        assert!(blob.is_file());
+        let dir = artifact.join("claude");
+        let blob_count = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                name != "index.json" && !name.starts_with('.')
+            })
+            .count();
+        assert_eq!(blob_count, 1, "two identical sources share one blob");
+    }
+
+    #[tokio::test]
+    async fn representative_secrets_never_appear_in_blobs_or_index() {
+        let td = tempdir().unwrap();
+        let home = td.path().join("home");
+        fs::create_dir_all(&home).unwrap();
+        let cwd = td.path().join("repo");
+        fs::create_dir_all(&cwd).unwrap();
+        let store = td.path().join("claude-store");
+        let secret = "sk-ant-test1234567890abcdefghijklmn";
+        let body = format!(
+            "{{\"api_key\":\"{}\",\"cwd\":\"/repo\",\"note\":\"not a secret\"}}",
+            secret
+        );
+        write_claude_store(&store, "sess-1", &body);
+        let artifact = td.path().join("snapshots");
+
+        let snap = claude_snapshot(&artifact, &home, &cwd, &store).await;
+        assert_eq!(snap.snapshotted(), 1);
+
+        // Scan every blob under the harness dir for the secret.
+        let dir = artifact.join("claude");
+        let mut leaked_blob = false;
+        for entry in fs::read_dir(&dir).unwrap().flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') || name == "index.json" {
+                continue;
+            }
+            let bytes = fs::read(entry.path()).unwrap();
+            if bytes.windows(secret.len()).any(|w| w == secret.as_bytes()) {
+                leaked_blob = true;
+                break;
+            }
+        }
+        assert!(!leaked_blob, "secret must not appear in any stored blob");
+
+        // Same scan over index.json.
+        let index = fs::read(dir.join("index.json")).unwrap();
+        assert!(
+            !index.windows(secret.len()).any(|w| w == secret.as_bytes()),
+            "secret must not appear in index.json"
         );
     }
 
@@ -655,9 +1034,17 @@ mod tests {
         fs::create_dir_all(&cwd).unwrap();
         let artifact = td.path().join("snapshots");
 
-        let snap = snapshot_store(ManagedHarness::Antigravity, &artifact, &home, &cwd, None)
-            .await
-            .unwrap();
+        let snap = snapshot_store(
+            ManagedHarness::Antigravity,
+            &artifact,
+            &home,
+            &cwd,
+            None,
+            TEST_MACHINE,
+            &sanitizer(),
+        )
+        .await
+        .unwrap();
 
         assert!(
             snap.unsupported.is_some(),
@@ -678,11 +1065,12 @@ mod tests {
 
         // Opening a directory read-only succeeds on Linux but reading it fails
         // (EISDIR), which exercises the unreadable path without depending on
-        // ambient permissions (a chmod-000 file is still readable by root).
+        // ambient permissions.
         let dir = td.path().join("a-directory");
         fs::create_dir_all(&dir).unwrap();
 
-        let snap = snapshot_file(ManagedHarness::Claude, &artifact, &dir, &dir).unwrap();
+        let snap = snapshot_text_store(ManagedHarness::Claude, &artifact, &dir, &dir, &sanitizer())
+            .unwrap();
 
         assert_eq!(
             snap.outcome,
@@ -691,25 +1079,18 @@ mod tests {
         );
         assert!(snap.detail.is_some(), "reason must travel with the loss");
         assert_eq!(snap.sha256, "");
-        // No blob may have been written for an unreadable source: the only
-        // file the harness dir may hold is the index (which write_index emits
-        // because sources were seen) — a published blob or a stray temp is a
-        // failure.
+        // No blob may be written for an unreadable source (this low-level call
+        // bypasses write_index and emits no index).
         let dir = artifact.join("claude");
-        let mut stray = false;
         if let Ok(entries) = fs::read_dir(&dir) {
-            for entry in entries.filter_map(Result::ok) {
-                let path = entry.path();
-                let name = path
-                    .file_name()
-                    .map(|name| name.to_string_lossy())
-                    .unwrap_or_default();
-                if name != "index.json" {
-                    stray = true;
-                }
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                assert!(
+                    !name.starts_with(".blob-") && name != "index.json",
+                    "stray artifact {name}"
+                );
             }
         }
-        assert!(!stray, "no blob may be written for an unreadable source");
     }
 
     #[tokio::test]
@@ -720,7 +1101,7 @@ mod tests {
         fs::create_dir_all(&cwd).unwrap();
         let artifact = td.path().join("snapshots");
 
-        let report = snapshot_all_harnesses(&artifact, &home, &cwd)
+        let report = snapshot_all_harnesses(&artifact, &home, &cwd, TEST_MACHINE, &sanitizer())
             .await
             .unwrap();
         // Every known harness is present, whether or not it had a store.
@@ -736,5 +1117,104 @@ mod tests {
             }),
             "every non-clean harness must carry an explicit reason"
         );
+    }
+
+    /// Durable provenance: the run ledger records machine identity, harness,
+    /// absolute source identity, and capture time without disturbing the
+    /// byte-deterministic index.
+    #[tokio::test]
+    async fn provenance_ledger_records_machine_harness_and_capture_time() {
+        let td = tempdir().unwrap();
+        let home = td.path().join("home");
+        fs::create_dir_all(&home).unwrap();
+        let cwd = td.path().join("repo");
+        fs::create_dir_all(&cwd).unwrap();
+        let store = td.path().join("claude-store");
+        write_claude_store(
+            &store,
+            "sess-1",
+            "{\"sessionId\":\"sess-1\",\"cwd\":\"/repo\"}",
+        );
+        let artifact = td.path().join("snapshots");
+
+        let snap = claude_snapshot(&artifact, &home, &cwd, &store).await;
+        assert_eq!(snap.snapshotted(), 1);
+
+        let ledger = artifact.join(PROVENANCE_LEDGER);
+        assert!(ledger.is_file(), "provenance ledger must be written");
+        let text = fs::read_to_string(&ledger).unwrap();
+        let record: serde_json::Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();
+        assert_eq!(record["machine_id"], "test-machine");
+        assert_eq!(record["harness"], "claude");
+        assert!(record["capture_time"].is_string(), "capture time recorded");
+        assert!(
+            record["sources"][0]["source"]
+                .as_str()
+                .unwrap()
+                .ends_with("sess-1.jsonl")
+        );
+    }
+
+    /// A live-WAL regression: a committed row that exists only in the WAL
+    /// (not yet checkpointed into the main database file) must survive into the
+    /// preserved blob.
+    #[tokio::test]
+    async fn sqlite_store_preserves_committed_wal_data_transactionally() {
+        let td = tempdir().unwrap();
+        let home = td.path().join("home");
+        fs::create_dir_all(&home).unwrap();
+        let cwd = td.path().join("repo");
+        fs::create_dir_all(&cwd).unwrap();
+        let artifact = td.path().join("snapshots");
+
+        // Build an OpenCode-style store where discovery expects opencode.db.
+        let db_root = td.path().join("opencode-store");
+        fs::create_dir_all(&db_root).unwrap();
+        let db = db_root.join("opencode.db");
+
+        // Create a WAL-mode database, commit a row, and keep the connection
+        // open so the row is WAL-resident (not checkpointed into the main
+        // opencode.db file).
+        {
+            let conn = Connection::open(&db).unwrap();
+            conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+            conn.execute_batch(
+                "CREATE TABLE evidence (id INTEGER PRIMARY KEY, body TEXT);
+                 INSERT INTO evidence (body) VALUES ('wal-resident-committed');",
+            )
+            .unwrap();
+
+            let snap = snapshot_store(
+                ManagedHarness::OpenCode,
+                &artifact,
+                &home,
+                &cwd,
+                Some(&db_root),
+                TEST_MACHINE,
+                &sanitizer(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(snap.snapshotted(), 1, "one blob for the opencode store");
+            assert_eq!(snap.unreadable(), 0);
+
+            // The emitted blob, opened as a database, must contain the
+            // committed WAL-resident row.
+            let sha = snap.sources[0].sha256.clone();
+            let blob = artifact.join("opencode").join(&sha);
+            assert!(blob.is_file(), "blob exists at {}", blob.display());
+            let check = Connection::open(&blob).unwrap();
+            let count: i64 = check
+                .query_row(
+                    "SELECT COUNT(*) FROM evidence WHERE body = ?1",
+                    params!["wal-resident-committed"],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                count, 1,
+                "committed WAL-resident row must be preserved in the blob"
+            );
+        }
     }
 }

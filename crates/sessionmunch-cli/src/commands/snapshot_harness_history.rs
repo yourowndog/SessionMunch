@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
 use serde_json::{Value, json};
+use sessionmunch_core::Sanitizer;
 use sessionmunch_workstream::{
     HarnessSnapshot, ManagedHarness, SnapshotOutcome, SnapshotReport, snapshot_all_harnesses,
     snapshot_store,
@@ -24,6 +25,9 @@ pub async fn run(config: &Config, args: SnapshotHarnessHistoryArgs) -> Result<()
     std::fs::create_dir_all(&artifact_root)
         .with_context(|| format!("creating snapshot root {}", artifact_root.display()))?;
 
+    let sanitizer = Sanitizer::new(&config.sanitize).context("building canonical sanitizer")?;
+    let machine_id = sysinfo::System::host_name().unwrap_or_else(|| "localhost".to_string());
+
     let home = args
         .home
         .clone()
@@ -38,20 +42,22 @@ pub async fn run(config: &Config, args: SnapshotHarnessHistoryArgs) -> Result<()
         .ok()
         .unwrap_or(Path::new(".").to_path_buf());
 
-    let report = if let Some(harness) = args.harness.clone() {
+    let report = if let Some(harness) = args.harness {
         let snap = snapshot_store(
             to_managed(harness),
             &artifact_root,
             &home,
             &cwd,
             args.session_dir.as_deref(),
+            &machine_id,
+            &sanitizer,
         )
         .await?;
         SnapshotReport {
             harnesses: vec![snap],
         }
     } else {
-        snapshot_all_harnesses(&artifact_root, &home, &cwd).await?
+        snapshot_all_harnesses(&artifact_root, &home, &cwd, &machine_id, &sanitizer).await?
     };
 
     if args.json {
@@ -108,12 +114,9 @@ fn print_report(report: &SnapshotReport, root: &Path) {
 
 fn print_harness(snap: &HarnessSnapshot) {
     let name = snap.harness.as_str();
-    match snap.unsupported.as_deref() {
-        Some(reason) => {
-            println!("{name}: UNSUPPORTED — {reason}");
-            return;
-        }
-        None => {}
+    if let Some(reason) = snap.unsupported.as_deref() {
+        println!("{name}: UNSUPPORTED — {reason}");
+        return;
     }
     if snap.is_clean() {
         println!("{name}: OK");
@@ -151,7 +154,7 @@ fn report_json(report: &SnapshotReport, root: &Path) -> Value {
     let harnesses = report
         .harnesses
         .iter()
-        .map(|snap| harness_json(snap))
+        .map(harness_json)
         .collect::<Vec<Value>>();
     let value: Value = json!({
         "snapshot_version": SNAPSHOT_VERSION.to_string(),

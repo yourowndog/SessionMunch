@@ -33,10 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unchanged store writes no new blobs and produces a byte-identical
   per-harness `index.json`), and reports per harness the discovered, snapshotted,
   already-known, unreadable, missing, and unsupported sources so no loss is
-  silent. SQLite-backed stores (opencode/opencode2/crush) snapshot the store
-  database file; Antigravity's id-addressed per-conversation stores are reported
-  unsupported. `--harness` limits to one harness; `--json` emits a structured
-  report. (#t_0bbcdf6b)
+  silent. Sanitization-before-persistence is enforced through the canonical
+  `Sanitizer` before any source bytes are hashed, written, deduplicated, or
+  indexed (North Star invariant 7); SQLite-backed stores (opencode/opencode2/
+  crush) are snapshotted transactionally via the SQLite online backup API so
+  committed WAL-resident rows are preserved, then their text cells are scrubbed
+  in place so the preserved database carries no secrets and stays reopenable.
+  Durable provenance (machine identity, harness, absolute source/store identity,
+  capture time, best-effort repository HEAD/branch) is appended to a per-run
+  `provenance.jsonl` ledger without perturbing deterministic content identity.
+  Antigravity's id-addressed per-conversation stores are reported unsupported.
+  `--harness` limits to one harness; `--json` emits a structured report.
+  (#t_0bbcdf6b, #t_d0a5e721)
 - New opt-in local cross-encoder reranker behind the existing
   `ai_memory_core::CrossEncoder` trait: `ai_memory_llm::CrossEncoderReranker`
   runs the pinned `cross-encoder/ms-marco-MiniLM-L-6-v2` candle model locally,
