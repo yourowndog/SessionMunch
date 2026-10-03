@@ -22,6 +22,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   API-key prefixes are unchanged (credential contract, not branding).
 
 ### Added
+- Promoted the portable workstream-event concept into a general session-owned
+  source ledger (North Star §4, P1): a new `session_events` table lets hook,
+  transcript-import, and managed events converge on one `sessions` row, with
+  idempotent insertion on the stable source-derived `event_id` and per-event
+  best-effort model/provider metadata. Sessions gain provenance columns
+  (`native_session_id`, `machine_id`, `git_root`, `git_branch`,
+  `commit_at_start`, `source`, `import_cursor`), `project_id` becomes nullable
+  for global/host-wide rows, and the `sessions.agent_kind` CHECK enum —
+  historically a full-table rebuild per new harness — is dropped so harness is
+  free text and future harnesses require no schema change. `observations`
+  remains readable for compatibility but is no longer the authoritative
+  history. New store APIs: `begin_session_with_provenance`,
+  `append_session_events`, `update_session_provenance`, and `session_events`
+  read. Migration V65 is the last of its rebuild class. (#t_9d619ad4)
+- New authenticated `POST /session-events` ingest endpoint that lets remote
+  nodes drain batched session events into the promoted ledger. It runs behind
+  the same `require_bearer` machine middleware as `/hook` and `/workstream/*`
+  (401 on a missing/bad token, 400 on a malformed or schema-invalid batch, 202
+  on a valid one), scrubs every untrusted field through the sanitizer before
+  persistence, and is idempotent on the stable `event_id` — re-draining an
+  identical batch yields identical row counts and zero duplication. (#t_d4871a5a)
 - New `sessionmunch snapshot-harness-history` command that snapshots perishable
   native harness transcript stores into hashed, content-addressed, read-only
   artifacts (North Star §5.9, P0 "stop losing history"). It reuses the existing

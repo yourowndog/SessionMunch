@@ -28,6 +28,7 @@ mod reader;
 mod retrieval_tuning;
 mod scope;
 mod session_consolidation;
+mod session_events;
 pub mod users;
 pub mod web_sessions;
 mod workstream;
@@ -60,6 +61,7 @@ pub use ops::{
 };
 pub use passage_index::{PagePassage, PageSection};
 pub use reader::PassageEmbedCandidate;
+pub use sessionmunch_core::session_events::SessionEventHit;
 pub use reader::{
     ActivityWindow, AgentSessionCount, AuditEvent, AuditLogFilter, AutoImproveCandidateSession,
     BriefPageBody, BriefingPage, BriefingSnapshot, ClientActivity, ContaminationFinding,

@@ -26,6 +26,7 @@ pub mod capture_policy;
 pub mod log;
 pub mod payload;
 pub mod router;
+pub mod session_events;
 pub mod synth;
 pub mod workstream;
 
@@ -52,6 +53,7 @@ pub use router::{
     DEFAULT_PROJECT_CACHE_MAX_ENTRIES, HookState, IngestGates, IngestRateLimiter, ProjectCache,
     ProjectCacheStore, SubagentSessionSet, SubagentSessions, hook_router,
 };
+pub use session_events::{SessionEventState, session_events_router};
 pub use synth::synthesize_session_page;
 pub use workstream::{WorkstreamState, workstream_router};
 

@@ -21,5 +21,6 @@ mod handoff_admission;
 mod handoff_identity;
 mod jev_benchmark;
 mod mcp_stateless_http;
+mod session_event_ingest;
 mod slot_identity;
 mod stress_autoscope;

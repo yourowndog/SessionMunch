@@ -3477,6 +3477,7 @@ const ALL_FTS_INDEXES: &[&str] = &[
     "observations_fts",
     "page_passages_fts",
     "pages_fts",
+    "session_events_fts",
     "workstream_events_fts",
 ];
 

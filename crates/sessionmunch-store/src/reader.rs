@@ -20,7 +20,7 @@ use sessionmunch_core::{
     AgentKind, AutoImproveProposalId, AutoImproveRunId, Handoff, HandoffContent, HandoffId,
     HandoffLifecycle, HandoffOrigin, HandoffScope, HandoffState, IdentityKey, ManagedRunId,
     Observation, ObservationId, ObservationKind, OwnerFilter, PageId, PagePath, ProjectId,
-    SessionId, User, UserId, WorkspaceId, WorkstreamEvent, WorkstreamId,
+    SessionEvent, SessionEventHit, SessionId, User, UserId, WorkspaceId, WorkstreamEvent, WorkstreamId,
 };
 use uuid::Uuid;
 // `sessionmunch_core::Tier` is referenced via fully-qualified path inside the
@@ -2807,6 +2807,57 @@ impl ReaderPool {
                 out.push(r??);
             }
             Ok(out)
+        })
+        .await
+    }
+
+    /// Read the promoted session-owned event ledger (newest first).
+    ///
+    /// Returns up to `limit` events for `session_id`. This is the authoritative
+    /// history going forward; [`Self::observations_for_session`] remains for
+    /// compatibility with the old capture path.
+    ///
+    /// # Errors
+    /// Propagates any SQL or pool error.
+    pub async fn session_events(
+        &self,
+        session_id: SessionId,
+        limit: usize,
+    ) -> StoreResult<Vec<SessionEvent>> {
+        self.with_conn(move |conn| {
+            crate::session_events::list_session_events(conn, &session_id, limit)
+        })
+        .await
+    }
+
+    /// Search session events globally across all sessions using full-text search.
+    pub async fn search_session_events(
+        &self,
+        query: String,
+        limit: usize,
+    ) -> StoreResult<Vec<SessionEventHit>> {
+        self.with_conn(move |conn| {
+            crate::session_events::search_session_events(conn, &query, limit)
+        })
+        .await
+    }
+
+    /// Search session events scoped to a workspace and project.
+    pub async fn search_session_events_scoped(
+        &self,
+        workspace_id: WorkspaceId,
+        project_id: ProjectId,
+        query: String,
+        limit: usize,
+    ) -> StoreResult<Vec<SessionEventHit>> {
+        self.with_conn(move |conn| {
+            crate::session_events::search_session_events_scoped(
+                conn,
+                workspace_id,
+                project_id,
+                &query,
+                limit,
+            )
         })
         .await
     }

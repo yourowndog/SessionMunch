@@ -26,7 +26,7 @@ use sessionmunch_consolidate::{
 use sessionmunch_core::{ActiveProject, ProjectId, Sanitizer, WorkspaceId};
 use sessionmunch_hooks::{
     DEFAULT_HOOK_INGEST_MAX_IN_FLIGHT, HookState, ProjectCacheStore, WorkstreamState, hook_router,
-    workstream_router,
+    session_events_router, workstream_router,
 };
 use sessionmunch_llm::{Embedder, LlmProvider, ProviderHealth, build_embedder};
 use sessionmunch_mcp::human_auth::{Cidr, HumanAuthRuntime, LoginLimiter};
@@ -1179,6 +1179,12 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
                 sanitizer: sanitizer.clone(),
                 data_dir: config.data_dir.clone(),
             });
+            let session_events =
+                session_events_router(sessionmunch_hooks::SessionEventState {
+                    writer: store.writer.clone(),
+                    reader: store.reader.clone(),
+                    sanitizer: sanitizer.clone(),
+                });
             let admin = admin_router_with_sweep_tuning(
                 AdminState {
                     ingest_metrics: ingest_metrics.clone(),
@@ -1300,6 +1306,7 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
                 .nest_service("/mcp", mcp_service)
                 .merge(hooks)
                 .merge(workstreams)
+                .merge(session_events)
                 .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
                 .layer(axum::middleware::from_fn_with_state(
                     auth_state.clone(),

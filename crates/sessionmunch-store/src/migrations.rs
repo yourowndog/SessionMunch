@@ -1052,4 +1052,117 @@ mod tests {
             .unwrap();
         assert_eq!(passage_count, 0);
     }
+
+    #[test]
+    fn v64_to_v65_promotes_session_events_and_free_text_harness() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_to(&mut conn, 64).unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        let workspace_id = crate::ops::get_or_create_workspace(&mut conn, "default").unwrap();
+        let project_id =
+            crate::ops::get_or_create_project(&mut conn, &workspace_id, "project", None).unwrap();
+        // Insert a legacy-era session with observations that must survive.
+        let legacy_session = SessionId::new();
+        conn.execute(
+            "INSERT INTO sessions \
+             (id, workspace_id, project_id, agent_kind, cwd, started_at, ended_at, \
+              ended_observation_count, actor_user) \
+             VALUES (?1, ?2, ?3, 'hermes', '/repo', 1, 2, 7, 'user:alice')",
+            params![
+                legacy_session.as_bytes(),
+                workspace_id.as_bytes(),
+                project_id.as_bytes(),
+            ],
+        )
+        .unwrap();
+        let obs_id = sessionmunch_core::ObservationId::new();
+        conn.execute(
+            "INSERT INTO observations(id, session_id, workspace_id, project_id, kind, title, \
+             body, importance, created_at) \
+             VALUES (?1, ?2, ?3, ?4, 'user-prompt', 't', 'b', 5, 1)",
+            params![
+                obs_id.as_bytes(),
+                legacy_session.as_bytes(),
+                workspace_id.as_bytes(),
+                project_id.as_bytes(),
+            ],
+        )
+        .unwrap();
+
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        run(&mut conn).unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+
+        // (1) Old data remains readable after the promotion.
+        let preserved: (String, String, i64, Option<String>) = conn
+            .query_row(
+                "SELECT agent_kind, cwd, ended_observation_count, actor_user \
+                 FROM sessions WHERE id = ?1",
+                params![legacy_session.as_bytes()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            preserved,
+            (
+                "hermes".into(),
+                "/repo".into(),
+                7,
+                Some("user:alice".into())
+            )
+        );
+        let obs_readable: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM observations WHERE session_id = ?1",
+                params![legacy_session.as_bytes()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(obs_readable, 1, "observations remain readable");
+
+        // (2) The recurring harness CHECK-table rebuild class is gone: a new
+        // harness string (not present in any historic CHECK enum) inserts into
+        // the free-text column with no schema change.
+        let new_harness = SessionId::new();
+        conn.execute(
+            "INSERT INTO sessions \
+             (id, workspace_id, project_id, agent_kind, started_at) \
+             VALUES (?1, ?2, ?3, 'some-future-harness', 1)",
+            params![
+                new_harness.as_bytes(),
+                workspace_id.as_bytes(),
+                project_id.as_bytes(),
+            ],
+        )
+        .unwrap();
+        // And a NULL project (global/host-wide session) is now accepted.
+        let global = SessionId::new();
+        conn.execute(
+            "INSERT INTO sessions \
+             (id, workspace_id, project_id, agent_kind, started_at) \
+             VALUES (?1, ?2, NULL, 'hermes', 1)",
+            params![global.as_bytes(), workspace_id.as_bytes()],
+        )
+        .unwrap();
+
+        // (3) The promoted session-owned event ledger exists and is usable.
+        let ledger_table: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'session_events'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(ledger_table, 1);
+        assert_eq!(
+            schema_object_count(&conn, "index", "idx_session_events_recent"),
+            1
+        );
+        assert_eq!(schema_object_count(&conn, "table", "session_events_fts"), 1);
+        assert_eq!(
+            schema_object_count(&conn, "index", "idx_sessions_native"),
+            1,
+            "V65 must add the machine/harness/native-session index"
+        );
+    }
 }
