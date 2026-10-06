@@ -1,11 +1,23 @@
 //! Read-only native harness adapters used by `sessionmunch run`.
+//!
+//! Includes the content-addressed, compressed artifact store
+//! ([`artifact`]) used for large sanitized evidence and its provenance
+//! linkage.
 
+mod artifact;
+mod artifact_client;
 mod drain;
 mod harness;
 mod repository;
 mod snapshot;
 mod spool;
 mod transcript;
+
+pub use artifact::{
+    ARTIFACTS_PATH, ArtifactError, ArtifactLoss, ArtifactProvenance, ArtifactReceipt,
+    ArtifactStore, ArtifactUpload,
+};
+pub use artifact_client::{ARTIFACT_UPLOAD_BYTE_CAP, ArtifactClient, ArtifactClientError};
 
 pub use crate::drain::{
     DeliveryReceipt, DrainReport, EventSink, HttpEventSink, SESSION_EVENTS_PATH, SinkError,
@@ -28,3 +40,7 @@ pub use transcript::{
     kiro_harness_from_source_cursor, kiro_v3_resume_uses_default_store, list_native_sessions,
     native_session_exists, wait_for_transcript_flush,
 };
+
+#[cfg(test)]
+#[path = "../tests/suite/mod.rs"]
+mod integration;

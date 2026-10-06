@@ -14,6 +14,10 @@ anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+# For compressing large artifact evidence (content-addressed storage).
+flate2.workspace = true
+# For resolving the canonical runtime artifact root under the data dir.
+dirs.workspace = true
 # Kimi wire records timestamp in ms epoch; jiff renders them RFC3339 like the
 # other harnesses' native ISO strings.
 jiff.workspace = true

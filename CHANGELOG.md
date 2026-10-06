@@ -66,6 +66,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Antigravity's id-addressed per-conversation stores are reported unsupported.
   `--harness` limits to one harness; `--json` emits a structured report.
   (#t_0bbcdf6b, #t_d0a5e721)
+- New `[cluster]` node-topology configuration (North Star P1.3) that lets a
+  node declare its role in a Brokentooth/Sleeper deployment — `node_id`
+  (validated machine-readable id), `role` (`standalone` default, `hub`, or
+  `satellite`), `central_url`, and `auth_token`. The default posture is
+  unchanged: strictly local standalone, no remote URL, no credential. The
+  config is validated at load time and fails closed — a `node_id`,
+  `central_url`, or `auth_token` supplied while role stays `standalone`, or a
+  hub/satellite missing its `node_id`/`central_url`, is refused at startup.
+  `serve` surfaces the resolved topology once at startup for a clustered node.
+  Env overrides: `SESSIONMUNCH_CLUSTER__NODE_ID`, `SESSIONMUNCH_CLUSTER__ROLE`,
+  `SESSIONMUNCH_CLUSTER__CENTRAL_URL`, `SESSIONMUNCH_CLUSTER__AUTH_TOKEN`.
+  (#t_663c8f39)
+- New content-addressed, gzip-compressed artifact store and authoritative
+  `POST /artifacts` ingest endpoint (North Star P1.4) for shipping large
+  sanitized evidence (full tool outputs, imported transcripts) from a remote
+  node to the canonical Hub. Blobs are named by the lowercase SHA-256 hex of
+  their raw bytes (deduplicating identical content), verified on both write
+  and read, and stored under `<data_dir>/artifacts/`; a lying caller-supplied
+  receipt hash is refused (409) with nothing persisted, a corrupt or tampered
+  pre-existing blob fails verification explicitly, and a retried store repairs
+  or rejects it — never silently succeeds. Provenance (session id, node id,
+  harness, event id/source) is linked per artifact in a small registry and a
+  satellite-side `ArtifactClient` ships uploads to the same wire contract the
+  server parses, so the two can never drift. (#t_663c8f39)
 - New opt-in local cross-encoder reranker behind the existing
   `ai_memory_core::CrossEncoder` trait: `ai_memory_llm::CrossEncoderReranker`
   runs the pinned `cross-encoder/ms-marco-MiniLM-L-6-v2` candle model locally,

@@ -21,6 +21,7 @@
 //! This crate does not read process environment directly; server configuration
 //! is resolved once by `sessionmunch-cli` and threaded in as typed state.
 
+pub mod artifacts;
 mod assistant_capture;
 pub mod capture_policy;
 pub mod log;
@@ -36,6 +37,7 @@ pub use sessionmunch_core::{SanitizeConfig, Sanitized, Sanitizer};
 // Client-side symbols used by the CLI crate; the server-side `apply_assistant_backstop`
 // and the protocol/table internals stay crate-private (router reaches them via
 // `crate::assistant_capture`).
+pub use artifacts::{ArtifactState, artifacts_router};
 pub use assistant_capture::{
     ClientAssistantTransform, strip_assistant_message_raw, transform_for_client,
 };

@@ -25,8 +25,8 @@ use sessionmunch_consolidate::{
 };
 use sessionmunch_core::{ActiveProject, ProjectId, Sanitizer, WorkspaceId};
 use sessionmunch_hooks::{
-    DEFAULT_HOOK_INGEST_MAX_IN_FLIGHT, HookState, ProjectCacheStore, WorkstreamState, hook_router,
-    session_events_router, workstream_router,
+    DEFAULT_HOOK_INGEST_MAX_IN_FLIGHT, HookState, ProjectCacheStore, WorkstreamState,
+    artifacts_router, hook_router, session_events_router, workstream_router,
 };
 use sessionmunch_llm::{Embedder, LlmProvider, ProviderHealth, build_embedder};
 use sessionmunch_mcp::human_auth::{Cidr, HumanAuthRuntime, LoginLimiter};
@@ -40,6 +40,7 @@ use sessionmunch_store::{
 };
 use sessionmunch_web::{WebMountSpec, normalize_prefix, split_web_routers, web_base_href};
 use sessionmunch_wiki::{WatcherHandle, Wiki, migrations, run_wiki_migrations};
+use sessionmunch_workstream::ArtifactStore;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -1184,6 +1185,16 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
                 reader: store.reader.clone(),
                 sanitizer: sanitizer.clone(),
             });
+            // P1.3 startup topology wiring: the canonical Hub owns the
+            // authoritative content-addressed artifact store under its data
+            // dir, and exposes `POST /artifacts` beside `/session-events` so
+            // remote satellites can ship large sanitized evidence. The store
+            // root is derived from the configured data dir (never from a
+            // caller-supplied path).
+            let artifact_root = config.data_dir.join("artifacts");
+            let artifacts = artifacts_router(sessionmunch_hooks::ArtifactState {
+                store: std::sync::Arc::new(ArtifactStore::open(&artifact_root)?),
+            });
             let admin = admin_router_with_sweep_tuning(
                 AdminState {
                     ingest_metrics: ingest_metrics.clone(),
@@ -1306,6 +1317,7 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
                 .merge(hooks)
                 .merge(workstreams)
                 .merge(session_events)
+                .merge(artifacts)
                 .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
                 .layer(axum::middleware::from_fn_with_state(
                     auth_state.clone(),
@@ -1397,6 +1409,20 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
                 args.allow_insecure_no_auth,
                 running_in_container(),
             )?;
+            // P1.3: surface the resolved cluster topology once at startup so
+            // an operator can see at a glance whether this node participates
+            // in a Brokentooth/Sleeper deployment and where the canonical Hub
+            // sits (no-op for the default standalone posture).
+            if config.cluster.is_clustered() {
+                info!(
+                    role = config.cluster.role.as_str(),
+                    central = config.cluster.central_url().unwrap_or("<none>"),
+                    "cluster topology: node {:?} is a {:?} reporting to hub {:?}",
+                    config.cluster.node_id.as_deref().unwrap_or("<unset>"),
+                    config.cluster.role.as_str(),
+                    config.cluster.central_url().unwrap_or("<none>"),
+                );
+            }
             info!(
                 %local_addr,
                 auth = auth_enabled,
