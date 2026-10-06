@@ -3,30 +3,37 @@ set -euo pipefail
 
 echo "--- Plugin Lifecycle Test ---"
 
-PLUGIN_DIR="$HOME/.hermes/profiles/builder-b/plugins/sessionmunch"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+TEST_HOME="$(mktemp -d "${TMPDIR:-/tmp}/sessionmunch-hermes-lifecycle.XXXXXX")"
+trap 'rm -rf -- "$TEST_HOME"' EXIT
+export HERMES_HOME="$TEST_HOME"
+PLUGIN_DIR="$HERMES_HOME/plugins/sessionmunch"
 
-# 1. Clean/Uninstall by moving away
-if [ -d "$PLUGIN_DIR" ]; then
-    mv "$PLUGIN_DIR" "/tmp/sessionmunch_test_trash_$(date +%s)_$RANDOM"
-fi
+hermes config set memory.provider sessionmunch >/dev/null
 
-# 2. Check uninstalled
-if hermes memory status | grep -q "NOT installed"; then
-    echo "PASS: Uninstalled correctly"
-else
-    echo "FAIL: Not uninstalled"
+uninstalled_output="$(hermes memory status)"
+grep -Fq "Provider:  sessionmunch" <<<"$uninstalled_output"
+grep -Fq "Plugin:    NOT installed ✗" <<<"$uninstalled_output"
+echo "PASS: Isolated home reports the plugin uninstalled"
+
+mkdir -p "$(dirname -- "$PLUGIN_DIR")"
+cp -R -- "$SCRIPT_DIR" "$PLUGIN_DIR"
+
+installed_output="$(hermes memory status)"
+grep -Fq "Provider:  sessionmunch" <<<"$installed_output"
+grep -Fq "Plugin:    installed ✓" <<<"$installed_output"
+grep -Fq "• sessionmunch  (API key / local) ← active" <<<"$installed_output"
+echo "PASS: Isolated home reports the plugin installed and active"
+
+rm -rf -- "$PLUGIN_DIR"
+
+removed_output="$(hermes memory status)"
+grep -Fq "Provider:  sessionmunch" <<<"$removed_output"
+grep -Fq "Plugin:    NOT installed ✗" <<<"$removed_output"
+if grep -Fq "• sessionmunch" <<<"$removed_output"; then
+    echo "FAIL: Removed plugin still appears in installed plugins"
     exit 1
 fi
-
-# 3. Install
-cp -r . "$PLUGIN_DIR"
-
-# 4. Check installed
-if hermes memory status | grep -q "installed ✓"; then
-    echo "PASS: Installed correctly"
-else
-    echo "FAIL: Not installed"
-    exit 1
-fi
+echo "PASS: Isolated home reports the plugin removed"
 
 echo "PASS: Tests completed."

@@ -10,3 +10,12 @@ dependencies = []
 
 [project.entry-points."hermes_agent.memory_providers"]
 sessionmunch = "hermes_sessionmunch.plugin:register"
+
+[tool.hatch.build.targets.wheel]
+only-include = [
+    "__init__.py",
+    "config_schema.py",
+    "legacy_reference.py",
+    "schema.py",
+    "scope.py",
+]
