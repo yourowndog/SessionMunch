@@ -79,7 +79,9 @@ pub use sanitize::{
     OBSERVATION_BODY_MAX_BYTES, SanitizeConfig, Sanitized, Sanitizer, truncate_utf8_bytes,
     truncate_utf8_bytes_head_tail,
 };
-pub use session_events::{NewSessionEvent, SessionEvent, SessionEventHit, SessionProvenance, SessionSource};
+pub use session_events::{
+    NewSessionEvent, SessionEvent, SessionEventHit, SessionProvenance, SessionSource,
+};
 pub use slots::{
     SLOT_PREFIX, SlotPlacement, SlotVisibility, is_slot_named, is_slot_path, slot_owner,
     slot_placement,

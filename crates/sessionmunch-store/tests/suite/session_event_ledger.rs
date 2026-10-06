@@ -234,7 +234,8 @@ async fn search_session_events_fts_global_and_scoped() {
                     kind: WorkstreamEventKind::Message,
                     role: Some("user".into()),
                     content: "How do I configure postgres replica failover?\
-Some extra context".into(),
+Some extra context"
+                        .into(),
                     occurred_at: Some("2026-10-02T10:00:00Z".into()),
                     source: SessionSource::Import,
                     metadata: serde_json::json!({"model": "claude-3-7-sonnet"}),

@@ -77,6 +77,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#t_c51f1a51).
 
 ### Fixed
+- A single malformed spool batch no longer wedges the session-event spool
+  head-of-line forever. `SpoolDrainer::drain_once` previously stopped the whole
+  pass on the first non-retryable delivery error and never advanced the
+  high-water mark, so every later pass re-hit the same bad batch and the good
+  batches behind it never shipped. A per-batch poison rejection (HTTP
+  400/413/422) is now moved to a dead-letter `quarantine/` directory as
+  evidence and the pass continues with the tail, so the spool drains completely
+  on reconnection. `DrainReport` gains `stopped_on_auth`, `quarantined_batches`,
+  and `quarantined_seqs`. (#t_0474cfae)
+- The drain sink now classifies HTTP status explicitly instead of treating
+  every non-202 as a permanent rejection. Only 400/413/422 are per-batch poison
+  and quarantine-eligible; 401/403 surface as a distinct `stopped_on_auth` auth
+  wall (previously indistinguishable from offline) and are never quarantined;
+  transient 408/425/429/5xx and wrong-endpoint 404/405/501 are retryable, so a
+  restart storm, rate limit, or misconfigured base URL retains its batches
+  instead of silently discarding them. (#t_0474cfae)
 - Updated `rustls` to >=0.23.45 (and `rustls-webpki` to 0.103.15) across the
   workspace and the companion importer, resolving the RUSTSEC-2026-0285
   advisory. No advisory ignore added. (#t_93c1c58c)

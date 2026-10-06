@@ -1179,12 +1179,11 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
                 sanitizer: sanitizer.clone(),
                 data_dir: config.data_dir.clone(),
             });
-            let session_events =
-                session_events_router(sessionmunch_hooks::SessionEventState {
-                    writer: store.writer.clone(),
-                    reader: store.reader.clone(),
-                    sanitizer: sanitizer.clone(),
-                });
+            let session_events = session_events_router(sessionmunch_hooks::SessionEventState {
+                writer: store.writer.clone(),
+                reader: store.reader.clone(),
+                sanitizer: sanitizer.clone(),
+            });
             let admin = admin_router_with_sweep_tuning(
                 AdminState {
                     ingest_metrics: ingest_metrics.clone(),

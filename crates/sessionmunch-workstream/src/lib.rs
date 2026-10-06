@@ -1,10 +1,18 @@
 //! Read-only native harness adapters used by `sessionmunch run`.
 
+mod drain;
 mod harness;
 mod repository;
 mod snapshot;
+mod spool;
 mod transcript;
 
+pub use crate::drain::{
+    DeliveryReceipt, DrainReport, EventSink, HttpEventSink, SESSION_EVENTS_PATH, SinkError,
+    SpoolDrainer,
+};
+/// Crash-safe local spooling and idempotent drain for remote session events.
+pub use crate::spool::{Spool, SpoolBatch, SpoolConfig, SpoolError, SpoolMetrics, SpooledRecord};
 pub use harness::{
     LaunchMode, LaunchPlan, ManagedHarness, allows_native_session_adoption, apply_yolo,
     build_launch_plan, has_native_session_selector, kiro_explicit_session_id,

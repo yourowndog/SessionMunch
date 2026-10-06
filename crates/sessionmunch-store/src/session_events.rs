@@ -282,8 +282,14 @@ pub(crate) fn search_session_events(
             occurred_at,
             metadata: serde_json::from_str(&metadata_json)?,
             source: SessionSource::from_wire(&source_str),
-            workspace_id: ws_bytes.as_deref().map(WorkspaceId::from_slice).transpose()?,
-            project_id: proj_bytes.as_deref().map(ProjectId::from_slice).transpose()?,
+            workspace_id: ws_bytes
+                .as_deref()
+                .map(WorkspaceId::from_slice)
+                .transpose()?,
+            project_id: proj_bytes
+                .as_deref()
+                .map(ProjectId::from_slice)
+                .transpose()?,
             harness,
             machine_id,
         });
@@ -330,7 +336,12 @@ pub(crate) fn search_session_events_scoped(
          LIMIT ?4",
     )?;
     let rows = stmt.query_map(
-        params![fts_query, workspace_id.as_bytes(), project_id.as_bytes(), limit],
+        params![
+            fts_query,
+            workspace_id.as_bytes(),
+            project_id.as_bytes(),
+            limit
+        ],
         |row| {
             Ok((
                 row.get::<_, Vec<u8>>(0)?,
@@ -384,8 +395,14 @@ pub(crate) fn search_session_events_scoped(
             occurred_at,
             metadata: serde_json::from_str(&metadata_json)?,
             source: SessionSource::from_wire(&source_str),
-            workspace_id: ws_bytes.as_deref().map(WorkspaceId::from_slice).transpose()?,
-            project_id: proj_bytes.as_deref().map(ProjectId::from_slice).transpose()?,
+            workspace_id: ws_bytes
+                .as_deref()
+                .map(WorkspaceId::from_slice)
+                .transpose()?,
+            project_id: proj_bytes
+                .as_deref()
+                .map(ProjectId::from_slice)
+                .transpose()?,
             harness,
             machine_id,
         });

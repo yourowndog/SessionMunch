@@ -31,6 +31,7 @@ sha2.workspace = true
 
 [dev-dependencies]
 sessionmunch-test-support.workspace = true
+sessionmunch-workstream.workspace = true
 tempfile.workspace = true
 git2.workspace = true
 sessionmunch-llm.workspace = true

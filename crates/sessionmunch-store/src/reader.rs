@@ -20,7 +20,8 @@ use sessionmunch_core::{
     AgentKind, AutoImproveProposalId, AutoImproveRunId, Handoff, HandoffContent, HandoffId,
     HandoffLifecycle, HandoffOrigin, HandoffScope, HandoffState, IdentityKey, ManagedRunId,
     Observation, ObservationId, ObservationKind, OwnerFilter, PageId, PagePath, ProjectId,
-    SessionEvent, SessionEventHit, SessionId, User, UserId, WorkspaceId, WorkstreamEvent, WorkstreamId,
+    SessionEvent, SessionEventHit, SessionId, User, UserId, WorkspaceId, WorkstreamEvent,
+    WorkstreamId,
 };
 use uuid::Uuid;
 // `sessionmunch_core::Tier` is referenced via fully-qualified path inside the

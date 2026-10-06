@@ -20,6 +20,11 @@ jiff.workspace = true
 rusqlite.workspace = true
 tokio.workspace = true
 uuid.workspace = true
+# For the HTTP drain sink (Sleeper batch ingest). Native-roots TLS keeps
+# private-PKI servers (the project's HTTPS-via-proxy path) reachable.
+reqwest.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

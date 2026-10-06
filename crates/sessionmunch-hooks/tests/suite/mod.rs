@@ -4,3 +4,4 @@
 
 mod powershell_home;
 mod powershell_utf8;
+mod sleeper_spool_outage;

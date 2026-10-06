@@ -140,7 +140,8 @@ wait $PID || true
     if !output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let serve_log = fs::read_to_string(&log_file).unwrap_or_else(|_| "serve.log not found".into());
+        let serve_log =
+            fs::read_to_string(&log_file).unwrap_or_else(|_| "serve.log not found".into());
         panic!(
             "isolated runtime test failed (outbound network access attempted or server crashed)\nExit status: {}\n--- unshare stdout ---\n{}\n--- unshare stderr ---\n{}\n--- serve.log ---\n{}",
             output.status, stdout, stderr, serve_log
