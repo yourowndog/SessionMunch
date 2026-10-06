@@ -101,6 +101,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#t_c51f1a51).
 
 ### Fixed
+- Renamed the legacy Architecture & Data Ownership guide so it no longer
+  differs from the canonical `docs/ARCHITECTURE.md` only by letter case,
+  preventing case-insensitive macOS and Windows checkouts from compiling the
+  CLI documentation test against the wrong file. (#t_e43b5210)
 - A single malformed spool batch no longer wedges the session-event spool
   head-of-line forever. `SpoolDrainer::drain_once` previously stopped the whole
   pass on the first non-retryable delivery error and never advanced the

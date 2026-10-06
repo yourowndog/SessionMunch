@@ -264,7 +264,7 @@ See [`docs/privacy-security.md`](docs/privacy-security.md).
 ## Documentation Suite
 
 - **[Landing Page Copy & Product Story](docs/landing-page.md):** Canonical public-facing website copy, claims, tone, and section structure.
-- **[Architecture & Data Ownership](docs/architecture.md):** Markdown storage layout, Git synchronization, single-writer pattern, and SQLite derivation.
+- **[Architecture & Data Ownership](docs/architecture-and-data-ownership.md):** Markdown storage layout, Git synchronization, single-writer pattern, and SQLite derivation.
 - **[Quickstart Guide](docs/quickstart.md):** Release-candidate setup, agent connection, and first useful retrieval.
 - **[Configuration Reference](docs/configuration.md):** TOML configuration reference, environment variables, and directory markers.
 - **[Opinionated Model & Hardware Guide](docs/models.md):** Copy-paste local/API profiles from CPU-only systems through 24 GB+ GPUs.
