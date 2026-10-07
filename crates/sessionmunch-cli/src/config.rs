@@ -789,8 +789,15 @@ fn validate_cluster(cluster: &ClusterSettings, data_dir: &Path) -> Result<(), an
                     cluster.role.as_str()
                 );
             }
-            // Validate the node_id string against the NodeId grammar.
-            let _ = cluster.node_id()?;
+            // Validate the node_id string against the NodeId grammar, and
+            // fail closed when the raw value collapses to no identity
+            // (e.g. a whitespace-only string maps to Ok(None), not Err).
+            if cluster.node_id()?.is_none() {
+                anyhow::bail!(
+                    "cluster.node_id must be a non-empty identifier for role {:?}",
+                    cluster.role.as_str()
+                );
+            }
         }
     }
     let _ = data_dir;
@@ -3599,6 +3606,26 @@ fn validate_cluster_non_standalone_requires_identity_and_central_url() {
             &ClusterSettings {
                 role: sessionmunch_core::ClusterRole::Hub,
                 node_id: Some("bad node/name".into()),
+                central_url: Some("http://sleeper:49374".into()),
+                ..ClusterSettings::default()
+            },
+            tmp.path(),
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn validate_cluster_hub_rejects_whitespace_only_node_id() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    // A whitespace-only node_id collapses to no identity (Ok(None)) and must
+    // be rejected for a hub, not silently accepted as a validated identity.
+    assert!(
+        validate_cluster(
+            &ClusterSettings {
+                role: sessionmunch_core::ClusterRole::Hub,
+                node_id: Some("   ".into()),
                 central_url: Some("http://sleeper:49374".into()),
                 ..ClusterSettings::default()
             },
