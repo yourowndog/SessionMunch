@@ -92,7 +92,12 @@ fn walk_rel(root: &Path) -> Vec<String> {
                 stack.push(p);
             } else {
                 let rel = p.strip_prefix(root).unwrap_or(&p);
-                out.push(rel.to_string_lossy().into_owned());
+                // `/`-joined so expectations read the same on Windows.
+                let parts: Vec<_> = rel
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                    .collect();
+                out.push(parts.join("/"));
             }
         }
     }
