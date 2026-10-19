@@ -121,6 +121,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transient 408/425/429/5xx and wrong-endpoint 404/405/501 are retryable, so a
   restart storm, rate limit, or misconfigured base URL retains its batches
   instead of silently discarding them. (#t_0474cfae)
+- Updated `rustls` to 0.23.46 and `quinn-proto` to 0.11.19 in the workspace and
+  the companion importer, resolving RUSTSEC-2026-0346/0347/0348/0349 and
+  RUSTSEC-2026-0338 through 0342; the importer also takes `anyhow` 1.0.104
+  (RUSTSEC-2026-0190). The `zip` extraction advisories
+  (RUSTSEC-2026-0367/0368/0369) are ignored with a recorded reason: `zip` comes
+  only through candle-core 0.11, which never calls the affected extract APIs and
+  has no release on zip 9 yet. `unsafe-libyaml` (RUSTSEC-2024-0449, unmaintained,
+  via `serde_yaml`) is likewise ignored pending a YAML parser replacement.
+  (#t_8b2e4cde)
 - Updated `rustls` to >=0.23.45 (and `rustls-webpki` to 0.103.15) across the
   workspace and the companion importer, resolving the RUSTSEC-2026-0285
   advisory. No advisory ignore added. (#t_93c1c58c)
