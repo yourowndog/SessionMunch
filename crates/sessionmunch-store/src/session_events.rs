@@ -129,9 +129,10 @@ pub(crate) fn mirror_observation(
     created_at_micros: i64,
 ) -> StoreResult<()> {
     let (kind, role) = observation_event_kind(obs.kind);
+    // Prompt hooks title the observation with the prompt itself; keep one copy.
     let content = match (obs.title.trim(), obs.body.trim()) {
         (title, "") => title.to_owned(),
-        ("", body) => body.to_owned(),
+        (title, body) if title.is_empty() || body.starts_with(title) => body.to_owned(),
         (title, body) => format!("{title}\n{body}"),
     };
     let content = sessionmunch_core::truncate_utf8_bytes(&content, SESSION_EVENT_CONTENT_MAX_BYTES);

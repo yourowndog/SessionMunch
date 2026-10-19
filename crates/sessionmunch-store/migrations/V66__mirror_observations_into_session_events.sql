@@ -42,6 +42,7 @@ SELECT
     CASE
         WHEN trim(o.body) = '' THEN trim(o.title)
         WHEN trim(o.title) = '' THEN trim(o.body)
+        WHEN substr(trim(o.body), 1, length(trim(o.title))) = trim(o.title) THEN trim(o.body)
         ELSE trim(o.title) || char(10) || trim(o.body)
     END,
     strftime('%Y-%m-%dT%H:%M:%fZ', o.created_at / 1000000.0, 'unixepoch'),

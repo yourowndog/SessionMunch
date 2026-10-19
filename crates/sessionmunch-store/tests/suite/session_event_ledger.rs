@@ -487,3 +487,33 @@ async fn event_search_applies_the_session_owner_rule() {
         1
     );
 }
+
+#[tokio::test]
+async fn a_prompt_titled_with_itself_is_stored_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    let store = Store::open(tmp.path()).unwrap();
+    let (ws, proj) = scope(&store).await;
+    let session_id = SessionId::new();
+    store
+        .writer
+        .begin_session_with_provenance(
+            new_session(ws, proj, session_id),
+            SessionProvenance::default(),
+        )
+        .await
+        .unwrap();
+    store
+        .writer
+        .insert_observation(observation(
+            session_id,
+            ws,
+            proj,
+            sessionmunch_core::ObservationKind::UserPrompt,
+            "fix the ledger",
+            "fix the ledger please",
+        ))
+        .await
+        .unwrap();
+    let events = store.reader.session_events(session_id, 10).await.unwrap();
+    assert_eq!(events[0].content, "fix the ledger please");
+}
