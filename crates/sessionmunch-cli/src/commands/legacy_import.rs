@@ -464,19 +464,21 @@ fn resolve_source_dir(args: &LegacyImportArgs) -> Result<PathBuf> {
     bail!("no legacy ai-memory found; pass --path <data-dir>");
 }
 
+/// `path` relative to `source` as a `/`-separated string, so manifests and
+/// destination names are identical on every OS. String-prefix matching with a
+/// hardcoded `/` left a leading `\\` on Windows, which joined back onto the
+/// source as an absolute path and failed every import there.
 fn relative_to(path: &Path, source: &Path) -> String {
-    let rel = path.to_string_lossy();
-    let src = source.to_string_lossy();
-    #[allow(clippy::explicit_auto_deref)]
-    let src_ref: &str = &*src;
-    if let Some(stripped) = rel.strip_prefix(src_ref) {
-        let stripped = stripped.trim_start_matches('/');
-        stripped.to_string()
-    } else {
-        path.file_name()
-            .map(|s| s.to_string_lossy())
-            .unwrap_or(rel)
-            .to_string()
+    match path.strip_prefix(source) {
+        Ok(rel) => rel
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/"),
+        Err(_) => path
+            .file_name()
+            .map_or_else(|| path.to_string_lossy(), |name| name.to_string_lossy())
+            .into_owned(),
     }
 }
 
@@ -574,6 +576,25 @@ mod tests {
         assert_eq!(
             canonical_dest_path(Path::new("/d/wiki/a/b/p.md"), Path::new("/d")),
             "p.md"
+        );
+    }
+
+    #[test]
+    fn relative_paths_use_forward_slashes_on_every_os() {
+        let td = tempdir().unwrap();
+        let root = td.path().join("data");
+        let nested = root
+            .join("wiki")
+            .join("ws")
+            .join("proj")
+            .join("deep")
+            .join("p.md");
+        assert_eq!(relative_to(&nested, &root), "wiki/ws/proj/deep/p.md");
+        assert_eq!(canonical_dest_path(&nested, &root), "deep/p.md");
+        assert_eq!(
+            root.join(relative_to(&nested, &root)),
+            nested,
+            "the relative path joins back onto the source"
         );
     }
 
