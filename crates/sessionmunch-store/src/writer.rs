@@ -179,6 +179,7 @@ pub(crate) enum WriteCmd {
         obs: NewObservation,
         owner_filter: OwnerFilter,
         ingest_key: Option<String>,
+        machine_id: Option<String>,
         reply: oneshot::Sender<StoreResult<HookSessionAdmission>>,
     },
     EndAdmittedSession {
@@ -1091,6 +1092,7 @@ impl WriterHandle {
         obs: Sanitized<NewObservation>,
         owner_filter: OwnerFilter,
         ingest_key: Option<String>,
+        machine_id: Option<String>,
     ) -> StoreResult<HookSessionAdmission> {
         let (tx, rx) = oneshot::channel();
         self.send(WriteCmd::AdmitHookSessionEvent {
@@ -1098,6 +1100,7 @@ impl WriterHandle {
             obs: obs.into_inner(),
             owner_filter,
             ingest_key,
+            machine_id,
             reply: tx,
         })
         .await?;
@@ -2908,6 +2911,7 @@ fn worker_loop(mut conn: Connection, mut rx: mpsc::Receiver<WriteCmd>) {
                 obs,
                 owner_filter,
                 ingest_key,
+                machine_id,
                 reply,
             } => {
                 let result = ops::admit_hook_session_event(
@@ -2916,6 +2920,7 @@ fn worker_loop(mut conn: Connection, mut rx: mpsc::Receiver<WriteCmd>) {
                     &obs,
                     &owner_filter,
                     ingest_key.as_deref(),
+                    machine_id.as_deref(),
                 );
                 send_or_warn(reply, result, "admit_hook_session_event");
             }

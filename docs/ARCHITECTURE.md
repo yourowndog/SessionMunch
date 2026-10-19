@@ -365,7 +365,7 @@ Each crate has a single responsibility and exposes a typed API. No
 circular deps. Inter-crate boundaries enforce the cross-cutting
 invariants below.
 
-## MCP tool surface (19 tools)
+## MCP tool surface (20 tools)
 
 | Tool | Hint | Purpose |
 |---|---|---|
@@ -373,6 +373,7 @@ invariants below.
 | `memory_recent` | read-only | Most-recently-updated `is_latest=1` pages. |
 | `memory_read_page` | read-only | Fetch the FULL body of a single wiki page by `path` or by top FTS5 hit for a `query`; optional `workspace` + `project` targets a named sibling workspace/project. Use when an agent needs more than the 24-word snippets from `memory_query`. |
 | `memory_read_session_observations` | read-only | Page through ONE session's raw hook observations (`ObservationRecord` with full sanitized body, capped per row by `body_max_chars`), restricted to the rows that landed in the resolved scope and to sessions the caller may see; `total` and `elided_other_scope` report the in-scope count and the rows the session left in another project. `session_id` omitted reads the latest completed visible session. |
+| `memory_search_events` | read-only | Lexical search over the session event ledger (hook capture mirrored at ingest, imported transcripts, ingested batches) across every project, machine, and harness. Filters: `machine`, `harness`, `since`, `newest`, and `workspace`+`project` together; hits carry time, machine, harness, project, session id, kind, and a capped snippet. Owner-filtered like raw observation reads. |
 | `memory_status` | read-only | Counts, paths, version. |
 | `memory_briefing` | read-only | Structured counts/activity/rules/slots/recent snapshot. Opt-in `settled_first: true` leads with up to 8 of the project's highest-standing `rule`/`decision` pages, ordered by evidence count then recency; off by default. |
 | `memory_explore` | read-only | LLM prose digest over the briefing snapshot, degrading to JSON without a provider. |
@@ -482,6 +483,7 @@ move-project         move-session         uninstall
 auth                 user                 completions
 handoffs             purge-session        compact
 api-key              export-okf            snapshot-harness-history
+import               search-events
 ```
 
 Run `sessionmunch --help` for the full tree.

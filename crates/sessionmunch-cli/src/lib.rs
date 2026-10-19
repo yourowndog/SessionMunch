@@ -170,6 +170,10 @@ pub async fn run() -> Result<()> {
         Command::SnapshotHarnessHistory(args) => {
             commands::snapshot_harness_history::run(&config, args).await
         }
+        Command::Import(crate::cli::ImportCommand::Sessions(args)) => {
+            commands::import_sessions::run(&config, args).await
+        }
+        Command::SearchEvents(args) => commands::search_events::run(&config, args).await,
         // `Completions` is handled in the fast-path above (before config/tracing).
         Command::Completions(args) => commands::completions::run(args),
     }

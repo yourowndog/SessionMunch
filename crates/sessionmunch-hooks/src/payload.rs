@@ -91,6 +91,9 @@ pub struct HookQuery {
     /// `.sessionmunch.toml` named it, `repo-root` when the host hook derived it
     /// from the enclosing checkout. Absent on older clients (#394).
     pub project_src: Option<String>,
+    /// Machine identity of the node that captured the event (the cluster
+    /// `node_id`, else the host name). Absent on older clients.
+    pub machine: Option<String>,
 }
 
 /// Coalesced view of an incoming hook event after light parsing of the
@@ -146,6 +149,9 @@ pub struct HookEnvelope {
     /// ASCII `[A-Za-z0-9_-]` chars, else dropped at parse time. `Some` makes
     /// the ingest path dedup the event against a replayed delivery.
     pub ingest_key: Option<String>,
+    /// Validated machine identity forwarded by the host hook (`machine`
+    /// query param, [`sessionmunch_core::NodeId`] rules), else `None`.
+    pub machine: Option<String>,
     /// Optional title hint extracted from the body.
     pub title_hint: Option<String>,
     /// Optional body excerpt extracted from the agent's raw payload.
@@ -556,6 +562,11 @@ impl HookEnvelope {
             })
         };
         let ingest_key = query.ingest_key.filter(|k| valid_ingest_key(k));
+        let machine = query
+            .machine
+            .as_deref()
+            .and_then(|raw| sessionmunch_core::NodeId::new(raw).ok())
+            .map(|node| node.as_str().to_owned());
         Self {
             event,
             agent,
@@ -571,6 +582,7 @@ impl HookEnvelope {
             managed_run,
             capture_assistant_requested,
             ingest_key,
+            machine,
             extension,
             source_event,
             title_hint,
@@ -1134,6 +1146,26 @@ mod tests {
         assert!(ProjectSource::RepoRoot.yields_to_session());
         assert!(!ProjectSource::Marker.yields_to_session());
         assert!(!ProjectSource::Unspecified.yields_to_session());
+    }
+
+    #[test]
+    fn machine_identity_is_validated_like_a_node_id() {
+        let parse = |machine: &str| {
+            HookEnvelope::from_query_and_body(
+                HookQuery {
+                    event: "user-prompt-submit".into(),
+                    agent: Some("claude-code".into()),
+                    machine: Some(machine.into()),
+                    ..Default::default()
+                },
+                serde_json::json!({ "session_id": "s" }),
+            )
+            .machine
+        };
+        assert_eq!(parse("sleeper").as_deref(), Some("sleeper"));
+        assert_eq!(parse(" titan.local ").as_deref(), Some("titan.local"));
+        assert_eq!(parse("evil host;rm"), None, "rejected, not stored");
+        assert_eq!(parse(""), None);
     }
 
     #[test]

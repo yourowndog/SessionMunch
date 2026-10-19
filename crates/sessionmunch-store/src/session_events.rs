@@ -11,8 +11,9 @@ use std::str::FromStr as _;
 use jiff::Timestamp;
 use rusqlite::{Connection, Transaction, params};
 use sessionmunch_core::{
-    NewSession, NewSessionEvent, ProjectId, SessionEvent, SessionEventHit, SessionId,
-    SessionProvenance, SessionSource, WorkspaceId, WorkstreamEventKind,
+    NewObservation, NewSession, NewSessionEvent, ObservationId, ObservationKind, OwnerFilter,
+    ProjectId, SessionEvent, SessionEventHit, SessionEventSearch, SessionId, SessionProvenance,
+    SessionSource, WorkspaceId, WorkstreamEventKind,
 };
 
 use crate::StoreResult;
@@ -95,6 +96,74 @@ pub(crate) fn append_session_events(
     }
     tx.commit()?;
     Ok(appended)
+}
+
+/// Ledger shape of a hook observation: the event family, the message role
+/// where one applies, and the stable event id `obs:<observation id>`.
+pub(crate) fn observation_event_kind(
+    kind: ObservationKind,
+) -> (WorkstreamEventKind, Option<&'static str>) {
+    match kind {
+        ObservationKind::UserPrompt => (WorkstreamEventKind::Message, Some("user")),
+        ObservationKind::Stop => (WorkstreamEventKind::Message, Some("assistant")),
+        ObservationKind::PreToolUse => (WorkstreamEventKind::ToolCall, None),
+        ObservationKind::PostToolUse => (WorkstreamEventKind::ToolResult, None),
+        ObservationKind::PreCompact | ObservationKind::PostCompaction => {
+            (WorkstreamEventKind::Compaction, None)
+        }
+        ObservationKind::SessionStart
+        | ObservationKind::SessionEnd
+        | ObservationKind::Notification
+        | ObservationKind::Other => (WorkstreamEventKind::Annotation, None),
+    }
+}
+
+/// Mirror one just-inserted hook observation into its session's event
+/// ledger, so hook capture is searchable history and not only consolidation
+/// input. Runs on the caller's transaction (index-with-data), and is
+/// idempotent on `obs:<id>` like every other ledger append.
+pub(crate) fn mirror_observation(
+    conn: &Connection,
+    id: &ObservationId,
+    obs: &NewObservation,
+    created_at_micros: i64,
+) -> StoreResult<()> {
+    let (kind, role) = observation_event_kind(obs.kind);
+    let content = match (obs.title.trim(), obs.body.trim()) {
+        (title, "") => title.to_owned(),
+        ("", body) => body.to_owned(),
+        (title, body) => format!("{title}\n{body}"),
+    };
+    let content = sessionmunch_core::truncate_utf8_bytes(&content, SESSION_EVENT_CONTENT_MAX_BYTES);
+    let occurred_at = Timestamp::from_microsecond(created_at_micros)
+        .ok()
+        .map(|at| at.to_string());
+    let metadata = serde_json::json!({
+        "observation_kind": obs.kind.as_str(),
+        "extension": obs.extension,
+        "source_event": obs.source_event,
+    });
+    conn.execute(
+        "INSERT OR IGNORE INTO session_events( \
+             session_id, sequence, event_id, kind, role, content, \
+             occurred_at, metadata_json, source, created_at \
+         ) VALUES ( \
+             ?1, \
+             (SELECT COALESCE(MAX(sequence), 0) + 1 FROM session_events WHERE session_id = ?1), \
+             ?2, ?3, ?4, ?5, ?6, ?7, 'hook', ?8 \
+         )",
+        params![
+            obs.session_id.as_bytes(),
+            format!("obs:{id}"),
+            kind.as_str(),
+            role,
+            content,
+            occurred_at,
+            serde_json::to_string(&metadata)?,
+            created_at_micros,
+        ],
+    )?;
+    Ok(())
 }
 
 /// Read the newest `limit` events for a session, newest first.
@@ -196,18 +265,28 @@ fn ensure_provenance_in_transaction(
     Ok(())
 }
 
-/// Search session events globally using full-text search over `session_events_fts`.
+/// Lexical search over the session event ledger with optional scope,
+/// machine, harness, and time filters. Ordered by BM25 relevance, or newest
+/// first when asked ("when did we last run X").
 pub(crate) fn search_session_events(
     conn: &Connection,
-    query: &str,
-    limit: usize,
+    search: &SessionEventSearch,
 ) -> StoreResult<Vec<SessionEventHit>> {
-    let fts_query = crate::prepare_fts5_query(query);
-    if fts_query.is_empty() || limit == 0 {
+    let fts_query = crate::prepare_fts5_query(&search.query);
+    if fts_query.is_empty() || search.limit == 0 {
         return Ok(Vec::new());
     }
-    let limit = limit.clamp(1, 1000) as i64;
-    let mut stmt = conn.prepare(
+    let limit = search.limit.clamp(1, 1000) as i64;
+    let (scope_ws, scope_proj) = match &search.scope {
+        Some((ws, proj)) => (Some(ws.as_bytes().to_vec()), Some(proj.as_bytes().to_vec())),
+        None => (None, None),
+    };
+    let order = if search.newest_first {
+        "session_events.created_at DESC, session_events.sequence DESC"
+    } else {
+        "session_events_fts.rank"
+    };
+    let sql = format!(
         "SELECT session_events.session_id, \
                 session_events.sequence, \
                 session_events.event_id, \
@@ -222,190 +301,125 @@ pub(crate) fn search_session_events(
                 sessions.workspace_id, \
                 sessions.project_id, \
                 sessions.agent_kind, \
-                sessions.machine_id \
+                sessions.machine_id, \
+                workspaces.name, \
+                projects.name, \
+                sessions.cwd, \
+                session_events.created_at \
          FROM session_events_fts \
          JOIN session_events ON session_events.rowid = session_events_fts.rowid \
          JOIN sessions ON sessions.id = session_events.session_id \
+         LEFT JOIN workspaces ON workspaces.id = sessions.workspace_id \
+         LEFT JOIN projects ON projects.id = sessions.project_id \
          WHERE session_events_fts MATCH ?1 \
-         ORDER BY session_events_fts.rank \
-         LIMIT ?2",
+           AND (?2 IS NULL OR (sessions.workspace_id = ?2 AND sessions.project_id = ?3)) \
+           AND (?4 IS NULL OR sessions.machine_id = ?4 COLLATE NOCASE) \
+           AND (?5 IS NULL OR sessions.agent_kind = ?5 COLLATE NOCASE) \
+           AND (?6 IS NULL OR session_events.created_at >= ?6) \
+           AND (?7 IS NULL OR session_events.created_at < ?7) \
+           AND (?9 = 0 OR sessions.actor_user IS NULL \
+                OR (?9 = 1 AND sessions.actor_user = ?10)) \
+         ORDER BY {order} \
+         LIMIT ?8"
+    );
+    let (owner_mode, owner_key): (i64, Option<&str>) = match &search.owner {
+        None | Some(OwnerFilter::Any) => (0, None),
+        Some(OwnerFilter::User(key)) => (1, Some(key.as_str())),
+        Some(OwnerFilter::Unattributed) => (2, None),
+    };
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(
+        params![
+            fts_query,
+            scope_ws,
+            scope_proj,
+            search.machine,
+            search.harness,
+            search.since_micros,
+            search.until_micros,
+            limit,
+            owner_mode,
+            owner_key,
+        ],
+        |row| {
+            Ok(RawHit {
+                session_id: row.get(0)?,
+                sequence: row.get(1)?,
+                event_id: row.get(2)?,
+                kind: row.get(3)?,
+                role: row.get(4)?,
+                content: row.get(5)?,
+                snippet: row.get(6)?,
+                rank: row.get(7)?,
+                occurred_at: row.get(8)?,
+                metadata_json: row.get(9)?,
+                source: row.get(10)?,
+                workspace_id: row.get(11)?,
+                project_id: row.get(12)?,
+                harness: row.get(13)?,
+                machine_id: row.get(14)?,
+                workspace: row.get(15)?,
+                project: row.get(16)?,
+                cwd: row.get(17)?,
+                created_at: row.get(18)?,
+            })
+        },
     )?;
-    let rows = stmt.query_map(params![fts_query, limit], |row| {
-        Ok((
-            row.get::<_, Vec<u8>>(0)?,
-            row.get::<_, i64>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-            row.get::<_, Option<String>>(4)?,
-            row.get::<_, String>(5)?,
-            row.get::<_, String>(6)?,
-            row.get::<_, f64>(7)?,
-            row.get::<_, Option<String>>(8)?,
-            row.get::<_, String>(9)?,
-            row.get::<_, String>(10)?,
-            row.get::<_, Option<Vec<u8>>>(11)?,
-            row.get::<_, Option<Vec<u8>>>(12)?,
-            row.get::<_, String>(13)?,
-            row.get::<_, Option<String>>(14)?,
-        ))
-    })?;
-
     let mut hits = Vec::new();
     for row in rows {
-        let (
-            session_id_bytes,
-            sequence,
-            event_id,
-            kind_str,
-            role,
-            content,
-            snippet,
-            rank,
-            occurred_at,
-            metadata_json,
-            source_str,
-            ws_bytes,
-            proj_bytes,
-            harness,
-            machine_id,
-        ) = row?;
-
+        let raw = row?;
         hits.push(SessionEventHit {
-            session_id: SessionId::from_slice(&session_id_bytes)?,
-            sequence,
-            event_id,
-            kind: WorkstreamEventKind::from_str(&kind_str)?,
-            role,
-            content,
-            snippet,
-            rank,
-            occurred_at,
-            metadata: serde_json::from_str(&metadata_json)?,
-            source: SessionSource::from_wire(&source_str),
-            workspace_id: ws_bytes
+            session_id: SessionId::from_slice(&raw.session_id)?,
+            sequence: raw.sequence,
+            event_id: raw.event_id,
+            kind: WorkstreamEventKind::from_str(&raw.kind)?,
+            role: raw.role,
+            content: raw.content,
+            snippet: raw.snippet,
+            rank: raw.rank,
+            occurred_at: raw.occurred_at,
+            metadata: serde_json::from_str(&raw.metadata_json)?,
+            source: SessionSource::from_wire(&raw.source),
+            workspace_id: raw
+                .workspace_id
                 .as_deref()
                 .map(WorkspaceId::from_slice)
                 .transpose()?,
-            project_id: proj_bytes
+            project_id: raw
+                .project_id
                 .as_deref()
                 .map(ProjectId::from_slice)
                 .transpose()?,
-            harness,
-            machine_id,
+            harness: raw.harness,
+            machine_id: raw.machine_id,
+            workspace: raw.workspace,
+            project: raw.project,
+            cwd: raw.cwd,
+            created_at: raw.created_at,
         });
     }
     Ok(hits)
 }
 
-/// Search session events scoped to a workspace and project.
-pub(crate) fn search_session_events_scoped(
-    conn: &Connection,
-    workspace_id: WorkspaceId,
-    project_id: ProjectId,
-    query: &str,
-    limit: usize,
-) -> StoreResult<Vec<SessionEventHit>> {
-    let fts_query = crate::prepare_fts5_query(query);
-    if fts_query.is_empty() || limit == 0 {
-        return Ok(Vec::new());
-    }
-    let limit = limit.clamp(1, 1000) as i64;
-    let mut stmt = conn.prepare(
-        "SELECT session_events.session_id, \
-                session_events.sequence, \
-                session_events.event_id, \
-                session_events.kind, \
-                session_events.role, \
-                session_events.content, \
-                snippet(session_events_fts, 0, '<mark>', '</mark>', '…', 24) AS snip, \
-                session_events_fts.rank, \
-                session_events.occurred_at, \
-                session_events.metadata_json, \
-                session_events.source, \
-                sessions.workspace_id, \
-                sessions.project_id, \
-                sessions.agent_kind, \
-                sessions.machine_id \
-         FROM session_events_fts \
-         JOIN session_events ON session_events.rowid = session_events_fts.rowid \
-         JOIN sessions ON sessions.id = session_events.session_id \
-         WHERE session_events_fts MATCH ?1 \
-           AND sessions.workspace_id = ?2 \
-           AND sessions.project_id = ?3 \
-         ORDER BY session_events_fts.rank \
-         LIMIT ?4",
-    )?;
-    let rows = stmt.query_map(
-        params![
-            fts_query,
-            workspace_id.as_bytes(),
-            project_id.as_bytes(),
-            limit
-        ],
-        |row| {
-            Ok((
-                row.get::<_, Vec<u8>>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, String>(5)?,
-                row.get::<_, String>(6)?,
-                row.get::<_, f64>(7)?,
-                row.get::<_, Option<String>>(8)?,
-                row.get::<_, String>(9)?,
-                row.get::<_, String>(10)?,
-                row.get::<_, Option<Vec<u8>>>(11)?,
-                row.get::<_, Option<Vec<u8>>>(12)?,
-                row.get::<_, String>(13)?,
-                row.get::<_, Option<String>>(14)?,
-            ))
-        },
-    )?;
-
-    let mut hits = Vec::new();
-    for row in rows {
-        let (
-            session_id_bytes,
-            sequence,
-            event_id,
-            kind_str,
-            role,
-            content,
-            snippet,
-            rank,
-            occurred_at,
-            metadata_json,
-            source_str,
-            ws_bytes,
-            proj_bytes,
-            harness,
-            machine_id,
-        ) = row?;
-
-        hits.push(SessionEventHit {
-            session_id: SessionId::from_slice(&session_id_bytes)?,
-            sequence,
-            event_id,
-            kind: WorkstreamEventKind::from_str(&kind_str)?,
-            role,
-            content,
-            snippet,
-            rank,
-            occurred_at,
-            metadata: serde_json::from_str(&metadata_json)?,
-            source: SessionSource::from_wire(&source_str),
-            workspace_id: ws_bytes
-                .as_deref()
-                .map(WorkspaceId::from_slice)
-                .transpose()?,
-            project_id: proj_bytes
-                .as_deref()
-                .map(ProjectId::from_slice)
-                .transpose()?,
-            harness,
-            machine_id,
-        });
-    }
-    Ok(hits)
+/// One search row before id/enum parsing.
+struct RawHit {
+    session_id: Vec<u8>,
+    sequence: i64,
+    event_id: String,
+    kind: String,
+    role: Option<String>,
+    content: String,
+    snippet: String,
+    rank: f64,
+    occurred_at: Option<String>,
+    metadata_json: String,
+    source: String,
+    workspace_id: Option<Vec<u8>>,
+    project_id: Option<Vec<u8>>,
+    harness: String,
+    machine_id: Option<String>,
+    workspace: Option<String>,
+    project: Option<String>,
+    cwd: Option<String>,
+    created_at: i64,
 }

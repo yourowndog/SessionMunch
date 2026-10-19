@@ -82,7 +82,8 @@ pub use sanitize::{
     truncate_utf8_bytes_head_tail,
 };
 pub use session_events::{
-    NewSessionEvent, SessionEvent, SessionEventHit, SessionProvenance, SessionSource,
+    NewSessionEvent, SessionEvent, SessionEventHit, SessionEventSearch, SessionProvenance,
+    SessionSource, parse_time_window,
 };
 pub use slots::{
     SLOT_PREFIX, SlotPlacement, SlotVisibility, is_slot_named, is_slot_path, slot_owner,

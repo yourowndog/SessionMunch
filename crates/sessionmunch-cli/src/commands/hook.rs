@@ -643,9 +643,15 @@ where
     // delivery succeeded but whose response was lost — closing the
     // conservative-retry duplication vector. Older servers ignore the param.
     let ingest_key = uuid::Uuid::new_v4().simple().to_string();
+    // Machine provenance, so the hub can answer "what ran on <node>".
+    let machine = super::import_sessions::machine_identity();
     let event_url = format!(
-        "{base}/hook?event={}&agent={}{}{}&ingest_key={ingest_key}",
-        args.event, args.agent, hook_qs, capture_qs
+        "{base}/hook?event={}&agent={}{}{}&ingest_key={ingest_key}&machine={}",
+        args.event,
+        args.agent,
+        hook_qs,
+        capture_qs,
+        super::hook_capture::url_encode(&machine)
     );
     let entry = hook_spool::entry_for(event_url, payload.clone(), effective_token, oidc_present);
     if hook_spool::enqueue(&spool, &entry).is_err() {

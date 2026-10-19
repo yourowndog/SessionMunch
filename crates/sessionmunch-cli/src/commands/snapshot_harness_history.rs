@@ -84,7 +84,7 @@ pub async fn run(config: &Config, args: SnapshotHarnessHistoryArgs) -> Result<()
     Ok(())
 }
 
-fn to_managed(choice: RunHarnessChoice) -> ManagedHarness {
+pub(crate) fn to_managed(choice: RunHarnessChoice) -> ManagedHarness {
     match choice {
         RunHarnessChoice::Claude => ManagedHarness::Claude,
         RunHarnessChoice::Codex => ManagedHarness::Codex,

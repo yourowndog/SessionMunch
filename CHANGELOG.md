@@ -22,6 +22,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   API-key prefixes are unchanged (credential contract, not branding).
 
 ### Added
+- New `sessionmunch import sessions --since <window>` (North Star §5, P1
+  global historical import). It enumerates every session the local Claude
+  Code, Codex, OpenCode (v1 and v2), Pi, OMP, Kimi Code, Command Code, Kiro
+  (v2/v3), and Grok stores changed in the window regardless of the current
+  directory, reads them through the existing read-only transcript readers,
+  sanitizes the content before anything is hashed or leaves the machine, and
+  queues it in the crash-safe P1.2 session-event spool before draining it to
+  the hub's `POST /session-events`. Imported sessions reuse the hook path's
+  session id, so transcript events and hook capture converge on one session;
+  re-runs are idempotent on each stable event id, and a local per-session
+  cursor skips tails already queued. Payloads over 16 KiB keep a head and tail
+  inline with their length and SHA-256 and upload whole to `POST /artifacts`.
+  Crush (per-project databases) and Antigravity (undecodable steps) are
+  reported unsupported instead of skipped silently, and every unreadable
+  transcript is named. `--dry-run` counts without sending; `--json` reports
+  per-harness counts and losses. (#t_8b2e4cde)
+- New MCP tool `memory_search_events` and CLI `sessionmunch search-events`
+  (backed by `GET /admin/search-events`): lexical search over the session
+  event ledger across every project, machine, and harness, filterable by
+  `machine`, `harness`, `since`, newest-first ordering, or one project. Hits
+  carry time, machine, harness, workspace/project names, cwd, session id, kind,
+  and a snippet. MCP results follow the raw-observation owner rule. This is the
+  P1 exit condition: "when did we run X on Sleeper?" is answered from
+  preserved evidence. The MCP tool count is now 20. (#t_8b2e4cde)
+- Hook observations now also land in the session event ledger in the same
+  transaction (`obs:<observation id>`), and migration V66 backfills every
+  existing observation, so hook-captured history is searchable as events and
+  not only as consolidation input. `sessionmunch hook` sends the node's host
+  name as `machine`, and the server records it once per session in
+  `sessions.machine_id`. (#t_8b2e4cde)
 - Promoted the portable workstream-event concept into a general session-owned
   source ledger (North Star §4, P1): a new `session_events` table lets hook,
   transcript-import, and managed events converge on one `sessions` row, with
@@ -121,6 +151,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transient 408/425/429/5xx and wrong-endpoint 404/405/501 are retryable, so a
   restart storm, rate limit, or misconfigured base URL retains its batches
   instead of silently discarding them. (#t_0474cfae)
+- `sessionmunch legacy-import --apply` works on Windows. Relative page paths
+  were built by string-prefix matching with a hardcoded `/`, which left a
+  leading backslash that joined back onto the source as an absolute path, so
+  every Windows import failed after planning. Paths are now derived
+  component-wise and recorded `/`-separated on every OS. (#t_8b2e4cde)
 - Updated `rustls` to 0.23.46 and `quinn-proto` to 0.11.19 in the workspace and
   the companion importer, resolving RUSTSEC-2026-0346/0347/0348/0349 and
   RUSTSEC-2026-0338 through 0342; the importer also takes `anyhow` 1.0.104

@@ -4171,7 +4171,7 @@ mod tests {
                 ],
             )
             .unwrap();
-            super::ops::insert_observation(
+            super::ops::insert_observation_unmirrored(
                 &mut conn,
                 &NewObservation {
                     session_id,

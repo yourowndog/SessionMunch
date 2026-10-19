@@ -9,6 +9,7 @@ mod autoscope_env;
 mod backfill_sections;
 mod branding;
 mod completions;
+mod history_import_e2e;
 mod hook_drain;
 mod hook_payload;
 mod legacy_import_e2e;

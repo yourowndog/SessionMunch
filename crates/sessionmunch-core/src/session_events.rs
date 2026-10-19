@@ -203,11 +203,95 @@ pub struct SessionEventHit {
     /// Machine ID where the session ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine_id: Option<String>,
+    /// Workspace name, for display.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    /// Project name, for display.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    /// Session working directory when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    /// When the server persisted the event (microseconds since the epoch).
+    #[serde(default)]
+    pub created_at: i64,
+}
+
+/// Filters for a lexical search over the session event ledger. Every filter
+/// is optional; an empty filter set searches all history.
+#[derive(Clone, Debug, Default)]
+pub struct SessionEventSearch {
+    /// FTS5 query text (sanitised into a safe MATCH expression).
+    pub query: String,
+    /// Maximum hits (clamped to 1..=1000).
+    pub limit: usize,
+    /// Restrict to one workspace and project.
+    pub scope: Option<(WorkspaceId, ProjectId)>,
+    /// Restrict to sessions recorded on this machine (exact, case-insensitive).
+    pub machine: Option<String>,
+    /// Restrict to one harness (exact `agent_kind`, case-insensitive).
+    pub harness: Option<String>,
+    /// Only events persisted at or after this time (microseconds).
+    pub since_micros: Option<i64>,
+    /// Only events persisted before this time (microseconds).
+    pub until_micros: Option<i64>,
+    /// Order newest first instead of by relevance.
+    pub newest_first: bool,
+    /// Whose sessions are visible. `None` is cross-owner (root or
+    /// single-user); otherwise the owner's sessions plus unowned ones, the
+    /// same rule raw observation reads apply.
+    pub owner: Option<crate::OwnerFilter>,
+}
+
+/// Parse a look-back window: `30m`, `12h`, `7d`, `2w`, or `all`.
+///
+/// # Errors
+/// A human-readable message for a missing number, a missing or unknown unit.
+pub fn parse_time_window(raw: &str) -> Result<std::time::Duration, String> {
+    let raw = raw.trim();
+    if raw.eq_ignore_ascii_case("all") {
+        return Ok(std::time::Duration::from_secs(u64::MAX / 4));
+    }
+    let split = raw
+        .find(|c: char| !c.is_ascii_digit())
+        .ok_or_else(|| format!("{raw:?} needs a unit, e.g. 7d, 12h, 30m, 2w, or `all`"))?;
+    let (count, unit) = raw.split_at(split);
+    let count: u64 = count
+        .parse()
+        .map_err(|_| format!("{raw:?} must start with a number"))?;
+    let seconds = match unit {
+        "m" => 60,
+        "h" => 3_600,
+        "d" => 86_400,
+        "w" => 604_800,
+        _ => return Err(format!("time unit must be m, h, d, or w (got {unit:?})")),
+    };
+    Ok(std::time::Duration::from_secs(
+        count.saturating_mul(seconds),
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn time_windows_accept_units_and_all() {
+        use std::time::Duration;
+        assert_eq!(parse_time_window("7d"), Ok(Duration::from_secs(7 * 86_400)));
+        assert_eq!(
+            parse_time_window("12h"),
+            Ok(Duration::from_secs(12 * 3_600))
+        );
+        assert_eq!(
+            parse_time_window("2w"),
+            Ok(Duration::from_secs(14 * 86_400))
+        );
+        assert!(parse_time_window("all").unwrap() > Duration::from_secs(100 * 365 * 86_400));
+        assert!(parse_time_window("7").is_err());
+        assert!(parse_time_window("7y").is_err());
+        assert!(parse_time_window("d").is_err());
+    }
 
     #[test]
     fn session_source_round_trips() {

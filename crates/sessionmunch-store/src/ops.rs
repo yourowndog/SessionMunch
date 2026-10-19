@@ -1493,7 +1493,37 @@ pub fn insert_observation(
     conn: &mut Connection,
     obs: &NewObservation,
 ) -> StoreResult<ObservationId> {
-    insert_observation_row(conn, obs)
+    let tx = conn.transaction()?;
+    let id = insert_observation_row(&tx, obs)?;
+    tx.commit()?;
+    Ok(id)
+}
+
+/// Seed an observation on a schema older than V65, before the session-event
+/// ledger exists. Upgrade tests use it so the V66 backfill has history to
+/// carry forward.
+#[cfg(test)]
+pub(crate) fn insert_observation_unmirrored(
+    conn: &mut Connection,
+    obs: &NewObservation,
+) -> StoreResult<ObservationId> {
+    let id = ObservationId::new();
+    conn.execute(
+        "INSERT INTO observations (id, session_id, workspace_id, project_id, kind, title, body, \
+          importance, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            id.as_bytes(),
+            obs.session_id.as_bytes(),
+            obs.workspace_id.as_bytes(),
+            obs.project_id.as_bytes(),
+            observation_kind_as_str(obs.kind),
+            obs.title,
+            obs.body,
+            i64::from(obs.importance.clamp(1, 10)),
+            Timestamp::now().as_microsecond(),
+        ],
+    )?;
+    Ok(id)
 }
 
 /// Ingest-keys older than this are swept opportunistically on every keyed
@@ -1558,6 +1588,7 @@ pub fn admit_hook_session_event(
     obs: &NewObservation,
     owner_filter: &OwnerFilter,
     ingest_key: Option<&str>,
+    machine_id: Option<&str>,
 ) -> StoreResult<HookSessionAdmission> {
     if obs.session_id != session.id
         || obs.workspace_id != session.workspace_id
@@ -1625,6 +1656,15 @@ pub fn admit_hook_session_event(
             (session.actor_user.clone(), None, 0)
         }
     };
+    // Best-effort provenance: the first event that names its machine fixes
+    // it. A later event never rewrites it, so a moved session keeps the
+    // machine it started on.
+    if let Some(machine_id) = machine_id {
+        tx.execute(
+            "UPDATE sessions SET machine_id = ?2 WHERE id = ?1 AND machine_id IS NULL",
+            params![session.id.as_bytes(), machine_id],
+        )?;
+    }
     let guard = AdmittedSession {
         session_id: session.id,
         workspace_id: session.workspace_id,
@@ -1790,7 +1830,8 @@ pub fn complete_observation_ingest_if_claimed(
 }
 
 /// The observation INSERT itself, shared by the plain and keyed paths
-/// (`&Connection` so it also runs inside a [`rusqlite::Transaction`]).
+/// (`&Connection` so it also runs inside a [`rusqlite::Transaction`]). Every
+/// caller holds a transaction, so the session-ledger mirror commits with it.
 fn insert_observation_row(conn: &Connection, obs: &NewObservation) -> StoreResult<ObservationId> {
     let id = ObservationId::new();
     let now = Timestamp::now().as_microsecond();
@@ -1821,6 +1862,7 @@ fn insert_observation_row(conn: &Connection, obs: &NewObservation) -> StoreResul
             now,
         ],
     )?;
+    crate::session_events::mirror_observation(conn, &id, obs, now)?;
     Ok(id)
 }
 
@@ -9080,7 +9122,7 @@ pub(crate) mod tests {
 
         // Three misattributed observations on the fragment.
         for i in 0..3 {
-            insert_observation(
+            insert_observation_unmirrored(
                 &mut conn,
                 &NewObservation {
                     session_id: sid,
@@ -9289,7 +9331,7 @@ pub(crate) mod tests {
             Some("/home/user/tiktok_analysis"),
         );
         for i in 0..4 {
-            insert_observation(
+            insert_observation_unmirrored(
                 &mut conn,
                 &NewObservation {
                     session_id: sid,
@@ -9380,7 +9422,7 @@ pub(crate) mod tests {
                 sessionmunch_core::AgentKind::ClaudeCode,
                 None,
             );
-            insert_observation(
+            insert_observation_unmirrored(
                 &mut conn,
                 &NewObservation {
                     session_id: existing_sid,
@@ -10491,6 +10533,44 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn hook_admission_records_the_first_machine_and_keeps_it() {
+        let (_tmp, mut conn, ws, proj) = fresh_db();
+        let session = hook_session(SessionId::new(), ws, proj, None);
+        let event = hook_observation(&session);
+        let machine_of = |conn: &Connection| -> Option<String> {
+            conn.query_row(
+                "SELECT machine_id FROM sessions WHERE id = ?1",
+                params![session.id.as_bytes()],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        admit_hook_session_event(&mut conn, &session, &event, &OwnerFilter::Any, None, None)
+            .unwrap();
+        assert_eq!(machine_of(&conn), None, "an older client sends no machine");
+        admit_hook_session_event(
+            &mut conn,
+            &session,
+            &event,
+            &OwnerFilter::Any,
+            None,
+            Some("sleeper"),
+        )
+        .unwrap();
+        assert_eq!(machine_of(&conn).as_deref(), Some("sleeper"));
+        admit_hook_session_event(
+            &mut conn,
+            &session,
+            &event,
+            &OwnerFilter::Any,
+            None,
+            Some("titan"),
+        )
+        .unwrap();
+        assert_eq!(machine_of(&conn).as_deref(), Some("sleeper"));
+    }
+
+    #[test]
     fn hook_admission_rejects_cross_owner_fresh_key_without_claiming_it() {
         let (_tmp, mut conn, ws, proj) = fresh_db();
         let alice = "user:alice";
@@ -10506,6 +10586,7 @@ pub(crate) mod tests {
                 &bob_event,
                 &OwnerFilter::User(bob.into()),
                 Some("fresh-key"),
+                None,
             ),
             Err(StoreError::SessionCollision)
         ));
@@ -10524,6 +10605,7 @@ pub(crate) mod tests {
                 &bob_event,
                 &OwnerFilter::User(alice.into()),
                 Some("fresh-key"),
+                None,
             )
             .unwrap(),
             HookSessionAdmission::Observation {
@@ -10557,6 +10639,7 @@ pub(crate) mod tests {
                 &moved,
                 &observation,
                 &OwnerFilter::User("user:alice".into()),
+                None,
                 None,
             )
             .unwrap(),
@@ -10600,6 +10683,7 @@ pub(crate) mod tests {
                 &observation,
                 &OwnerFilter::User("user:bob".into()),
                 None,
+                None,
             ),
             Err(StoreError::SessionCollision)
         ));
@@ -10613,6 +10697,7 @@ pub(crate) mod tests {
                 &other_agent,
                 &observation,
                 &OwnerFilter::User("user:alice".into()),
+                None,
                 None,
             ),
             Err(StoreError::SessionCollision)
@@ -10643,6 +10728,7 @@ pub(crate) mod tests {
                 &moved,
                 &end,
                 &OwnerFilter::User("user:alice".into()),
+                None,
                 None,
             )
             .unwrap(),
@@ -10684,6 +10770,7 @@ pub(crate) mod tests {
                     &hook_observation(&session),
                     &OwnerFilter::User(owner.into()),
                     Some(key),
+                    None,
                 )
             })
         };
@@ -10720,6 +10807,7 @@ pub(crate) mod tests {
                 &observation,
                 &OwnerFilter::User("user:alice".into()),
                 Some("tuple-key"),
+                None,
             ),
             Err(StoreError::InvalidState(_))
         ));
@@ -10744,6 +10832,7 @@ pub(crate) mod tests {
                 &observation,
                 &OwnerFilter::User("user:alice".into()),
                 Some("agent-key"),
+                None,
             ),
             Err(StoreError::SessionCollision)
         ));
@@ -10768,6 +10857,7 @@ pub(crate) mod tests {
                 &hook_observation(&owned),
                 &OwnerFilter::User("user:bob".into()),
                 Some("denied-owner"),
+                None,
             ),
             Err(StoreError::SessionCollision)
         ));
@@ -10782,6 +10872,7 @@ pub(crate) mod tests {
             &shared,
             &hook_observation(&shared),
             &OwnerFilter::User("user:alice".into()),
+            None,
             None,
         )
         .unwrap();
@@ -10802,6 +10893,7 @@ pub(crate) mod tests {
                 &hook_observation(&shared),
                 &OwnerFilter::User("user:bob".into()),
                 Some("shared-bob"),
+                None,
             )
             .unwrap(),
             HookSessionAdmission::Observation { .. }
@@ -10835,6 +10927,7 @@ pub(crate) mod tests {
                 &session_end_observation(&session),
                 &OwnerFilter::User("user:alice".into()),
                 Some(key),
+                None,
             )
             .unwrap();
             match admission {
@@ -10873,6 +10966,7 @@ pub(crate) mod tests {
                 &session_end_observation(&session),
                 &OwnerFilter::User("user:alice".into()),
                 Some(key),
+                None,
             )
             .unwrap();
             match admission {
@@ -10901,6 +10995,7 @@ pub(crate) mod tests {
                 &session_end_observation(&session),
                 &OwnerFilter::User("user:alice".into()),
                 Some("missing-end"),
+                None,
             )
             .unwrap(),
             HookSessionAdmission::InvalidMissingEnd
@@ -10928,6 +11023,7 @@ pub(crate) mod tests {
                 &hook_observation(&session),
                 &OwnerFilter::User("user:alice".into()),
                 Some("ordinary-complete"),
+                None,
             )
             .unwrap(),
             HookSessionAdmission::Observation {
@@ -10947,6 +11043,7 @@ pub(crate) mod tests {
                 &session,
                 &hook_observation(&session),
                 &OwnerFilter::User("user:alice".into()),
+                None,
                 None,
             )
             .unwrap(),
@@ -10997,6 +11094,7 @@ pub(crate) mod tests {
                 &receiver,
                 &lifecycle_observation,
                 &OwnerFilter::User("user:alice".into()),
+                None,
                 None,
             )
             .unwrap(),

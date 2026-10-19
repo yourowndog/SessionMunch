@@ -2646,6 +2646,7 @@ async fn process_authorized(
                 sanitized,
                 owner_filter.clone(),
                 ingest_key.clone(),
+                env.machine.clone(),
             )
             .await;
         match result {

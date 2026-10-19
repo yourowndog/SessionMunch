@@ -286,3 +286,204 @@ Some extra context"
         .unwrap();
     assert!(empty_hits.is_empty());
 }
+
+fn observation(
+    session_id: SessionId,
+    ws: WorkspaceId,
+    proj: ProjectId,
+    kind: sessionmunch_core::ObservationKind,
+    title: &str,
+    body: &str,
+) -> sessionmunch_core::Sanitized<sessionmunch_core::NewObservation> {
+    sessionmunch_core::Sanitized::new(
+        sessionmunch_core::NewObservation {
+            session_id,
+            workspace_id: ws,
+            project_id: proj,
+            kind,
+            extension: None,
+            source_event: None,
+            title: title.into(),
+            body: body.into(),
+            importance: 5,
+        },
+        &sessionmunch_core::Sanitizer::default(),
+    )
+}
+
+#[tokio::test]
+async fn hook_observations_mirror_into_the_searchable_ledger() {
+    let tmp = tempfile::tempdir().unwrap();
+    let store = Store::open(tmp.path()).unwrap();
+    let (ws, proj) = scope(&store).await;
+    let session_id = SessionId::new();
+    store
+        .writer
+        .begin_session_with_provenance(
+            new_session(ws, proj, session_id),
+            SessionProvenance {
+                machine_id: Some("sleeper".into()),
+                ..SessionProvenance::default()
+            },
+        )
+        .await
+        .unwrap();
+    let prompt = store
+        .writer
+        .insert_observation(observation(
+            session_id,
+            ws,
+            proj,
+            sessionmunch_core::ObservationKind::UserPrompt,
+            "prompt",
+            "deploy the gryphonlatch service",
+        ))
+        .await
+        .unwrap();
+    store
+        .writer
+        .insert_observation(observation(
+            session_id,
+            ws,
+            proj,
+            sessionmunch_core::ObservationKind::PostToolUse,
+            "tool non-file",
+            "gryphonlatch: connection refused",
+        ))
+        .await
+        .unwrap();
+
+    let events = store.reader.session_events(session_id, 10).await.unwrap();
+    assert_eq!(events.len(), 2);
+    let first = events.iter().find(|e| e.sequence == 1).unwrap();
+    assert_eq!(first.event_id, format!("obs:{prompt}"));
+    assert_eq!(first.kind, WorkstreamEventKind::Message);
+    assert_eq!(first.role.as_deref(), Some("user"));
+    assert_eq!(first.content, "prompt\ndeploy the gryphonlatch service");
+    assert_eq!(first.metadata["observation_kind"], "user-prompt");
+    let second = events.iter().find(|e| e.sequence == 2).unwrap();
+    assert_eq!(second.kind, WorkstreamEventKind::ToolResult);
+
+    let on_sleeper = store
+        .reader
+        .search_session_events_filtered(sessionmunch_core::SessionEventSearch {
+            query: "gryphonlatch".into(),
+            limit: 10,
+            machine: Some("SLEEPER".into()),
+            newest_first: true,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(on_sleeper.len(), 2, "machine filter is case-insensitive");
+    assert_eq!(on_sleeper[0].sequence, 2, "newest first");
+    assert_eq!(on_sleeper[0].project.as_deref(), Some("shared-app"));
+    assert_eq!(on_sleeper[0].workspace.as_deref(), Some("acme"));
+    assert_eq!(on_sleeper[0].cwd.as_deref(), Some("/repo"));
+    assert!(on_sleeper[0].created_at > 0);
+
+    let elsewhere = store
+        .reader
+        .search_session_events_filtered(sessionmunch_core::SessionEventSearch {
+            query: "gryphonlatch".into(),
+            limit: 10,
+            machine: Some("titan".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(elsewhere.is_empty());
+
+    let future = store
+        .reader
+        .search_session_events_filtered(sessionmunch_core::SessionEventSearch {
+            query: "gryphonlatch".into(),
+            limit: 10,
+            since_micros: Some(i64::MAX - 1),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(future.is_empty(), "since filter excludes older events");
+
+    let wrong_harness = store
+        .reader
+        .search_session_events_filtered(sessionmunch_core::SessionEventSearch {
+            query: "gryphonlatch".into(),
+            limit: 10,
+            harness: Some("codex".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(wrong_harness.is_empty());
+}
+
+#[tokio::test]
+async fn event_search_applies_the_session_owner_rule() {
+    let tmp = tempfile::tempdir().unwrap();
+    let store = Store::open(tmp.path()).unwrap();
+    let (ws, proj) = scope(&store).await;
+    let alice = SessionId::new();
+    store
+        .writer
+        .begin_session_with_provenance(new_session(ws, proj, alice), SessionProvenance::default())
+        .await
+        .unwrap();
+    store
+        .writer
+        .append_session_events(
+            alice,
+            vec![event(
+                "a1",
+                WorkstreamEventKind::ToolCall,
+                "rotate the moonpetal key",
+            )],
+        )
+        .await
+        .unwrap();
+    let search = |owner| sessionmunch_core::SessionEventSearch {
+        query: "moonpetal".into(),
+        limit: 10,
+        owner,
+        ..Default::default()
+    };
+    let owner_of = |key: &str| Some(sessionmunch_core::OwnerFilter::User(key.into()));
+    assert_eq!(
+        store
+            .reader
+            .search_session_events_filtered(search(owner_of("user:alice")))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(
+        store
+            .reader
+            .search_session_events_filtered(search(owner_of("user:bob")))
+            .await
+            .unwrap()
+            .is_empty(),
+        "another operator's session events stay private"
+    );
+    assert!(
+        store
+            .reader
+            .search_session_events_filtered(search(Some(
+                sessionmunch_core::OwnerFilter::Unattributed
+            )))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        store
+            .reader
+            .search_session_events_filtered(search(None))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}

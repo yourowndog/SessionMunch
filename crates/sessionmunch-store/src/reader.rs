@@ -20,8 +20,8 @@ use sessionmunch_core::{
     AgentKind, AutoImproveProposalId, AutoImproveRunId, Handoff, HandoffContent, HandoffId,
     HandoffLifecycle, HandoffOrigin, HandoffScope, HandoffState, IdentityKey, ManagedRunId,
     Observation, ObservationId, ObservationKind, OwnerFilter, PageId, PagePath, ProjectId,
-    SessionEvent, SessionEventHit, SessionId, User, UserId, WorkspaceId, WorkstreamEvent,
-    WorkstreamId,
+    SessionEvent, SessionEventHit, SessionEventSearch, SessionId, User, UserId, WorkspaceId,
+    WorkstreamEvent, WorkstreamId,
 };
 use uuid::Uuid;
 // `sessionmunch_core::Tier` is referenced via fully-qualified path inside the
@@ -2831,19 +2831,40 @@ impl ReaderPool {
         .await
     }
 
+    /// Search the session event ledger with optional scope, machine,
+    /// harness, and time filters.
+    ///
+    /// # Errors
+    /// Propagates any SQL or pool error.
+    pub async fn search_session_events_filtered(
+        &self,
+        search: SessionEventSearch,
+    ) -> StoreResult<Vec<SessionEventHit>> {
+        self.with_conn(move |conn| crate::session_events::search_session_events(conn, &search))
+            .await
+    }
+
     /// Search session events globally across all sessions using full-text search.
+    ///
+    /// # Errors
+    /// Propagates any SQL or pool error.
     pub async fn search_session_events(
         &self,
         query: String,
         limit: usize,
     ) -> StoreResult<Vec<SessionEventHit>> {
-        self.with_conn(move |conn| {
-            crate::session_events::search_session_events(conn, &query, limit)
+        self.search_session_events_filtered(SessionEventSearch {
+            query,
+            limit,
+            ..SessionEventSearch::default()
         })
         .await
     }
 
     /// Search session events scoped to a workspace and project.
+    ///
+    /// # Errors
+    /// Propagates any SQL or pool error.
     pub async fn search_session_events_scoped(
         &self,
         workspace_id: WorkspaceId,
@@ -2851,14 +2872,11 @@ impl ReaderPool {
         query: String,
         limit: usize,
     ) -> StoreResult<Vec<SessionEventHit>> {
-        self.with_conn(move |conn| {
-            crate::session_events::search_session_events_scoped(
-                conn,
-                workspace_id,
-                project_id,
-                &query,
-                limit,
-            )
+        self.search_session_events_filtered(SessionEventSearch {
+            query,
+            limit,
+            scope: Some((workspace_id, project_id)),
+            ..SessionEventSearch::default()
         })
         .await
     }
