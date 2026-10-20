@@ -338,7 +338,14 @@ async fn import_sessions<'a>(
         if export.events.is_empty() {
             continue;
         }
-        let (events, oversized) = to_session_events(&export.events, sanitizer);
+        let (mut events, oversized) = to_session_events(&export.events, sanitizer);
+        // Per-event origin: a session can be imported from more than one
+        // machine when a transcript store was copied between them.
+        for event in &mut events {
+            if let serde_json::Value::Object(metadata) = &mut event.metadata {
+                metadata.insert("machine".into(), machine.into());
+            }
+        }
         report.sessions_with_new_events += 1;
         report.events_queued += events.len();
         if dry_run {

@@ -589,3 +589,68 @@ async fn ledger_events_attach_to_an_existing_session_whatever_scope_the_importer
         Err(sessionmunch_store::StoreError::SessionCollision)
     ));
 }
+
+#[tokio::test]
+async fn a_second_machine_cannot_relabel_where_a_session_ran() {
+    let tmp = tempfile::tempdir().unwrap();
+    let store = Store::open(tmp.path()).unwrap();
+    let (ws, proj) = scope(&store).await;
+    let session_id = SessionId::new();
+    let from = |machine: &str| SessionProvenance {
+        machine_id: Some(machine.into()),
+        source: SessionSource::Import,
+        ..SessionProvenance::default()
+    };
+    store
+        .writer
+        .begin_session_with_provenance(new_session(ws, proj, session_id), from("titan"))
+        .await
+        .unwrap();
+    let mut first = event("e1", WorkstreamEventKind::ToolCall, "lanternmoss build");
+    first.metadata = serde_json::json!({ "machine": "titan" });
+    store
+        .writer
+        .append_session_events(session_id, vec![first])
+        .await
+        .unwrap();
+    store
+        .writer
+        .begin_session_with_provenance(new_session(ws, proj, session_id), from("sleeper"))
+        .await
+        .unwrap();
+    let mut second = event("e2", WorkstreamEventKind::ToolCall, "lanternmoss copied");
+    second.metadata = serde_json::json!({ "machine": "sleeper" });
+    store
+        .writer
+        .append_session_events(session_id, vec![second])
+        .await
+        .unwrap();
+    let on = |machine: &str| sessionmunch_core::SessionEventSearch {
+        query: "lanternmoss".into(),
+        limit: 10,
+        machine: Some(machine.into()),
+        ..Default::default()
+    };
+    let titan = store
+        .reader
+        .search_session_events_filtered(on("titan"))
+        .await
+        .unwrap();
+    assert_eq!(titan.len(), 1);
+    assert_eq!(
+        titan[0].machine_id.as_deref(),
+        Some("titan"),
+        "first writer wins"
+    );
+    let sleeper = store
+        .reader
+        .search_session_events_filtered(on("sleeper"))
+        .await
+        .unwrap();
+    assert_eq!(
+        sleeper.len(),
+        1,
+        "per-event origin still answers 'on sleeper'"
+    );
+    assert_eq!(sleeper[0].event_id, "e2");
+}

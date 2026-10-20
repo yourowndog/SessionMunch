@@ -45,6 +45,7 @@ pub(crate) fn begin_session_with_provenance(
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
+    let created = existing.is_none();
     match existing {
         // Scope is not identity: an import that guessed a different project
         // for a session the hooks already recorded attaches to that session
@@ -63,7 +64,7 @@ pub(crate) fn begin_session_with_provenance(
         // purge/sanitize guards on the existing path).
         None => crate::ops::begin_session_in_transaction(&tx, session)?,
     }
-    ensure_provenance_in_transaction(&tx, session.id.as_bytes(), provenance)?;
+    ensure_provenance_in_transaction(&tx, session.id.as_bytes(), provenance, created)?;
     tx.commit()?;
     Ok(())
 }
@@ -263,16 +264,19 @@ fn ensure_provenance_in_transaction(
     tx: &Transaction<'_>,
     session_id: &[u8],
     provenance: &SessionProvenance,
+    created: bool,
 ) -> StoreResult<()> {
+    // Identity provenance is first-writer-wins: a second machine importing a
+    // copied transcript store must not relabel where the session ran.
     tx.execute(
         "UPDATE sessions SET \
-             native_session_id = COALESCE(?1, native_session_id), \
-             machine_id        = COALESCE(?2, machine_id), \
-             git_root          = COALESCE(?3, git_root), \
-             git_branch        = COALESCE(?4, git_branch), \
-             commit_at_start   = COALESCE(?5, commit_at_start), \
+             native_session_id = COALESCE(native_session_id, ?1), \
+             machine_id        = COALESCE(machine_id, ?2), \
+             git_root          = COALESCE(git_root, ?3), \
+             git_branch        = COALESCE(git_branch, ?4), \
+             commit_at_start   = COALESCE(commit_at_start, ?5), \
              import_cursor     = COALESCE(?6, import_cursor), \
-             source            = ?7 \
+             source            = CASE WHEN ?9 THEN ?7 ELSE source END \
          WHERE id = ?8",
         params![
             provenance.native_session_id,
@@ -283,6 +287,7 @@ fn ensure_provenance_in_transaction(
             provenance.import_cursor,
             provenance.source.as_str(),
             session_id,
+            created,
         ],
     )?;
     Ok(())
@@ -336,7 +341,8 @@ pub(crate) fn search_session_events(
          LEFT JOIN projects ON projects.id = sessions.project_id \
          WHERE session_events_fts MATCH ?1 \
            AND (?2 IS NULL OR (sessions.workspace_id = ?2 AND sessions.project_id = ?3)) \
-           AND (?4 IS NULL OR sessions.machine_id = ?4 COLLATE NOCASE) \
+           AND (?4 IS NULL OR COALESCE(json_extract(session_events.metadata_json, '$.machine'), \
+                sessions.machine_id) = ?4 COLLATE NOCASE) \
            AND (?5 IS NULL OR sessions.agent_kind = ?5 COLLATE NOCASE) \
            AND (?6 IS NULL OR session_events.created_at >= ?6) \
            AND (?7 IS NULL OR session_events.created_at < ?7) \
