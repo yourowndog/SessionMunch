@@ -517,3 +517,75 @@ async fn a_prompt_titled_with_itself_is_stored_once() {
     let events = store.reader.session_events(session_id, 10).await.unwrap();
     assert_eq!(events[0].content, "fix the ledger please");
 }
+
+#[tokio::test]
+async fn ledger_events_attach_to_an_existing_session_whatever_scope_the_importer_guessed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let store = Store::open(tmp.path()).unwrap();
+    let (ws, proj) = scope(&store).await;
+    let other_proj = store
+        .writer
+        .get_or_create_project(ws, "guessed-elsewhere".to_string(), None)
+        .await
+        .unwrap();
+    let session_id = SessionId::new();
+    store
+        .writer
+        .begin_session_with_provenance(
+            new_session(ws, proj, session_id),
+            SessionProvenance::default(),
+        )
+        .await
+        .unwrap();
+
+    // Same session, different guessed project, no owner named: attaches.
+    let mut guessed = new_session(ws, other_proj, session_id);
+    guessed.actor_user = None;
+    store
+        .writer
+        .begin_session_with_provenance(guessed.clone(), SessionProvenance::default())
+        .await
+        .expect("scope is not identity");
+    store
+        .writer
+        .append_session_events(
+            session_id,
+            vec![event(
+                "late",
+                WorkstreamEventKind::ToolCall,
+                "imported later",
+            )],
+        )
+        .await
+        .unwrap();
+    let hits = store
+        .reader
+        .search_session_events("imported".into(), 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        hits[0].project.as_deref(),
+        Some("shared-app"),
+        "kept its hook scope"
+    );
+
+    // A different harness or a different named owner is a real collision.
+    let mut other_agent = guessed.clone();
+    other_agent.agent_kind = AgentKind::Codex;
+    assert!(matches!(
+        store
+            .writer
+            .begin_session_with_provenance(other_agent, SessionProvenance::default())
+            .await,
+        Err(sessionmunch_store::StoreError::SessionCollision)
+    ));
+    let mut other_owner = guessed;
+    other_owner.actor_user = Some("user:bob".into());
+    assert!(matches!(
+        store
+            .writer
+            .begin_session_with_provenance(other_owner, SessionProvenance::default())
+            .await,
+        Err(sessionmunch_store::StoreError::SessionCollision)
+    ));
+}

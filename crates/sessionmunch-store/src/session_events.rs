@@ -9,7 +9,7 @@
 use std::str::FromStr as _;
 
 use jiff::Timestamp;
-use rusqlite::{Connection, Transaction, params};
+use rusqlite::{Connection, OptionalExtension as _, Transaction, params};
 use sessionmunch_core::{
     NewObservation, NewSession, NewSessionEvent, ObservationId, ObservationKind, OwnerFilter,
     ProjectId, SessionEvent, SessionEventHit, SessionEventSearch, SessionId, SessionProvenance,
@@ -38,9 +38,31 @@ pub(crate) fn begin_session_with_provenance(
     provenance: &SessionProvenance,
 ) -> StoreResult<()> {
     let tx = conn.transaction()?;
-    // Ensure the base session row exists first (idempotent, carries the
-    // purge/sanitize guards on the existing path).
-    crate::ops::begin_session_in_transaction(&tx, session)?;
+    let existing: Option<(String, Option<String>)> = tx
+        .query_row(
+            "SELECT agent_kind, actor_user FROM sessions WHERE id = ?1",
+            params![session.id.as_bytes()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    match existing {
+        // Scope is not identity: an import that guessed a different project
+        // for a session the hooks already recorded attaches to that session
+        // (where its hook history lives) instead of failing the batch. The
+        // harness and a named owner are identity; a mismatch is a collision.
+        Some((agent, owner)) => {
+            let owner_conflicts = session
+                .actor_user
+                .as_deref()
+                .is_some_and(|wanted| owner.as_deref() != Some(wanted));
+            if agent != session.agent_kind.as_str() || owner_conflicts {
+                return Err(crate::StoreError::SessionCollision);
+            }
+        }
+        // Ensure the base session row exists first (idempotent, carries the
+        // purge/sanitize guards on the existing path).
+        None => crate::ops::begin_session_in_transaction(&tx, session)?,
+    }
     ensure_provenance_in_transaction(&tx, session.id.as_bytes(), provenance)?;
     tx.commit()?;
     Ok(())

@@ -298,7 +298,7 @@ impl EventSink for HttpEventSink {
                 ))),
                 // Per-batch poison, provably this batch's fault and
                 // independent of destination health: safe to quarantine.
-                400 | 413 | 422 => Err(SinkError::Rejected {
+                400 | 409 | 413 | 422 => Err(SinkError::Rejected {
                     status,
                     body: trimmed,
                 }),

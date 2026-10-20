@@ -522,7 +522,7 @@ async fn poison_head_is_quarantined_and_good_tail_drains() {
 }
 
 /// The sink's status taxonomy (t_0474cfae review): only statuses that are
-/// provably one batch's fault may quarantine. 400/413/422 map to
+/// provably one batch's fault may quarantine. 400/409/413/422 map to
 /// non-retryable rejection; 401/403 to the auth wall; everything else —
 /// transient 429/5xx, wrong-endpoint 404/405/501 — is retryable so the
 /// batches are retained, never silently discarded.
@@ -558,7 +558,7 @@ async fn sink_status_taxonomy_never_quarantines_transient_or_endpoint_errors() {
     );
 
     // Per-batch poison: quarantine-eligible.
-    for status in [400u16, 413, 422] {
+    for status in [400u16, 409, 413, 422] {
         let (base_url, _server) = fixed_status_server(status).await;
         let err = HttpEventSink::new(&base_url, None)
             .deliver(&batch)

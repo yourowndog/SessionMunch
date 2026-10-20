@@ -227,7 +227,14 @@ async fn ingest_batch(
         .begin_session_with_provenance(new_session, request.provenance.clone())
         .await
     {
-        return error(StatusCode::INTERNAL_SERVER_ERROR, failure.to_string());
+        // A collision is this batch's fault and never heals on retry; 409 lets
+        // a drainer set it aside instead of wedging every batch behind it.
+        let status = if matches!(failure, sessionmunch_store::StoreError::SessionCollision) {
+            StatusCode::CONFLICT
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        };
+        return error(status, failure.to_string());
     }
 
     // Idempotent append: duplicates are skipped at the store (`UNIQUE
