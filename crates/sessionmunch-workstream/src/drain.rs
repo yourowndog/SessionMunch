@@ -254,7 +254,7 @@ impl HttpEventSink {
     /// token. The ingest path is appended automatically.
     pub fn new(base_url: impl Into<String>, token: Option<String>) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: crate::bounded_http_client(),
             base_url: base_url.into().trim_end_matches('/').to_string(),
             token,
             _sanitizer: Sanitizer::default(),

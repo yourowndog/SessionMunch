@@ -96,7 +96,7 @@ impl ArtifactClient {
     /// ingest path is appended automatically.
     pub fn new(base_url: impl Into<String>, token: Option<String>) -> Self {
         Self {
-            client: Client::new(),
+            client: crate::bounded_http_client(),
             base_url: base_url.into().trim_end_matches('/').to_string(),
             token,
         }

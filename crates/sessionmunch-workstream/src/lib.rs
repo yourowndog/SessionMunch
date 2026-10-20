@@ -50,6 +50,17 @@ pub use transcript::{
     native_session_exists, wait_for_transcript_flush,
 };
 
+/// HTTP client for hub delivery. Bounded so a dropped connection surfaces as
+/// a retryable transport error instead of hanging the drain forever (seen in
+/// the first fleet backfill: two importers sat idle with the hub at load 0).
+pub(crate) fn bounded_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
 #[cfg(test)]
 #[path = "../tests/suite/mod.rs"]
 mod integration;
