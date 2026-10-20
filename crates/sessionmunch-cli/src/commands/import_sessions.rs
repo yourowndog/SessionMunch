@@ -33,6 +33,8 @@ use crate::http_client::ServerEndpoint;
 /// Events per spooled batch; well under the hub's 4096-event cap so one
 /// batch stays a bounded request.
 const EVENTS_PER_BATCH: usize = 500;
+/// Back-off retries (2s, 4s, … capped at 60s) on a hub that stops answering.
+const DRAIN_RETRIES: u32 = 6;
 /// Unacknowledged spool cap. Large enough for a first full backfill.
 const MAX_SPOOL_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 /// Workspace for sessions whose transcript records no usable scope.
@@ -190,9 +192,21 @@ pub async fn run(config: &Config, args: ImportSessionsArgs) -> Result<()> {
         let drainer =
             SpoolDrainer::new(spool.clone(), Arc::new(HttpEventSink::new(&hub_url, token)))
                 .with_batches_per_pass(64);
+        let mut transient_retries = 0u32;
         loop {
             let pass = drainer.drain_once().await;
             events_delivered += pass.accepted_events;
+            // A busy hub (a fleet-wide backfill) times requests out; that is
+            // not an outage. Back off and retry before leaving it queued.
+            if pass.stopped_on_offline && !pass.stopped_on_auth && transient_retries < DRAIN_RETRIES
+            {
+                transient_retries += 1;
+                tokio::time::sleep(Duration::from_secs(2u64.pow(transient_retries).min(60))).await;
+                continue;
+            }
+            if pass.delivered_batches > 0 {
+                transient_retries = 0;
+            }
             if pass.stopped_on_offline || pass.stopped_on_auth || pass.permanent_failure {
                 delivery_problem = Some(if pass.stopped_on_auth {
                     format!("hub {hub_url} refused the credential; batches stay queued")
@@ -213,7 +227,10 @@ pub async fn run(config: &Config, args: ImportSessionsArgs) -> Result<()> {
             }
         }
         batches_pending = spool.metrics().pending_batches;
-        events_already_known = queued.saturating_sub(events_delivered);
+        // Only meaningful once everything queued has been answered.
+        if batches_pending == 0 {
+            events_already_known = queued.saturating_sub(events_delivered);
+        }
     }
 
     let report = ImportReport {
