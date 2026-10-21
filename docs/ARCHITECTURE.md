@@ -7,7 +7,7 @@
 ## Purpose
 
 sessionmunch is a single Rust binary that gives the coding agents in the
-[README Support Matrix](../README.md#support-matrix), plus other MCP-capable
+[Support Matrix](support-matrix.md), plus other MCP-capable
 clients, long-term memory shared across CLIs.
 Quit one mid-task; open another in the same directory; continue. No
 manual `write_note` ceremony, no copy-pasting summaries between

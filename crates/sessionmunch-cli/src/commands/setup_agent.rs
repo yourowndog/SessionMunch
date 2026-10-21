@@ -12,7 +12,7 @@
 //! ```bash
 //! docker run --rm \
 //!   -v "$HOME/.sessionmunch:/host" \
-//!   akitaonrails/ai-memory:latest \
+//!   yourowndog/sessionmunch:latest \
 //!   setup-agent \
 //!     --agent claude-code \
 //!     --to /host/hooks \

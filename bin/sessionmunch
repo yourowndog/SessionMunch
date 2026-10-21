@@ -17,7 +17,7 @@
 #                           Same: the rename is keyed on host repo identity.
 #
 # Env overrides:
-#   SESSIONMUNCH_IMAGE         container image (default: docker.io/akitaonrails/ai-memory:latest)
+#   SESSIONMUNCH_IMAGE         container image (default: docker.io/yourowndog/sessionmunch:latest)
 #   SESSIONMUNCH_DOCKER        container engine command (default: docker, then podman)
 #   SESSIONMUNCH_DATA_VOLUME   named volume mounted at /data (default: sessionmunch-data)
 #   SESSIONMUNCH_DATA_DIR      host path to bind-mount at /data instead (rare)
