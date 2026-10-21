@@ -13,7 +13,6 @@ description = "LLM provider trait with typed Anthropic, OpenAI, Gemini, OpenAI O
 
 [dependencies]
 sessionmunch-core.workspace = true
-anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true

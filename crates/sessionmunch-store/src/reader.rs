@@ -4758,39 +4758,10 @@ impl ReaderPool {
         .await
     }
 
-    /// Return pages linked to or from the seed pages, scoped to latest pages
-    /// in the same project.
-    ///
-    /// `expiry_cutoff_us`: see [`Self::search_pages_for_project`].
-    ///
-    /// # Errors
-    /// Propagates any SQL or pool error.
-    pub async fn graph_neighbors_for_project(
-        &self,
-        workspace_id: WorkspaceId,
-        project_id: ProjectId,
-        seed_ids: Vec<PageId>,
-        limit: usize,
-        expiry_cutoff_us: Option<i64>,
-    ) -> StoreResult<Vec<PageHit>> {
-        Ok(self
-            .graph_neighbors_for_project_explained(
-                workspace_id,
-                project_id,
-                seed_ids,
-                limit,
-                expiry_cutoff_us,
-            )
-            .await?
-            .into_iter()
-            .map(|n| n.hit)
-            .collect())
-    }
-
-    /// [`Self::graph_neighbors_for_project`] plus provenance: which seed
-    /// produced each neighbour (`seed_ord` indexes into the caller's
-    /// `seed_ids`) and in which direction the link points. Feeds the
-    /// `memory_query` explain surface.
+    /// Pages linked to or from the seed pages, scoped to latest pages in the
+    /// same project, plus provenance: which seed produced each neighbour
+    /// (`seed_ord` indexes into the caller's `seed_ids`) and in which
+    /// direction the link points. Feeds the `memory_query` explain surface.
     async fn graph_neighbors_for_project_explained(
         &self,
         workspace_id: WorkspaceId,

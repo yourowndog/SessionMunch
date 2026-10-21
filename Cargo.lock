@@ -3376,7 +3376,6 @@ dependencies = [
  "tokio-util",
  "toml_edit 0.22.27",
  "tower",
- "tower-http",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -3477,7 +3476,6 @@ dependencies = [
 name = "sessionmunch-llm"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "async-trait",
  "base64 0.22.1",
  "candle-core",
@@ -3527,7 +3525,6 @@ dependencies = [
  "subtle",
  "tar",
  "tempfile",
- "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "tower",
@@ -3540,7 +3537,6 @@ dependencies = [
 name = "sessionmunch-store"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "argon2",
  "base64 0.22.1",
  "fs2",
@@ -3582,7 +3578,6 @@ dependencies = [
  "sessionmunch-wiki",
  "sha2",
  "tempfile",
- "thiserror 2.0.18",
  "tokio",
  "tower",
  "tower-http",
@@ -3593,7 +3588,6 @@ dependencies = [
 name = "sessionmunch-wiki"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "async-trait",
  "axum",
  "dirs",
