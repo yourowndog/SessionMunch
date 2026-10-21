@@ -1021,6 +1021,7 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
                 }
             };
             if let Some(service) = service {
+                info!("MCP client completed the stdio handshake");
                 // Take the token before `waiting` consumes the service:
                 // stopping the transport is the only way out of that await.
                 let stop = service.cancellation_token();
