@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- The README, install guide, Hermes guide and MCP reference now match the shipped code. The harness table lists the four first-class integrations plus any MCP client, and it no longer claims Aider or Windsurf. The MCP reference documents all 20 tools. The install guide explains how to build the Docker image and binary locally until the first tagged release publishes them. (#11)
 - Product-wide rename: `ai-memory` is now SessionMunch (t_3f5184b0). Binary
   `sessionmunch`; crates `sessionmunch-*`; env `SESSIONMUNCH_*`; data dir
   `<data-local>/sessionmunch`; config `~/.config/sessionmunch`; marker
@@ -131,6 +132,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#t_c51f1a51).
 
 ### Fixed
+- Patched new certificate-validation advisories RUSTSEC-2026-0382 (rustls-webpki 0.103.16) and RUSTSEC-2026-0383 (webpki-root-certs 1.0.10). The web UI now uses askama 0.16 without its config feature, which drops the unmaintained basic-toml (RUSTSEC-2026-0374). (#11)
 - Renamed the legacy Architecture & Data Ownership guide so it no longer
   differs from the canonical `docs/ARCHITECTURE.md` only by letter case,
   preventing case-insensitive macOS and Windows checkouts from compiling the

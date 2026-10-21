@@ -1,4 +1,4 @@
-# Maintainer: AkitaOnRails <boss@akitaonrails.com>
+# Maintainer: yourowndog <https://github.com/yourowndog>
 
 # NOTE: pkgver/pkgrel and the sha256sums below are PLACEHOLDERS.
 # `.github/workflows/release.yml` copies this file at publish time and
@@ -15,7 +15,7 @@
 #
 pkgname=sessionmunch-bin
 _pkgname=sessionmunch
-pkgver=0.3.2
+pkgver=0.1.0
 pkgrel=1
 pkgdesc="Local-first long-term memory MCP server for AI coding agents (prebuilt binary)"
 arch=('x86_64' 'aarch64')

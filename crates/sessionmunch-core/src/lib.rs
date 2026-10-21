@@ -24,10 +24,7 @@ pub mod routing_snippet;
 pub mod sanitize;
 pub mod sections;
 pub mod session_events;
-pub use sections::{
-    CrossEncoder, CrossEncoderScore, EnrichmentHook, Passage, PassageEnrichment, Section,
-    count_tokens, parse_sections, split_passages,
-};
+pub use sections::{Passage, Section, count_tokens, parse_sections, split_passages};
 pub mod slots;
 pub mod user;
 mod workstream;

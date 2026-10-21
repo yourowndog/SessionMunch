@@ -130,21 +130,6 @@ pub struct User {
     pub has_password: bool,
 }
 
-impl User {
-    /// `true` when human login is currently allowed.
-    #[must_use]
-    pub fn is_human_enabled(&self) -> bool {
-        self.disabled_at.is_none() && self.has_password
-    }
-
-    /// `true` when the deprecated single-token compatibility credential is
-    /// active.
-    #[must_use]
-    pub fn is_token_active(&self) -> bool {
-        self.token_expired_at.is_none()
-    }
-}
-
 /// Public metadata for one native API credential. The authenticating
 /// hash is never serialised.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
