@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 
 use crate::cli::LegacyImportArgs;
 use crate::config::{Config, DEFAULT_WORKSPACE};
+use crate::host_env::HostEnv;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -40,8 +41,8 @@ struct ImportManifest {
 const IMPORT_VERSION: &str = "legacy-ai-memory-v1";
 const MANIFEST_FILE: &str = ".legacy-import-manifest.json";
 
-pub async fn run(config: &Config, args: LegacyImportArgs) -> Result<()> {
-    let source_dir = resolve_source_dir(&args)?;
+pub async fn run(config: &Config, host: &HostEnv, args: LegacyImportArgs) -> Result<()> {
+    let source_dir = resolve_source_dir(host, &args)?;
     let dest_data_dir = &config.data_dir;
 
     if !source_dir.is_dir() {
@@ -443,18 +444,18 @@ fn print_plan(entries: &[PageEntry], dw: &Path) {
     println!();
 }
 
-fn resolve_source_dir(args: &LegacyImportArgs) -> Result<PathBuf> {
+fn resolve_source_dir(host: &HostEnv, args: &LegacyImportArgs) -> Result<PathBuf> {
     if let Some(p) = &args.path {
         return Ok(p.clone());
     }
-    let env = std::env::var("AI_MEMORY_DATA_DIR")
-        .ok()
+    let env = host
+        .var("AI_MEMORY_DATA_DIR")
         .filter(|s| !s.is_empty())
         .map(PathBuf::from);
     if let Some(p) = env.filter(|p| p.is_dir()) {
         return Ok(p);
     }
-    let home = std::env::var("HOME").ok().unwrap_or("/tmp".into());
+    let home = host.var("HOME").unwrap_or("/tmp".into());
     for c in &[".local/share/ai-memory", ".ai-memory", ".config/ai-memory"] {
         let p = Path::new(&home).join(c);
         if p.is_dir() {

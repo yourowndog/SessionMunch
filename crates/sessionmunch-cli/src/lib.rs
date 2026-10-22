@@ -23,6 +23,7 @@ mod auth_bearer;
 mod cli;
 mod commands;
 mod config;
+mod host_env;
 mod http_client;
 mod logging;
 mod marker;
@@ -30,6 +31,7 @@ mod process_guard;
 
 use cli::{Cli, Command};
 use config::Config;
+use host_env::HostEnv;
 
 /// Parses argv, loads config, and dispatches to the requested subcommand.
 ///
@@ -42,6 +44,9 @@ pub async fn run() -> Result<()> {
         config: config_path,
         command,
     } = Cli::parse();
+    // The host environment is snapshotted once, here, and passed to whatever
+    // needs it; `Config::load` below is the only other env reader.
+    let host = HostEnv::capture();
 
     // Hooks fire on every tool call: they must be cheap and must emit ONLY
     // their JSON object to stdout. Short-circuit before config load and
@@ -50,8 +55,8 @@ pub async fn run() -> Result<()> {
     // a stored OIDC token when no explicit `--auth-token` is given, so we pass
     // the bare path rather than loading the full config.
     let command = match command {
-        Command::Hook(args) => return commands::hook::run(data_dir, args).await,
-        Command::HookDrain(_args) => return commands::hook::run_drain(data_dir).await,
+        Command::Hook(args) => return commands::hook::run(&host, data_dir, args).await,
+        Command::HookDrain(_args) => return commands::hook::run_drain(&host, data_dir).await,
         // Completions are pure text derived from the command tree. Emitting
         // them must not require a loadable config or an initialised data dir
         // (they are typically generated before `init`, or in a packaging
@@ -85,28 +90,28 @@ pub async fn run() -> Result<()> {
         Command::Init(args) => commands::init::run(&config, args, config_path.as_deref()),
         Command::Status(args) => commands::status::run(&config, args).await,
         Command::Run(args) => {
-            let exit_code = commands::run::run(&config, args).await?;
+            let exit_code = commands::run::run(&config, &host, args).await?;
             if exit_code != 0 {
                 std::process::exit(exit_code);
             }
             Ok(())
         }
         Command::Show(args) => {
-            let exit_code = commands::show::run(&config, args).await?;
+            let exit_code = commands::show::run(&config, &host, args).await?;
             if exit_code != 0 {
                 std::process::exit(exit_code);
             }
             Ok(())
         }
         Command::Continue(args) => {
-            let exit_code = commands::continue_session::run(&config, args).await?;
+            let exit_code = commands::continue_session::run(&config, &host, args).await?;
             if exit_code != 0 {
                 std::process::exit(exit_code);
             }
             Ok(())
         }
         Command::Resume(args) => {
-            let exit_code = commands::resume::run(&config, args).await?;
+            let exit_code = commands::resume::run(&config, &host, args).await?;
             if exit_code != 0 {
                 std::process::exit(exit_code);
             }
@@ -123,19 +128,23 @@ pub async fn run() -> Result<()> {
         Command::ReadPage(args) => commands::read_page::run(&config, args).await,
         Command::WritePage(args) => commands::write_page::run(&config, args).await,
         Command::DeletePage(args) => commands::delete_page::run(&config, args).await,
-        Command::Serve(args) => commands::serve::run(&config, args).await,
+        Command::Serve(args) => commands::serve::run(&config, &host, args).await,
         Command::Reset(args) => commands::reset::run(&config, args),
         Command::Compact(args) => commands::compact::run(&config, args).await,
         Command::Backup(args) => commands::backup::run(&config, args).await,
         Command::ExportOkf(args) => commands::export_okf::run(&config, args).await,
         Command::Restore(args) => commands::restore::run(&config, args),
         Command::Reindex(args) => commands::reindex::run(&config, args).await,
-        Command::InstallHooks(args) => commands::install_hooks::run(&config, args),
+        Command::InstallHooks(args) => commands::install_hooks::run(&config, &host, args),
         // `Hook` is handled in the fast-path above (before config/tracing).
-        Command::Hook(args) => commands::hook::run(Some(config.data_dir.clone()), args).await,
+        Command::Hook(args) => {
+            commands::hook::run(&host, Some(config.data_dir.clone()), args).await
+        }
         // `HookDrain` is handled in the fast-path above (before config/tracing).
-        Command::HookDrain(_args) => commands::hook::run_drain(Some(config.data_dir.clone())).await,
-        Command::InstallMcp(args) => commands::install_mcp::run(&config, args),
+        Command::HookDrain(_args) => {
+            commands::hook::run_drain(&host, Some(config.data_dir.clone())).await
+        }
+        Command::InstallMcp(args) => commands::install_mcp::run(&config, &host, args),
         Command::McpBridge(args) => commands::mcp_bridge::run(&config, args).await,
         Command::Commit(args) => commands::commit::run(&config, args).await,
         Command::Checkpoints(args) => commands::checkpoints::run(&config, args).await,
@@ -152,26 +161,28 @@ pub async fn run() -> Result<()> {
         Command::EmbedPassages(args) => commands::embed::embed_passages(&config, args).await,
         Command::Backfill(args) => commands::backfill::run(&config, args).await,
         Command::GenerateAuthToken(args) => commands::generate_auth_token::run(&config, args),
-        Command::SetupAgent(args) => commands::setup_agent::run(&config, args),
+        Command::SetupAgent(args) => commands::setup_agent::run(&config, &host, args),
         Command::Bootstrap(args) => commands::bootstrap::run(&config, args).await,
-        Command::InstallInstructions(args) => commands::install_instructions::run(&config, args),
-        Command::InstallSkills(args) => commands::install_skills::run(&config, args),
+        Command::InstallInstructions(args) => {
+            commands::install_instructions::run(&config, &host, args)
+        }
+        Command::InstallSkills(args) => commands::install_skills::run(&config, &host, args),
         Command::Reorg(args) => commands::reorg::run(&config, args).await,
         Command::PurgeProject(args) => commands::purge_project::run(&config, args).await,
         Command::PurgeSession(args) => commands::purge_session::run(&config, args).await,
         Command::RenameProject(args) => commands::rename_project::run(&config, args).await,
         Command::MoveProject(args) => commands::move_project::run(&config, args).await,
         Command::MoveSession(args) => commands::move_session::run(&config, args).await,
-        Command::Uninstall(args) => commands::uninstall::run(&config, args),
+        Command::Uninstall(args) => commands::uninstall::run(&config, &host, args),
         Command::Auth(args) => commands::auth::run(&config, args).await,
         Command::User(args) => commands::user::run(&config, args).await,
         Command::ApiKey(args) => commands::api_key::run(&config, args).await,
-        Command::LegacyImport(args) => commands::legacy_import::run(&config, args).await,
+        Command::LegacyImport(args) => commands::legacy_import::run(&config, &host, args).await,
         Command::SnapshotHarnessHistory(args) => {
-            commands::snapshot_harness_history::run(&config, args).await
+            commands::snapshot_harness_history::run(&config, &host, args).await
         }
         Command::Import(crate::cli::ImportCommand::Sessions(args)) => {
-            commands::import_sessions::run(&config, args).await
+            commands::import_sessions::run(&config, &host, args).await
         }
         Command::SearchEvents(args) => commands::search_events::run(&config, args).await,
         // `Completions` is handled in the fast-path above (before config/tracing).

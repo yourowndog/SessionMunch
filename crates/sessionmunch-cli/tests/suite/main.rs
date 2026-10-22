@@ -7,13 +7,21 @@
 
 mod autoscope_env;
 mod backfill_sections;
+// Test setup may read the real environment; invariant #1 governs runtime code.
+#[allow(clippy::disallowed_methods)]
 mod branding;
 mod completions;
+// Test setup may read the real environment; invariant #1 governs runtime code.
+#[allow(clippy::disallowed_methods)]
 mod history_import_e2e;
 mod hook_drain;
 mod hook_payload;
+// Test setup may read the real environment; invariant #1 governs runtime code.
+#[allow(clippy::disallowed_methods)]
 mod legacy_import_e2e;
 mod marker_scope;
+// Test setup may read the real environment; invariant #1 governs runtime code.
+#[allow(clippy::disallowed_methods)]
 mod packaging;
 mod removal;
 mod repo_layout;

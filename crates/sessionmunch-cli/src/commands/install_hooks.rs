@@ -24,7 +24,6 @@ use crate::cli::{AgentChoice, CaptureModeArg, InstallHooksArgs, McpClient, Proje
 use crate::commands::apply_shared::{ApplyOutcome, apply_atomic, mutate_json, mutate_toml};
 use crate::commands::install_mcp;
 use crate::commands::openclaw_plugin;
-use crate::commands::path_util::home_dir;
 use crate::commands::render_shared::{
     ANTIGRAVITY_LIFECYCLE_EVENTS, ANTIGRAVITY_TOOL_EVENTS, CODEX_PROFILE, COMMAND_CODE_PROFILE,
     CURSOR_PROFILE, GEMINI_PROFILE, HookProfile, KIMI_CODE_EVENTS, KIRO_CLI_V2_EVENTS,
@@ -37,26 +36,29 @@ use crate::commands::render_shared::{
 };
 use crate::commands::uninstall::hook_command_is_ours;
 use crate::config::{Config, DEFAULT_SERVER_URL};
+use crate::host_env::HostEnv;
 
 const CLAUDE_PROMPT_EVENT: &str = "UserPromptSubmit";
 
 /// Claude Code's settings file — hooks live under `hooks`.
 /// `$CLAUDE_CONFIG_DIR/settings.json` when the var is set, else
 /// `~/.claude/settings.json`.
-pub(crate) fn claude_settings_path() -> anyhow::Result<std::path::PathBuf> {
-    claude_settings_path_in(std::env::var_os("CLAUDE_CONFIG_DIR"))
+pub(crate) fn claude_settings_path(host: &HostEnv) -> anyhow::Result<std::path::PathBuf> {
+    claude_settings_path_in(host, host.var_os("CLAUDE_CONFIG_DIR"))
 }
 
 /// The env value comes in as a parameter so tests can exercise both
 /// branches without mutating process env (mirrors
 /// `install_mcp::kimi_code_home`).
 fn claude_settings_path_in(
+    host: &HostEnv,
     env_override: Option<std::ffi::OsString>,
 ) -> anyhow::Result<std::path::PathBuf> {
     if let Some(dir) = crate::commands::path_util::claude_config_dir(env_override) {
         return Ok(dir.join("settings.json"));
     }
-    Ok(home_dir()
+    Ok(host
+        .home_dir()
         .context("could not locate $HOME for ~/.claude/settings.json")?
         .join(".claude")
         .join("settings.json"))
@@ -71,51 +73,57 @@ fn claude_settings_path_in(
 /// honors the variable when it resolves that Codex's transcripts
 /// (`ManagedHarness::Codex` in `sessionmunch-workstream`), so ignoring it here left
 /// one half of the same install pointing somewhere the other half did not.
-pub(crate) fn codex_hooks_path() -> anyhow::Result<std::path::PathBuf> {
-    codex_hooks_path_in(std::env::var_os("CODEX_HOME"))
+pub(crate) fn codex_hooks_path(host: &HostEnv) -> anyhow::Result<std::path::PathBuf> {
+    codex_hooks_path_in(host, host.var_os("CODEX_HOME"))
 }
 
 /// The env value comes in as a parameter so tests can exercise both branches
 /// without mutating process env (mirrors [`claude_settings_path_in`]).
 fn codex_hooks_path_in(
+    host: &HostEnv,
     env_override: Option<std::ffi::OsString>,
 ) -> anyhow::Result<std::path::PathBuf> {
     if let Some(dir) = crate::commands::path_util::agent_config_home(env_override) {
         return Ok(dir.join("hooks.json"));
     }
-    Ok(home_dir()
+    Ok(host
+        .home_dir()
         .context("could not locate $HOME for ~/.codex/hooks.json")?
         .join(".codex")
         .join("hooks.json"))
 }
 
 /// `~/.commandcode/settings.json`.
-pub(crate) fn command_code_settings_path() -> anyhow::Result<std::path::PathBuf> {
-    Ok(home_dir()
+pub(crate) fn command_code_settings_path(host: &HostEnv) -> anyhow::Result<std::path::PathBuf> {
+    Ok(host
+        .home_dir()
         .context("could not locate $HOME for ~/.commandcode/settings.json")?
         .join(".commandcode")
         .join("settings.json"))
 }
 
 /// `~/.cursor/hooks.json`.
-pub(crate) fn cursor_hooks_path() -> anyhow::Result<std::path::PathBuf> {
-    Ok(home_dir()
+pub(crate) fn cursor_hooks_path(host: &HostEnv) -> anyhow::Result<std::path::PathBuf> {
+    Ok(host
+        .home_dir()
         .context("could not locate $HOME for ~/.cursor/hooks.json")?
         .join(".cursor")
         .join("hooks.json"))
 }
 
 /// `~/.gemini/settings.json`.
-pub(crate) fn gemini_settings_path() -> anyhow::Result<std::path::PathBuf> {
-    Ok(home_dir()
+pub(crate) fn gemini_settings_path(host: &HostEnv) -> anyhow::Result<std::path::PathBuf> {
+    Ok(host
+        .home_dir()
         .context("could not locate $HOME for ~/.gemini/settings.json")?
         .join(".gemini")
         .join("settings.json"))
 }
 
 /// `~/.gemini/config/hooks.json` — Antigravity CLI lifecycle hooks.
-pub(crate) fn antigravity_hooks_path() -> anyhow::Result<std::path::PathBuf> {
-    Ok(home_dir()
+pub(crate) fn antigravity_hooks_path(host: &HostEnv) -> anyhow::Result<std::path::PathBuf> {
+    Ok(host
+        .home_dir()
         .context("could not locate $HOME for ~/.gemini/config/hooks.json")?
         .join(".gemini")
         .join("config")
@@ -123,8 +131,8 @@ pub(crate) fn antigravity_hooks_path() -> anyhow::Result<std::path::PathBuf> {
 }
 
 /// `~/.grok/hooks/sessionmunch.json` — Grok Build CLI lifecycle hooks.
-pub(crate) fn grok_hooks_path() -> anyhow::Result<std::path::PathBuf> {
-    Ok(install_mcp::grok_home()?
+pub(crate) fn grok_hooks_path(host: &HostEnv) -> anyhow::Result<std::path::PathBuf> {
+    Ok(install_mcp::grok_home(host)?
         .join("hooks")
         .join("sessionmunch.json"))
 }
@@ -133,8 +141,9 @@ pub(crate) fn grok_hooks_path() -> anyhow::Result<std::path::PathBuf> {
 /// (issue #156). Zero resolves it under `$XDG_CONFIG_HOME` falling back to
 /// `~/.config`; like the OpenCode plugin path below we target the default
 /// location and `--config-file` covers non-default XDG setups.
-pub(crate) fn zero_hooks_path() -> anyhow::Result<std::path::PathBuf> {
-    Ok(home_dir()
+pub(crate) fn zero_hooks_path(host: &HostEnv) -> anyhow::Result<std::path::PathBuf> {
+    Ok(host
+        .home_dir()
         .context("could not locate $HOME for ~/.config/zero/hooks.json")?
         .join(".config")
         .join("zero")
@@ -147,8 +156,9 @@ pub(crate) fn zero_hooks_path() -> anyhow::Result<std::path::PathBuf> {
 /// gate, while ZCode's workspace scopes (`.zcode/config.json`,
 /// `zcode.json`) are trust-gated and off by default, so they are never
 /// targeted (#512).
-pub(crate) fn zcode_config_path() -> anyhow::Result<std::path::PathBuf> {
-    Ok(home_dir()
+pub(crate) fn zcode_config_path(host: &HostEnv) -> anyhow::Result<std::path::PathBuf> {
+    Ok(host
+        .home_dir()
         .context("could not locate $HOME for ~/.zcode/cli/config.json")?
         .join(".zcode")
         .join("cli")
@@ -156,24 +166,27 @@ pub(crate) fn zcode_config_path() -> anyhow::Result<std::path::PathBuf> {
 }
 
 /// `~/.devin/hooks.v1.json` — Devin CLI lifecycle hooks (default target).
-pub(crate) fn devin_hooks_path() -> anyhow::Result<std::path::PathBuf> {
-    Ok(home_dir()
+pub(crate) fn devin_hooks_path(host: &HostEnv) -> anyhow::Result<std::path::PathBuf> {
+    Ok(host
+        .home_dir()
         .context("could not locate $HOME for ~/.devin/hooks.v1.json")?
         .join(".devin")
         .join("hooks.v1.json"))
 }
 
 /// `~/.devin/config.json` — Devin CLI lifecycle hooks (alternative target under `hooks` key).
-pub(crate) fn devin_config_path() -> anyhow::Result<std::path::PathBuf> {
-    Ok(home_dir()
+pub(crate) fn devin_config_path(host: &HostEnv) -> anyhow::Result<std::path::PathBuf> {
+    Ok(host
+        .home_dir()
         .context("could not locate $HOME for ~/.devin/config.json")?
         .join(".devin")
         .join("config.json"))
 }
 
 /// `~/.config/opencode/plugins/sessionmunch.ts` — OpenCode's plugin file.
-pub(crate) fn opencode_plugin_path() -> anyhow::Result<std::path::PathBuf> {
-    Ok(home_dir()
+pub(crate) fn opencode_plugin_path(host: &HostEnv) -> anyhow::Result<std::path::PathBuf> {
+    Ok(host
+        .home_dir()
         .context("could not locate $HOME for ~/.config/opencode")?
         .join(".config")
         .join("opencode")
@@ -191,17 +204,21 @@ pub(crate) fn opencode_plugin_path() -> anyhow::Result<std::path::PathBuf> {
 /// it resolves OMP transcripts (`ManagedHarness::Omp` in
 /// `sessionmunch-workstream`), so ignoring it here left one half of the same
 /// install pointing somewhere the other half did not.
-pub(crate) fn omp_extension_path(profile: Option<&str>) -> anyhow::Result<std::path::PathBuf> {
+pub(crate) fn omp_extension_path(
+    host: &HostEnv,
+    profile: Option<&str>,
+) -> anyhow::Result<std::path::PathBuf> {
     // Bind the OsString before borrowing from it: `var_os(..).as_ref()` in a
     // single expression drops the temporary at the end of the statement.
-    let env_profile = std::env::var_os("OMP_PROFILE");
+    let env_profile = host.var_os("OMP_PROFILE");
     let profile = profile.or_else(|| env_profile.as_ref().and_then(|s| s.to_str()));
-    omp_extension_path_in(std::env::var_os("PI_CODING_AGENT_DIR"), profile)
+    omp_extension_path_in(host, host.var_os("PI_CODING_AGENT_DIR"), profile)
 }
 
 /// The env value comes in as a parameter so tests can exercise both branches
 /// without mutating process env (mirrors [`codex_hooks_path_in`]).
 fn omp_extension_path_in(
+    host: &HostEnv,
     env_override: Option<std::ffi::OsString>,
     profile: Option<&str>,
 ) -> anyhow::Result<std::path::PathBuf> {
@@ -221,7 +238,8 @@ fn omp_extension_path_in(
     let base_dir = if let Some(dir) = crate::commands::path_util::agent_config_home(env_override) {
         dir
     } else {
-        let root = home_dir()
+        let root = host
+            .home_dir()
             .context("could not locate $HOME for ~/.omp")?
             .join(".omp");
         if let Some(profile_name) = profile {
@@ -243,19 +261,21 @@ fn omp_extension_path_in(
 /// resolves Pi transcripts (`ManagedHarness::Pi` in `sessionmunch-workstream`),
 /// so ignoring it here left one half of the same install pointing somewhere
 /// the other half did not.
-pub(crate) fn pi_extension_path() -> anyhow::Result<std::path::PathBuf> {
-    pi_extension_path_in(std::env::var_os("PI_CODING_AGENT_DIR"))
+pub(crate) fn pi_extension_path(host: &HostEnv) -> anyhow::Result<std::path::PathBuf> {
+    pi_extension_path_in(host, host.var_os("PI_CODING_AGENT_DIR"))
 }
 
 /// The env value comes in as a parameter so tests can exercise both branches
 /// without mutating process env (mirrors [`codex_hooks_path_in`]).
 fn pi_extension_path_in(
+    host: &HostEnv,
     env_override: Option<std::ffi::OsString>,
 ) -> anyhow::Result<std::path::PathBuf> {
     if let Some(dir) = crate::commands::path_util::agent_config_home(env_override) {
         return Ok(dir.join("extensions").join("sessionmunch-pi.ts"));
     }
-    Ok(home_dir()
+    Ok(host
+        .home_dir()
         .context("could not locate $HOME for ~/.pi/agent/extensions")?
         .join(".pi")
         .join("agent")
@@ -267,20 +287,22 @@ fn pi_extension_path_in(
 /// Kimi Code keeps hooks as `[[hooks]]` entries inside the same
 /// config.toml that stores the user's providers/model, so the apply
 /// path merges TOML-aware instead of rewriting the file.
-pub(crate) fn kimi_code_config_path() -> anyhow::Result<std::path::PathBuf> {
-    kimi_code_config_path_in(std::env::var_os("KIMI_CODE_HOME"))
+pub(crate) fn kimi_code_config_path(host: &HostEnv) -> anyhow::Result<std::path::PathBuf> {
+    kimi_code_config_path_in(host, host.var_os("KIMI_CODE_HOME"))
 }
 
 /// The env value comes in as a parameter so tests can exercise both
 /// branches without mutating process env (mirrors
 /// `install_mcp::kimi_code_home`).
 fn kimi_code_config_path_in(
+    host: &HostEnv,
     env_override: Option<std::ffi::OsString>,
 ) -> anyhow::Result<std::path::PathBuf> {
     if let Some(dir) = env_override.filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(dir).join("config.toml"));
     }
-    Ok(home_dir()
+    Ok(host
+        .home_dir()
         .context("could not locate $HOME for ~/.kimi-code/config.toml")?
         .join(".kimi-code")
         .join("config.toml"))
@@ -292,29 +314,31 @@ fn kimi_code_config_path_in(
 /// has no file on disk. `KIRO_HOME` relocation is honored by the real
 /// binary (verified against kiro-cli 2.16.0: settings are written under
 /// `$KIRO_HOME` when set).
-pub(crate) fn kiro_cli_agents_dir() -> anyhow::Result<std::path::PathBuf> {
-    kiro_cli_home_join(std::env::var_os("KIRO_HOME"), "agents")
+pub(crate) fn kiro_cli_agents_dir(host: &HostEnv) -> anyhow::Result<std::path::PathBuf> {
+    kiro_cli_home_join(host, host.var_os("KIRO_HOME"), "agents")
 }
 
 /// `$KIRO_HOME/hooks/sessionmunch.json` when set, else
 /// `~/.kiro/hooks/sessionmunch.json`. Kiro v3 loads each standalone JSON file in
 /// this directory; using one sessionmunch-owned file avoids mutating unrelated
 /// registrations.
-pub(crate) fn kiro_cli_v3_hooks_path() -> anyhow::Result<std::path::PathBuf> {
-    Ok(kiro_cli_home_join(std::env::var_os("KIRO_HOME"), "hooks")?.join("sessionmunch.json"))
+pub(crate) fn kiro_cli_v3_hooks_path(host: &HostEnv) -> anyhow::Result<std::path::PathBuf> {
+    Ok(kiro_cli_home_join(host, host.var_os("KIRO_HOME"), "hooks")?.join("sessionmunch.json"))
 }
 
 /// The env value comes in as a parameter so tests can exercise both
 /// branches without mutating process env (mirrors
 /// `kimi_code_config_path_in`).
 fn kiro_cli_home_join(
+    host: &HostEnv,
     env_override: Option<std::ffi::OsString>,
     child: &str,
 ) -> anyhow::Result<std::path::PathBuf> {
     if let Some(dir) = env_override.filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(dir).join(child));
     }
-    Ok(home_dir()
+    Ok(host
+        .home_dir()
         .context("could not locate $HOME for ~/.kiro")?
         .join(".kiro")
         .join(child))
@@ -324,9 +348,9 @@ fn kiro_cli_home_join(
 ///
 /// # Errors
 /// Returns an error if the hook script directory cannot be located.
-pub fn run(config: &Config, mut args: InstallHooksArgs) -> Result<()> {
+pub fn run(config: &Config, host: &HostEnv, mut args: InstallHooksArgs) -> Result<()> {
     let inferred = if args.server_url.is_none() {
-        infer_installed_mcp_config(args.agent)?
+        infer_installed_mcp_config(host, args.agent)?
     } else {
         None
     };
@@ -385,7 +409,7 @@ pub fn run(config: &Config, mut args: InstallHooksArgs) -> Result<()> {
             | AgentChoice::Pi
             | AgentChoice::Openclaw
     );
-    if generated || local_hook_policy_v1_supported() {
+    if generated || local_hook_policy_v1_supported(host) {
         eprintln!(
             "[sessionmunch] capture-policy capability v1 enforced by this selected integration; re-run --apply to refresh existing installs."
         );
@@ -398,7 +422,7 @@ pub fn run(config: &Config, mut args: InstallHooksArgs) -> Result<()> {
     // silent fallback: bail so an operator on a script-fallback platform or a
     // different agent is told the flag has no effect instead of installing a
     // command whose capture would be silently dropped.
-    if args.capture_assistant && !capture_assistant_allowed(args.agent) {
+    if args.capture_assistant && !capture_assistant_allowed(host, args.agent) {
         anyhow::bail!(
             "--capture-assistant requires --agent claude-code on a native hook platform \
              (PosixNative/WindowsNative). The current selection uses the script fallback or a \
@@ -431,7 +455,7 @@ pub fn run(config: &Config, mut args: InstallHooksArgs) -> Result<()> {
             // never runs either enforcement point. Saying nothing would leave
             // an operator trusting a protection this install does not have —
             // the exact failure #446 is about.
-            if !generated && !local_hook_policy_v1_supported() {
+            if !generated && !local_hook_policy_v1_supported(host) {
                 println!(
                     "  WARNING: this install uses script hooks, which POST directly and \
                      cannot enforce the mode. Allowlist is stored but NOT in force here."
@@ -446,11 +470,12 @@ pub fn run(config: &Config, mut args: InstallHooksArgs) -> Result<()> {
         // is honored as-is, so an intentional downgrade still works. Resolving
         // into `args` here means every downstream renderer picks it up with no
         // per-agent plumbing.
-        args.project_strategy = install_project_strategy(&args);
+        args.project_strategy = install_project_strategy(host, &args);
         let hooks_dir =
             || resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir);
         let json_hooks = |target: &JsonHookTarget| {
             apply_json_hooks(
+                host,
                 target,
                 &hooks_dir()?,
                 &server_url,
@@ -460,7 +485,7 @@ pub fn run(config: &Config, mut args: InstallHooksArgs) -> Result<()> {
             )
         };
         let generated_file = |target: &GeneratedFileTarget| {
-            apply_generated_file(target, &server_url, auth, &args, &capture_mode)
+            apply_generated_file(host, target, &server_url, auth, &args, &capture_mode)
         };
         return match args.agent {
             AgentChoice::OpenCode => generated_file(&OPENCODE_PLUGIN),
@@ -475,15 +500,25 @@ pub fn run(config: &Config, mut args: InstallHooksArgs) -> Result<()> {
             AgentChoice::AntigravityCli => json_hooks(&ANTIGRAVITY_HOOKS),
             AgentChoice::Grok => json_hooks(&GROK_HOOKS),
             AgentChoice::Devin => json_hooks(&DEVIN_HOOKS),
-            AgentChoice::Zero => apply_to_zero_hooks(&server_url, auth, &config.data_dir, &args),
-            AgentChoice::Zcode => apply_to_zcode_hooks(&server_url, auth, &config.data_dir, &args),
+            AgentChoice::Zero => {
+                apply_to_zero_hooks(host, &server_url, auth, &config.data_dir, &args)
+            }
+            AgentChoice::Zcode => {
+                apply_to_zcode_hooks(host, &server_url, auth, &config.data_dir, &args)
+            }
             AgentChoice::Openclaw => {
                 openclaw_plugin::apply(&server_url, auth, &args, &capture_mode)
             }
-            AgentChoice::KimiCode => {
-                apply_to_kimi_code_config(&hooks_dir()?, &server_url, auth, &config.data_dir, &args)
-            }
+            AgentChoice::KimiCode => apply_to_kimi_code_config(
+                host,
+                &hooks_dir()?,
+                &server_url,
+                auth,
+                &config.data_dir,
+                &args,
+            ),
             AgentChoice::KiroCli => apply_to_kiro_cli_agent_configs(
+                host,
                 &hooks_dir()?,
                 &server_url,
                 auth,
@@ -491,15 +526,21 @@ pub fn run(config: &Config, mut args: InstallHooksArgs) -> Result<()> {
                 &args,
             ),
             AgentChoice::KiroCliV3 => apply_to_kiro_cli_v3_hooks(
+                host,
                 &hooks_dir()?,
                 &server_url,
                 auth,
                 &config.data_dir,
                 &args,
             ),
-            AgentChoice::Pool => {
-                apply_to_pool(&hooks_dir()?, &server_url, auth, &config.data_dir, &args)
-            }
+            AgentChoice::Pool => apply_to_pool(
+                host,
+                &hooks_dir()?,
+                &server_url,
+                auth,
+                &config.data_dir,
+                &args,
+            ),
         };
     }
     let strategy = args.project_strategy.and_then(ProjectStrategyArg::baked);
@@ -513,8 +554,11 @@ pub fn run(config: &Config, mut args: InstallHooksArgs) -> Result<()> {
         AgentChoice::OpenCode2 => {
             render_opencode2_plugin(&server_url, auth, strategy, &preview_capture_mode)
         }
-        AgentChoice::Pi => render_pi_extension(&server_url, auth, strategy, &preview_capture_mode),
+        AgentChoice::Pi => {
+            render_pi_extension(host, &server_url, auth, strategy, &preview_capture_mode)
+        }
         AgentChoice::Omp => render_omp_extension(
+            host,
             &server_url,
             auth,
             strategy,
@@ -526,9 +570,10 @@ pub fn run(config: &Config, mut args: InstallHooksArgs) -> Result<()> {
                 resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
             let settings_path = match &args.config_file {
                 Some(p) => p.clone(),
-                None => claude_settings_path()?,
+                None => claude_settings_path(host)?,
             };
             render_claude_code(
+                host,
                 &hooks_dir,
                 &server_url,
                 auth,
@@ -537,7 +582,7 @@ pub fn run(config: &Config, mut args: InstallHooksArgs) -> Result<()> {
                 &settings_path,
                 ClaudeCaptureScope {
                     assistant: args.capture_assistant,
-                    prompts: install_claude_prompt_capture(&args),
+                    prompts: install_claude_prompt_capture(host, &args),
                 },
             )
         }
@@ -545,6 +590,7 @@ pub fn run(config: &Config, mut args: InstallHooksArgs) -> Result<()> {
             let hooks_dir =
                 resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
             render_agent(
+                host,
                 "codex",
                 &hooks_dir,
                 &server_url,
@@ -557,6 +603,7 @@ pub fn run(config: &Config, mut args: InstallHooksArgs) -> Result<()> {
             let hooks_dir =
                 resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
             render_agent(
+                host,
                 "command-code",
                 &hooks_dir,
                 &server_url,
@@ -569,6 +616,7 @@ pub fn run(config: &Config, mut args: InstallHooksArgs) -> Result<()> {
             let hooks_dir =
                 resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
             render_agent(
+                host,
                 "cursor",
                 &hooks_dir,
                 &server_url,
@@ -581,6 +629,7 @@ pub fn run(config: &Config, mut args: InstallHooksArgs) -> Result<()> {
             let hooks_dir =
                 resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
             render_agent(
+                host,
                 "gemini-cli",
                 &hooks_dir,
                 &server_url,
@@ -593,6 +642,7 @@ pub fn run(config: &Config, mut args: InstallHooksArgs) -> Result<()> {
             let hooks_dir =
                 resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
             render_agent(
+                host,
                 "antigravity-cli",
                 &hooks_dir,
                 &server_url,
@@ -604,14 +654,28 @@ pub fn run(config: &Config, mut args: InstallHooksArgs) -> Result<()> {
         AgentChoice::Grok => {
             let hooks_dir =
                 resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
-            render_grok(&hooks_dir, &server_url, auth, &config.data_dir, strategy)
+            render_grok(
+                host,
+                &hooks_dir,
+                &server_url,
+                auth,
+                &config.data_dir,
+                strategy,
+            )
         }
         AgentChoice::Zero => render_zero(&server_url, auth, &config.data_dir, strategy),
         AgentChoice::Zcode => render_zcode(&server_url, auth, &config.data_dir, strategy),
         AgentChoice::Devin => {
             let hooks_dir =
                 resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
-            render_devin(&hooks_dir, &server_url, auth, &config.data_dir, strategy)
+            render_devin(
+                host,
+                &hooks_dir,
+                &server_url,
+                auth,
+                &config.data_dir,
+                strategy,
+            )
         }
         AgentChoice::Openclaw => {
             openclaw_plugin::render(&server_url, auth, strategy, &preview_capture_mode);
@@ -620,22 +684,50 @@ pub fn run(config: &Config, mut args: InstallHooksArgs) -> Result<()> {
         AgentChoice::KimiCode => {
             let hooks_dir =
                 resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
-            render_kimi_code(&hooks_dir, &server_url, auth, &config.data_dir, strategy)
+            render_kimi_code(
+                host,
+                &hooks_dir,
+                &server_url,
+                auth,
+                &config.data_dir,
+                strategy,
+            )
         }
         AgentChoice::KiroCli => {
             let hooks_dir =
                 resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
-            render_kiro_cli(&hooks_dir, &server_url, auth, &config.data_dir, strategy)
+            render_kiro_cli(
+                host,
+                &hooks_dir,
+                &server_url,
+                auth,
+                &config.data_dir,
+                strategy,
+            )
         }
         AgentChoice::KiroCliV3 => {
             let hooks_dir =
                 resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
-            render_kiro_cli_v3(&hooks_dir, &server_url, auth, &config.data_dir, strategy)
+            render_kiro_cli_v3(
+                host,
+                &hooks_dir,
+                &server_url,
+                auth,
+                &config.data_dir,
+                strategy,
+            )
         }
         AgentChoice::Pool => {
             let hooks_dir =
                 resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
-            render_pool(&hooks_dir, &server_url, auth, &config.data_dir, strategy)
+            render_pool(
+                host,
+                &hooks_dir,
+                &server_url,
+                auth,
+                &config.data_dir,
+                strategy,
+            )
         }
     }
 }
@@ -650,7 +742,7 @@ struct InferredMcpConfig {
 /// when one was given, otherwise the strategy an earlier `--apply` baked into
 /// the agent's existing config (so a bare re-apply preserves it instead of
 /// reverting to basename). `None` means "bake nothing", unchanged from before.
-fn install_project_strategy(args: &InstallHooksArgs) -> Option<ProjectStrategyArg> {
+fn install_project_strategy(host: &HostEnv, args: &InstallHooksArgs) -> Option<ProjectStrategyArg> {
     if args.project_strategy.is_some() {
         return args.project_strategy;
     }
@@ -660,7 +752,7 @@ fn install_project_strategy(args: &InstallHooksArgs) -> Option<ProjectStrategyAr
     if args.agent == AgentChoice::KiroCli {
         return None;
     }
-    existing_agent_config(args)
+    existing_agent_config(host, args)
         .as_deref()
         .and_then(|existing| baked_project_strategy(args.agent, existing))
 }
@@ -711,14 +803,14 @@ fn persist_capture_mode(data_dir: &Path, requested: Option<CaptureModeArg>) -> R
 /// Whether the Claude Code install should include its prompt-capture hook.
 /// Explicit flags win. A bare apply preserves the state of an existing
 /// sessionmunch install so `upgrade` cannot silently restore a privacy opt-out.
-fn install_claude_prompt_capture(args: &InstallHooksArgs) -> bool {
+fn install_claude_prompt_capture(host: &HostEnv, args: &InstallHooksArgs) -> bool {
     if args.no_capture_prompts {
         return false;
     }
     if args.capture_prompts || !args.apply {
         return true;
     }
-    existing_agent_config(args)
+    existing_agent_config(host, args)
         .as_deref()
         .and_then(baked_claude_prompt_capture)
         .unwrap_or(true)
@@ -746,7 +838,7 @@ fn baked_claude_prompt_capture(existing: &str) -> Option<bool> {
 }
 
 /// Read the config file `--apply` will update for the selected agent.
-fn existing_agent_config(args: &InstallHooksArgs) -> Option<String> {
+fn existing_agent_config(host: &HostEnv, args: &InstallHooksArgs) -> Option<String> {
     let path = if let Some(path) = &args.config_file {
         if args.agent == AgentChoice::Openclaw {
             path.join(openclaw_plugin::ENTRYPOINT_TS)
@@ -755,29 +847,29 @@ fn existing_agent_config(args: &InstallHooksArgs) -> Option<String> {
         }
     } else {
         match args.agent {
-            AgentChoice::ClaudeCode => claude_settings_path().ok()?,
-            AgentChoice::Codex => codex_hooks_path().ok()?,
-            AgentChoice::CommandCode => command_code_settings_path().ok()?,
-            AgentChoice::Cursor => cursor_hooks_path().ok()?,
-            AgentChoice::GeminiCli => gemini_settings_path().ok()?,
-            AgentChoice::OpenCode => opencode_plugin_path().ok()?,
-            AgentChoice::OpenCode2 => opencode2_plugin_path().ok()?,
-            AgentChoice::Pi => pi_extension_path().ok()?,
-            AgentChoice::Omp => omp_extension_path(args.profile.as_deref()).ok()?,
+            AgentChoice::ClaudeCode => claude_settings_path(host).ok()?,
+            AgentChoice::Codex => codex_hooks_path(host).ok()?,
+            AgentChoice::CommandCode => command_code_settings_path(host).ok()?,
+            AgentChoice::Cursor => cursor_hooks_path(host).ok()?,
+            AgentChoice::GeminiCli => gemini_settings_path(host).ok()?,
+            AgentChoice::OpenCode => opencode_plugin_path(host).ok()?,
+            AgentChoice::OpenCode2 => opencode2_plugin_path(host).ok()?,
+            AgentChoice::Pi => pi_extension_path(host).ok()?,
+            AgentChoice::Omp => omp_extension_path(host, args.profile.as_deref()).ok()?,
             AgentChoice::Openclaw => openclaw_plugin::default_plugin_dir()
                 .ok()?
                 .join(openclaw_plugin::ENTRYPOINT_TS),
-            AgentChoice::AntigravityCli => antigravity_hooks_path().ok()?,
-            AgentChoice::Grok => grok_hooks_path().ok()?,
-            AgentChoice::Zero => zero_hooks_path().ok()?,
-            AgentChoice::Zcode => zcode_config_path().ok()?,
-            AgentChoice::Devin => devin_hooks_path().ok()?,
-            AgentChoice::KimiCode => kimi_code_config_path().ok()?,
+            AgentChoice::AntigravityCli => antigravity_hooks_path(host).ok()?,
+            AgentChoice::Grok => grok_hooks_path(host).ok()?,
+            AgentChoice::Zero => zero_hooks_path(host).ok()?,
+            AgentChoice::Zcode => zcode_config_path(host).ok()?,
+            AgentChoice::Devin => devin_hooks_path(host).ok()?,
+            AgentChoice::KimiCode => kimi_code_config_path(host).ok()?,
             AgentChoice::KiroCli => return None,
             // Pool's hook config is per-repo (`.poolside/settings.yaml`), not a
             // user-global file the installer could re-read a baked strategy from.
             AgentChoice::Pool => return None,
-            AgentChoice::KiroCliV3 => kiro_cli_v3_hooks_path().ok()?,
+            AgentChoice::KiroCliV3 => kiro_cli_v3_hooks_path(host).ok()?,
         }
     };
     std::fs::read_to_string(path).ok()
@@ -983,7 +1075,10 @@ fn apply_base_path_to_hook_url(url: &str, base_path: &str) -> String {
     }
 }
 
-fn infer_installed_mcp_config(agent: AgentChoice) -> Result<Option<InferredMcpConfig>> {
+fn infer_installed_mcp_config(
+    host: &HostEnv,
+    agent: AgentChoice,
+) -> Result<Option<InferredMcpConfig>> {
     if agent == AgentChoice::Grok {
         let cwd = std::env::current_dir()
             .context("could not resolve current dir for Grok project configuration")?;
@@ -998,7 +1093,7 @@ fn infer_installed_mcp_config(agent: AgentChoice) -> Result<Option<InferredMcpCo
     let Some(client) = mcp_client_for_agent(agent) else {
         return Ok(None);
     };
-    let path = install_mcp::mcp_config_path(client)?;
+    let path = install_mcp::mcp_config_path(host, client)?;
     let Ok(content) = fs::read_to_string(path) else {
         return Ok(None);
     };
@@ -1016,7 +1111,7 @@ fn infer_installed_mcp_config(agent: AgentChoice) -> Result<Option<InferredMcpCo
             &["mcpServers", "sessionmunch"],
             "url",
         )),
-        McpClient::Grok => infer_grok_mcp_config(&content),
+        McpClient::Grok => infer_grok_mcp_config(host, &content),
         McpClient::OpenCode => Ok(infer_json_mcp_config(
             &content,
             &["mcp", "sessionmunch"],
@@ -1224,7 +1319,7 @@ fn infer_toml_mcp_config(content: &str) -> Option<InferredMcpConfig> {
 /// Infer Grok's TOML entry after resolving its supported `${VAR}` and
 /// `${VAR:-default}` placeholders. Refuse missing variables so generated hook
 /// commands never contain a literal placeholder.
-fn infer_grok_mcp_config(content: &str) -> Result<Option<InferredMcpConfig>> {
+fn infer_grok_mcp_config(host: &HostEnv, content: &str) -> Result<Option<InferredMcpConfig>> {
     let doc: toml_edit::DocumentMut = match content.parse() {
         Ok(doc) => doc,
         Err(_) => return Ok(None),
@@ -1238,7 +1333,7 @@ fn infer_grok_mcp_config(content: &str) -> Result<Option<InferredMcpConfig>> {
     let hook_server_url = server
         .get("url")
         .and_then(|value| value.as_str())
-        .map(expand_grok_placeholders)
+        .map(|value| expand_grok_placeholders(host, value))
         .transpose()?
         .as_deref()
         .and_then(hook_server_url_from_mcp_url);
@@ -1246,7 +1341,7 @@ fn infer_grok_mcp_config(content: &str) -> Result<Option<InferredMcpConfig>> {
         .get("headers")
         .and_then(|headers| headers.get("Authorization"))
         .and_then(|value| value.as_str())
-        .map(expand_grok_placeholders)
+        .map(|value| expand_grok_placeholders(host, value))
         .transpose()?
         .as_deref()
         .and_then(bearer_token_from_header);
@@ -1259,8 +1354,8 @@ fn infer_grok_mcp_config(content: &str) -> Result<Option<InferredMcpConfig>> {
     }))
 }
 
-fn expand_grok_placeholders(value: &str) -> Result<String> {
-    expand_grok_placeholders_with(value, |name| std::env::var(name).ok())
+fn expand_grok_placeholders(host: &HostEnv, value: &str) -> Result<String> {
+    expand_grok_placeholders_with(value, |name| host.var(name))
 }
 
 fn expand_grok_placeholders_with(
@@ -1431,8 +1526,8 @@ fn overlay_kiro_cli_event_hooks(
 /// (#196): Claude Code on a native hook platform only. Any other agent or a
 /// script-fallback platform cannot honor the opt-in, so the installer bails
 /// instead of enabling it silently.
-fn capture_assistant_allowed(agent: AgentChoice) -> bool {
-    matches!(agent, AgentChoice::ClaudeCode) && local_hook_policy_v1_supported()
+fn capture_assistant_allowed(host: &HostEnv, agent: AgentChoice) -> bool {
+    matches!(agent, AgentChoice::ClaudeCode) && local_hook_policy_v1_supported(host)
 }
 
 fn prompt_capture_options_allowed(agent: AgentChoice) -> bool {
@@ -1464,7 +1559,7 @@ struct JsonHookTarget {
     /// Staging subdirectory, and the agent name profile payloads carry.
     label: &'static str,
     /// Where the config lives when `--config-file` is not given.
-    default_path: fn() -> Result<PathBuf>,
+    default_path: fn(&HostEnv) -> Result<PathBuf>,
     /// Stage the scripts before resolving the config path rather than
     /// after. Each installer keeps the order it has always had; the two
     /// differ only when the default path cannot be resolved (no `$HOME`),
@@ -1495,10 +1590,10 @@ enum HookPayload {
     },
 }
 
-/// `build_*_payload_with_data_dir(command_dir, server_url, auth_token,
+/// `build_*_payload_with_data_dir(host, command_dir, server_url, auth_token,
 /// data_dir, project_strategy)`.
 type HookPayloadBuilder =
-    fn(&Path, &str, Option<&str>, Option<&Path>, Option<&str>) -> serde_json::Value;
+    fn(&HostEnv, &Path, &str, Option<&str>, Option<&Path>, Option<&str>) -> serde_json::Value;
 
 /// Where in the config document the per-event arrays live.
 enum HookTable {
@@ -1722,6 +1817,7 @@ final turn, run `sessionmunch finalize-session --agent antigravity-cli` to creat
 the final summary and handoff and to queue opt-in SessionEnd consolidation.\n";
 
 fn apply_json_hooks(
+    host: &HostEnv,
     target: &JsonHookTarget,
     hooks_dir: &Path,
     server_url: &str,
@@ -1732,22 +1828,25 @@ fn apply_json_hooks(
     let path = if target.stage_before_path {
         None
     } else {
-        Some(apply_target_path(args, target.default_path)?)
+        Some(apply_target_path(host, args, target.default_path)?)
     };
-    let staged = stage_hook_scripts(hooks_dir, target.label, data_dir)?;
+    let staged = stage_hook_scripts(host, hooks_dir, target.label, data_dir)?;
     let payload = json_hook_payload(
+        host,
         target,
-        &staged_command_dir(&staged, target.label),
+        &staged_command_dir(host, &staged, target.label),
         server_url,
         auth_token,
         data_dir,
         args.project_strategy.and_then(ProjectStrategyArg::baked),
         args,
     )?;
-    write_json_hooks(target, &payload, path, args)
+    write_json_hooks(host, target, &payload, path, args)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn json_hook_payload(
+    host: &HostEnv,
     target: &JsonHookTarget,
     command_dir: &Path,
     server_url: &str,
@@ -1758,9 +1857,10 @@ fn json_hook_payload(
 ) -> Result<JsonHookPayload> {
     let (payload, key, withdrawn): (_, _, &'static [&'static str]) = match target.payload {
         HookPayload::ClaudeCode => {
-            let capture_prompts = install_claude_prompt_capture(args);
+            let capture_prompts = install_claude_prompt_capture(host, args);
             let payload = configure_claude_prompt_capture(
                 build_claude_code_payload_with_data_dir(
+                    host,
                     command_dir,
                     server_url,
                     auth_token,
@@ -1779,6 +1879,7 @@ fn json_hook_payload(
         }
         HookPayload::Profile(profile) => (
             build_profile_payload_for_agent(
+                host,
                 profile,
                 command_dir,
                 server_url,
@@ -1792,6 +1893,7 @@ fn json_hook_payload(
         ),
         HookPayload::Builder { build, key } => (
             build(
+                host,
                 command_dir,
                 server_url,
                 auth_token,
@@ -1823,6 +1925,7 @@ fn json_hook_events(
 /// Merge `payload` into the target's config and report the outcome. `path`
 /// is the already-resolved config path, or `None` to resolve it now.
 fn write_json_hooks(
+    host: &HostEnv,
     target: &JsonHookTarget,
     payload: &JsonHookPayload,
     path: Option<PathBuf>,
@@ -1830,7 +1933,7 @@ fn write_json_hooks(
 ) -> Result<()> {
     let path = match path {
         Some(path) => path,
-        None => apply_target_path(args, target.default_path)?,
+        None => apply_target_path(host, args, target.default_path)?,
     };
     let outcome = merge_json_hooks(target, payload, &path)?;
     report_apply_outcome(&path, outcome, "new file", "already up to date");
@@ -1882,12 +1985,13 @@ fn merge_json_hooks(
 /// The config file an `--apply` writes: `--config-file` when given, else
 /// the agent's default location.
 fn apply_target_path(
+    host: &HostEnv,
     args: &InstallHooksArgs,
-    default_path: fn() -> Result<PathBuf>,
+    default_path: fn(&HostEnv) -> Result<PathBuf>,
 ) -> Result<PathBuf> {
     match &args.config_file {
         Some(path) => Ok(path.clone()),
-        None => default_path(),
+        None => default_path(host),
     }
 }
 
@@ -1918,17 +2022,19 @@ fn report_apply_outcome(path: &Path, outcome: ApplyOutcome, created: &str, uncha
 /// `event` + `command` — `matcher` omitted (Kimi Code matches
 /// everything) and `timeout` omitted (30s default).
 fn apply_to_kimi_code_config(
+    host: &HostEnv,
     hooks_dir: &Path,
     server_url: &str,
     auth_token: Option<&str>,
     data_dir: &Path,
     args: &InstallHooksArgs,
 ) -> Result<()> {
-    let path = apply_target_path(args, kimi_code_config_path)?;
-    let staged = stage_hook_scripts(hooks_dir, "kimi-code", data_dir)?;
-    let command_dir = staged_command_dir(&staged, "kimi-code");
+    let path = apply_target_path(host, args, kimi_code_config_path)?;
+    let staged = stage_hook_scripts(host, hooks_dir, "kimi-code", data_dir)?;
+    let command_dir = staged_command_dir(host, &staged, "kimi-code");
     let strategy = args.project_strategy.and_then(ProjectStrategyArg::baked);
     let outcome = merge_kimi_code_hooks(
+        host,
         &command_dir,
         server_url,
         auth_token,
@@ -1941,6 +2047,7 @@ fn apply_to_kimi_code_config(
 }
 
 fn merge_kimi_code_hooks(
+    host: &HostEnv,
     staged: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -1949,6 +2056,7 @@ fn merge_kimi_code_hooks(
     config_path: &Path,
 ) -> Result<ApplyOutcome> {
     let commands = kimi_code_hook_commands(
+        host,
         staged,
         server_url,
         auth_token,
@@ -2017,6 +2125,7 @@ fn is_sessionmunch_toml_hook_entry(entry: &toml_edit::Table) -> bool {
 /// disk), so hooks in it would never fire and the install would look
 /// successful while capturing nothing.
 fn apply_to_kiro_cli_agent_configs(
+    host: &HostEnv,
     hooks_dir: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -2036,7 +2145,7 @@ fn apply_to_kiro_cli_agent_configs(
             );
             vec![p.clone()]
         }
-        None => list_kiro_cli_agent_configs(&kiro_cli_agents_dir()?)?,
+        None => list_kiro_cli_agent_configs(&kiro_cli_agents_dir(host)?)?,
     };
     anyhow::ensure!(
         !targets.is_empty(),
@@ -2044,9 +2153,10 @@ fn apply_to_kiro_cli_agent_configs(
          agent config and the built-in default agent has no file on disk, so create an agent \
          first (`kiro-cli agent create`, then `kiro-cli agent set-default <name>`) and re-run. \
          For Kiro v3, select the explicit `--agent kiro-cli-v3` standalone-hook target instead.",
-        kiro_cli_agents_dir()?.display()
+        kiro_cli_agents_dir(host)?.display()
     );
     let prepared = preflight_kiro_cli_agent_configs(
+        host,
         targets,
         hooks_dir,
         server_url,
@@ -2055,10 +2165,11 @@ fn apply_to_kiro_cli_agent_configs(
         args.project_strategy,
     )?;
 
-    let staged = stage_hook_scripts(hooks_dir, "kiro-cli", data_dir)?;
-    let command_dir = staged_command_dir(&staged, "kiro-cli");
+    let staged = stage_hook_scripts(host, hooks_dir, "kiro-cli", data_dir)?;
+    let command_dir = staged_command_dir(host, &staged, "kiro-cli");
     for (path, strategy) in prepared {
         let outcome = merge_kiro_cli_agent_hooks(
+            host,
             &command_dir,
             server_url,
             auth_token,
@@ -2075,6 +2186,7 @@ fn apply_to_kiro_cli_agent_configs(
 /// any config. The strategy is recovered per file because Kiro can update
 /// several independently-configured agents in one invocation.
 fn preflight_kiro_cli_agent_configs(
+    host: &HostEnv,
     targets: Vec<PathBuf>,
     command_dir: &Path,
     server_url: &str,
@@ -2089,6 +2201,7 @@ fn preflight_kiro_cli_agent_configs(
         let strategy =
             explicit_strategy.or_else(|| baked_project_strategy(AgentChoice::KiroCli, &existing));
         render_kiro_cli_agent_hooks(
+            host,
             &existing,
             command_dir,
             server_url,
@@ -2106,6 +2219,7 @@ fn preflight_kiro_cli_agent_configs(
 /// preserving every third-party entry under the same triggers and every
 /// non-hook field of the agent definition.
 fn merge_kiro_cli_agent_hooks(
+    host: &HostEnv,
     staged: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -2115,6 +2229,7 @@ fn merge_kiro_cli_agent_hooks(
 ) -> Result<ApplyOutcome> {
     apply_atomic(config_path, |existing| {
         render_kiro_cli_agent_hooks(
+            host,
             existing,
             staged,
             server_url,
@@ -2126,7 +2241,9 @@ fn merge_kiro_cli_agent_hooks(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_kiro_cli_agent_hooks(
+    host: &HostEnv,
     existing: &str,
     staged: &Path,
     server_url: &str,
@@ -2136,6 +2253,7 @@ fn render_kiro_cli_agent_hooks(
     config_path: &Path,
 ) -> Result<String> {
     let our_hooks = build_kiro_cli_v2_hooks_value(
+        host,
         staged,
         server_url,
         auth_token,
@@ -2161,13 +2279,14 @@ fn render_kiro_cli_agent_hooks(
 }
 
 fn apply_to_kiro_cli_v3_hooks(
+    host: &HostEnv,
     hooks_dir: &Path,
     server_url: &str,
     auth_token: Option<&str>,
     data_dir: &Path,
     args: &InstallHooksArgs,
 ) -> Result<()> {
-    let path = apply_target_path(args, kiro_cli_v3_hooks_path)?;
+    let path = apply_target_path(host, args, kiro_cli_v3_hooks_path)?;
     let existing = match fs::read_to_string(&path) {
         Ok(existing) => existing,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -2178,12 +2297,13 @@ fn apply_to_kiro_cli_v3_hooks(
     // Validate before staging scripts so an incompatible registration file
     // cannot leave a partial installation behind.
     render_kiro_cli_v3_hooks(
-        &existing, hooks_dir, server_url, auth_token, data_dir, strategy, &path,
+        host, &existing, hooks_dir, server_url, auth_token, data_dir, strategy, &path,
     )?;
 
-    let staged = stage_hook_scripts(hooks_dir, "kiro-cli", data_dir)?;
-    let command_dir = staged_command_dir(&staged, "kiro-cli");
+    let staged = stage_hook_scripts(host, hooks_dir, "kiro-cli", data_dir)?;
+    let command_dir = staged_command_dir(host, &staged, "kiro-cli");
     let outcome = merge_kiro_cli_v3_hooks(
+        host,
         &command_dir,
         server_url,
         auth_token,
@@ -2196,6 +2316,7 @@ fn apply_to_kiro_cli_v3_hooks(
 }
 
 fn merge_kiro_cli_v3_hooks(
+    host: &HostEnv,
     command_dir: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -2205,6 +2326,7 @@ fn merge_kiro_cli_v3_hooks(
 ) -> Result<ApplyOutcome> {
     apply_atomic(config_path, |existing| {
         render_kiro_cli_v3_hooks(
+            host,
             existing,
             command_dir,
             server_url,
@@ -2216,7 +2338,9 @@ fn merge_kiro_cli_v3_hooks(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_kiro_cli_v3_hooks(
+    host: &HostEnv,
     existing: &str,
     command_dir: &Path,
     server_url: &str,
@@ -2226,6 +2350,7 @@ fn render_kiro_cli_v3_hooks(
     config_path: &Path,
 ) -> Result<String> {
     let desired = build_kiro_cli_v3_hooks_value(
+        host,
         command_dir,
         server_url,
         auth_token,
@@ -2365,7 +2490,7 @@ pub(crate) fn is_sessionmunch_kiro_hook_command(command: &str) -> bool {
 /// `--apply` writes whole (no merge with the existing content). Each entry
 /// states what differs; [`apply_generated_file`] runs the shared install.
 struct GeneratedFileTarget {
-    resolve_path: fn(&InstallHooksArgs) -> Result<PathBuf>,
+    resolve_path: fn(&HostEnv, &InstallHooksArgs) -> Result<PathBuf>,
     /// Renders the file from server URL, token, baked strategy and capture
     /// mode.
     build: fn(&str, Option<&str>, Option<&str>, &str) -> Result<String>,
@@ -2387,7 +2512,7 @@ struct GeneratedFileTarget {
 /// `experimental.chat.system.transform`, because plugin shell stdout is
 /// not prepended to the model context the way Claude Code hook stdout is.
 static OPENCODE_PLUGIN: GeneratedFileTarget = GeneratedFileTarget {
-    resolve_path: |args| apply_target_path(args, opencode_plugin_path),
+    resolve_path: |host, args| apply_target_path(host, args, opencode_plugin_path),
     build: |server_url, auth_token, strategy, capture_mode| {
         Ok(build_opencode_plugin(
             server_url,
@@ -2415,7 +2540,7 @@ static OPENCODE_PLUGIN: GeneratedFileTarget = GeneratedFileTarget {
 /// is benign, and `uninstall` removes each file only on its own ownership
 /// markers.
 static OPENCODE2_PLUGIN: GeneratedFileTarget = GeneratedFileTarget {
-    resolve_path: |args| apply_target_path(args, opencode2_plugin_path),
+    resolve_path: |host, args| apply_target_path(host, args, opencode2_plugin_path),
     build: build_opencode2_plugin,
     created: "new plugin file",
     extension_agent: None,
@@ -2472,13 +2597,14 @@ static PI_EXTENSION: GeneratedFileTarget = GeneratedFileTarget {
 };
 
 fn apply_generated_file(
+    host: &HostEnv,
     target: &GeneratedFileTarget,
     server_url: &str,
     auth_token: Option<&str>,
     args: &InstallHooksArgs,
     capture_mode: &str,
 ) -> Result<()> {
-    let path = (target.resolve_path)(args)?;
+    let path = (target.resolve_path)(host, args)?;
     let strategy = args.project_strategy.and_then(ProjectStrategyArg::baked);
     let body = (target.build)(server_url, auth_token, strategy, capture_mode)?;
 
@@ -2486,7 +2612,7 @@ fn apply_generated_file(
     report_apply_outcome(&path, outcome, target.created, "already up to date");
 
     if let Some(agent) = target.extension_agent {
-        warn_if_agents_share_extensions_dir(agent, &path);
+        warn_if_agents_share_extensions_dir(host, agent, &path);
         remove_legacy_extension(&path, agent);
     }
 
@@ -2520,8 +2646,9 @@ fn render_opencode_plugin(
 /// beta plugin file. The beta shares v1's config dir and session store but
 /// not its plugin API, so this is a distinct file from `sessionmunch.ts`
 /// (uninstall keys each file to its own banner + agent constant).
-pub(crate) fn opencode2_plugin_path() -> anyhow::Result<std::path::PathBuf> {
-    Ok(home_dir()
+pub(crate) fn opencode2_plugin_path(host: &HostEnv) -> anyhow::Result<std::path::PathBuf> {
+    Ok(host
+        .home_dir()
         .context("could not locate $HOME for ~/.config/opencode")?
         .join(".config")
         .join("opencode")
@@ -2883,10 +3010,10 @@ fn build_opencode_plugin(
 /// That is not a regression this installer can fix by itself: both agents
 /// honour the same `PI_CODING_AGENT_DIR`, so the collision is upstream. What
 /// it can do is refuse to be silent about it, and name the two ways out.
-fn warn_if_agents_share_extensions_dir(this_agent: &str, this_path: &Path) {
+fn warn_if_agents_share_extensions_dir(host: &HostEnv, this_agent: &str, this_path: &Path) {
     let other = match this_agent {
-        "pi" => omp_extension_path(None),
-        "omp" => pi_extension_path(),
+        "pi" => omp_extension_path(host, None),
+        "omp" => pi_extension_path(host),
         _ => return,
     };
     let Ok(other_path) = other else { return };
@@ -2954,10 +3081,11 @@ fn remove_legacy_extension(new_path: &Path, agent: &str) {
 }
 
 fn omp_extension_hint_in(
+    host: &HostEnv,
     env_override: Option<std::ffi::OsString>,
     profile: Option<&str>,
 ) -> String {
-    omp_extension_path_in(env_override, profile).map_or_else(
+    omp_extension_path_in(host, env_override, profile).map_or_else(
         |_| {
             if let Some(name) = profile {
                 format!(
@@ -2973,14 +3101,15 @@ fn omp_extension_hint_in(
 }
 
 /// See [`omp_extension_hint_in`]; same reasoning for Pi.
-fn pi_extension_hint_in(env_override: Option<std::ffi::OsString>) -> String {
-    pi_extension_path_in(env_override).map_or_else(
+fn pi_extension_hint_in(host: &HostEnv, env_override: Option<std::ffi::OsString>) -> String {
+    pi_extension_path_in(host, env_override).map_or_else(
         |_| "~/.pi/agent/extensions/sessionmunch-pi.ts".to_string(),
         |p| p.display().to_string(),
     )
 }
 
 fn render_omp_extension(
+    host: &HostEnv,
     server_url: &str,
     auth_token: Option<&str>,
     project_strategy: Option<&str>,
@@ -2989,7 +3118,7 @@ fn render_omp_extension(
 ) -> Result<()> {
     println!(
         "// Oh My Pi / OMP extension — write to {}",
-        omp_extension_hint_in(std::env::var_os("PI_CODING_AGENT_DIR"), profile)
+        omp_extension_hint_in(host, host.var_os("PI_CODING_AGENT_DIR"), profile)
     );
     println!("// Or re-run with `--apply` to install it automatically.");
     println!("// Restart OMP after changing extensions; config is loaded at startup.");
@@ -3001,20 +3130,21 @@ fn render_omp_extension(
     Ok(())
 }
 
-fn resolve_omp_extension_path(args: &InstallHooksArgs) -> Result<PathBuf> {
+fn resolve_omp_extension_path(host: &HostEnv, args: &InstallHooksArgs) -> Result<PathBuf> {
     if let Some(p) = &args.config_file {
         return Ok(p.clone());
     }
     // See `omp_extension_path`: bind before borrowing.
-    let env_profile = std::env::var_os("OMP_PROFILE");
+    let env_profile = host.var_os("OMP_PROFILE");
     let profile = args
         .profile
         .as_deref()
         .or_else(|| env_profile.as_ref().and_then(|s| s.to_str()));
-    omp_extension_path(profile)
+    omp_extension_path(host, profile)
 }
 
 fn render_pi_extension(
+    host: &HostEnv,
     server_url: &str,
     auth_token: Option<&str>,
     project_strategy: Option<&str>,
@@ -3022,7 +3152,7 @@ fn render_pi_extension(
 ) -> Result<()> {
     println!(
         "// Pi extension — write to {}",
-        pi_extension_hint_in(std::env::var_os("PI_CODING_AGENT_DIR"))
+        pi_extension_hint_in(host, host.var_os("PI_CODING_AGENT_DIR"))
     );
     println!("// Or re-run with `--apply` to install it automatically.");
     println!("// Restart Pi after changing extensions; MCP tools are bridged by this file.");
@@ -3034,11 +3164,11 @@ fn render_pi_extension(
     Ok(())
 }
 
-fn resolve_pi_extension_path(args: &InstallHooksArgs) -> Result<PathBuf> {
+fn resolve_pi_extension_path(host: &HostEnv, args: &InstallHooksArgs) -> Result<PathBuf> {
     if let Some(p) = &args.config_file {
         return Ok(p.clone());
     }
-    pi_extension_path()
+    pi_extension_path(host)
 }
 
 fn build_pi_extension(
@@ -3099,6 +3229,7 @@ fn build_omp_extension(
 }
 
 fn render_agent(
+    host: &HostEnv,
     label: &str,
     hooks_dir: &Path,
     server_url: &str,
@@ -3109,6 +3240,7 @@ fn render_agent(
     print!(
         "{}",
         render_agent_output(
+            host,
             label,
             hooks_dir,
             server_url,
@@ -3121,6 +3253,7 @@ fn render_agent(
 }
 
 fn render_agent_output(
+    host: &HostEnv,
     label: &str,
     hooks_dir: &Path,
     server_url: &str,
@@ -3145,7 +3278,7 @@ fn render_agent_output(
     out.push('\n');
     for events in event_lists {
         for (_, script) in *events {
-            let script = hook_script_for_current_platform(script);
+            let script = hook_script_for_current_platform(host, script);
             out.push_str(&format!(
                 "- {}\n",
                 hooks_dir.join(script.as_ref()).display()
@@ -3200,11 +3333,19 @@ fn manual_agent_project_strategy_instruction(project_strategy: Option<&str>) -> 
 ///
 /// Errors propagate when source is missing, the staging dir
 /// can't be created, or any file copy fails.
-fn stage_hook_scripts(source_dir: &Path, agent_label: &str, data_dir: &Path) -> Result<PathBuf> {
+fn stage_hook_scripts(
+    host: &HostEnv,
+    source_dir: &Path,
+    agent_label: &str,
+    data_dir: &Path,
+) -> Result<PathBuf> {
+    let in_container = sessionmunch_wiki::backup::running_in_container(
+        host.var("SESSIONMUNCH_IN_CONTAINER").as_deref(),
+    );
     stage_hook_scripts_in(
         source_dir,
         agent_label,
-        &hook_staging_root(data_dir, sessionmunch_wiki::backup::running_in_container()),
+        &hook_staging_root(data_dir, in_container),
     )
 }
 
@@ -3377,9 +3518,9 @@ fn copy_support_hook_scripts(source_dir: &Path, dest_root: &Path) -> Result<()> 
     Ok(())
 }
 
-fn staged_command_dir(staged: &Path, agent_label: &str) -> PathBuf {
-    match std::env::var("SESSIONMUNCH_HOOKS_HOST_ROOT") {
-        Ok(root) if !root.trim().is_empty() => PathBuf::from(root).join(agent_label),
+fn staged_command_dir(host: &HostEnv, staged: &Path, agent_label: &str) -> PathBuf {
+    match host.var("SESSIONMUNCH_HOOKS_HOST_ROOT") {
+        Some(root) if !root.trim().is_empty() => PathBuf::from(root).join(agent_label),
         _ => staged.to_path_buf(),
     }
 }
@@ -3512,7 +3653,9 @@ struct ClaudeCaptureScope {
     prompts: bool,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_claude_code(
+    host: &HostEnv,
     hooks_dir: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -3533,7 +3676,7 @@ fn render_claude_code(
         if !capture_prompts && event == CLAUDE_PROMPT_EVENT {
             continue;
         }
-        let script = hook_script_for_claude_code(script);
+        let script = hook_script_for_claude_code(host, script);
         let abs = hooks_dir.join(script.as_ref());
         if !abs.exists() {
             eprintln!(
@@ -3547,6 +3690,7 @@ fn render_claude_code(
     }
     let payload = configure_claude_prompt_capture(
         build_claude_code_payload_with_data_dir(
+            host,
             hooks_dir,
             server_url,
             auth_token,
@@ -3577,6 +3721,7 @@ fn render_claude_code(
 }
 
 fn render_grok(
+    host: &HostEnv,
     hooks_dir: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -3586,7 +3731,7 @@ fn render_grok(
     // Soft check (same rationale as render_claude_code): warn, don't bail,
     // so the docker host-path flow still works.
     for (_, script) in super::render_shared::CLAUDE_CODE_EVENTS {
-        let script = hook_script_for_claude_code(script);
+        let script = hook_script_for_claude_code(host, script);
         let abs = hooks_dir.join(script.as_ref());
         if !abs.exists() {
             eprintln!(
@@ -3599,6 +3744,7 @@ fn render_grok(
         }
     }
     let payload = build_grok_payload_with_data_dir(
+        host,
         hooks_dir,
         server_url,
         auth_token,
@@ -3607,7 +3753,7 @@ fn render_grok(
     );
     let serialized =
         serde_json::to_string_pretty(&payload).context("serializing grok hook config")?;
-    let config_path = grok_hooks_path()?;
+    let config_path = grok_hooks_path(host)?;
     println!(
         "# Grok Build CLI hook config — write to {}",
         config_path.display()
@@ -3638,12 +3784,13 @@ fn render_grok(
 /// preserved when the file already exists (a user who disabled hooks
 /// globally keeps that choice — we warn instead of overriding).
 fn apply_to_zero_hooks(
+    host: &HostEnv,
     server_url: &str,
     auth_token: Option<&str>,
     data_dir: &Path,
     args: &InstallHooksArgs,
 ) -> Result<()> {
-    let path = apply_target_path(args, zero_hooks_path)?;
+    let path = apply_target_path(host, args, zero_hooks_path)?;
     let strategy = args.project_strategy.and_then(ProjectStrategyArg::baked);
     let payload = super::render_shared::build_zero_hooks_config(
         server_url,
@@ -3804,12 +3951,13 @@ fn zcode_event_runs_nothing(slot: &serde_json::Value) -> bool {
 /// key it writes, which drops a caller's own empty group along with the
 /// ones its withdrawal emptied.
 fn apply_to_zcode_hooks(
+    host: &HostEnv,
     server_url: &str,
     auth_token: Option<&str>,
     data_dir: &Path,
     args: &InstallHooksArgs,
 ) -> Result<()> {
-    let path = apply_target_path(args, zcode_config_path)?;
+    let path = apply_target_path(host, args, zcode_config_path)?;
     let strategy = args.project_strategy.and_then(ProjectStrategyArg::baked);
     let payload = super::render_shared::build_zcode_hooks_config(
         server_url,
@@ -3992,6 +4140,7 @@ fn render_zcode(
 }
 
 fn render_devin(
+    host: &HostEnv,
     hooks_dir: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -4001,7 +4150,7 @@ fn render_devin(
     // Soft check (same rationale as render_claude_code): warn, don't bail,
     // so the docker host-path flow still works.
     for (_, script) in super::render_shared::DEVIN_EVENTS {
-        let script = hook_script_for_claude_code(script);
+        let script = hook_script_for_claude_code(host, script);
         let abs = hooks_dir.join(script.as_ref());
         if !abs.exists() {
             eprintln!(
@@ -4014,6 +4163,7 @@ fn render_devin(
         }
     }
     let payload = build_devin_payload_with_data_dir(
+        host,
         hooks_dir,
         server_url,
         auth_token,
@@ -4046,6 +4196,7 @@ fn render_devin(
 /// same upsert path the apply mode uses, so the printout is byte-for-
 /// byte what `--apply` would append to config.toml.
 fn render_kimi_code(
+    host: &HostEnv,
     hooks_dir: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -4055,7 +4206,7 @@ fn render_kimi_code(
     // Soft check (same rationale as render_claude_code): warn, don't bail,
     // so the docker host-path flow still works.
     for (_, script) in KIMI_CODE_EVENTS {
-        let script = hook_script_for_current_platform(script);
+        let script = hook_script_for_current_platform(host, script);
         let abs = hooks_dir.join(script.as_ref());
         if !abs.exists() {
             eprintln!(
@@ -4068,6 +4219,7 @@ fn render_kimi_code(
         }
     }
     let commands = kimi_code_hook_commands(
+        host,
         hooks_dir,
         server_url,
         auth_token,
@@ -4092,6 +4244,7 @@ fn render_kimi_code(
 }
 
 fn render_kiro_cli(
+    host: &HostEnv,
     hooks_dir: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -4101,7 +4254,7 @@ fn render_kiro_cli(
     // Soft check (same rationale as render_claude_code): warn, don't bail,
     // so the docker host-path flow still works.
     for (_, script) in KIRO_CLI_V2_EVENTS {
-        let script = hook_script_for_current_platform(script);
+        let script = hook_script_for_current_platform(host, script);
         let abs = hooks_dir.join(script.as_ref());
         if !abs.exists() {
             eprintln!(
@@ -4114,6 +4267,7 @@ fn render_kiro_cli(
         }
     }
     let hooks = build_kiro_cli_v2_hooks_value(
+        host,
         hooks_dir,
         server_url,
         auth_token,
@@ -4143,6 +4297,7 @@ fn render_kiro_cli(
 }
 
 fn render_kiro_cli_v3(
+    host: &HostEnv,
     hooks_dir: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -4150,7 +4305,7 @@ fn render_kiro_cli_v3(
     project_strategy: Option<&str>,
 ) -> Result<()> {
     for (_, script) in KIRO_CLI_V3_EVENTS {
-        let abs = hooks_dir.join(hook_script_for_current_platform(script).as_ref());
+        let abs = hooks_dir.join(hook_script_for_current_platform(host, script).as_ref());
         if !abs.exists() {
             eprintln!(
                 "# warning: {} not present on this filesystem. If this command is running \
@@ -4161,6 +4316,7 @@ fn render_kiro_cli_v3(
         }
     }
     let payload = build_kiro_cli_v3_hooks_value(
+        host,
         hooks_dir,
         server_url,
         auth_token,
@@ -4191,6 +4347,7 @@ fn render_kiro_cli_v3(
 /// location first so the printed commands reference paths that outlive the
 /// source checkout / docker image (see [`apply_to_pool`]).
 fn render_pool(
+    host: &HostEnv,
     hooks_dir: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -4200,7 +4357,7 @@ fn render_pool(
     // Soft check (same rationale as render_claude_code): warn, don't bail,
     // so the docker host-path flow still works.
     for (_, script) in POOL_EVENTS {
-        let script = hook_script_for_current_platform(script);
+        let script = hook_script_for_current_platform(host, script);
         let abs = hooks_dir.join(script.as_ref());
         if !abs.exists() {
             eprintln!(
@@ -4215,6 +4372,7 @@ fn render_pool(
     print!(
         "{}",
         render_pool_output(
+            host,
             hooks_dir,
             server_url,
             auth_token,
@@ -4226,6 +4384,7 @@ fn render_pool(
 }
 
 fn render_pool_output(
+    host: &HostEnv,
     hooks_dir: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -4233,6 +4392,7 @@ fn render_pool_output(
     project_strategy: Option<&str>,
 ) -> String {
     let snippet = build_pool_settings_yaml_with_data_dir(
+        host,
         hooks_dir,
         server_url,
         auth_token,
@@ -4269,21 +4429,31 @@ fn render_pool_output(
 /// written: install-hooks is a user-scoped operation and must not mutate
 /// files inside the user's repositories.
 fn apply_to_pool(
+    host: &HostEnv,
     hooks_dir: &Path,
     server_url: &str,
     auth_token: Option<&str>,
     data_dir: &Path,
     args: &InstallHooksArgs,
 ) -> Result<()> {
-    let staged = stage_hook_scripts(hooks_dir, "pool", data_dir)?;
-    let command_dir = staged_command_dir(&staged, "pool");
+    let staged = stage_hook_scripts(host, hooks_dir, "pool", data_dir)?;
+    let command_dir = staged_command_dir(host, &staged, "pool");
     let strategy = args.project_strategy.and_then(ProjectStrategyArg::baked);
     print!(
         "{}",
-        render_pool_output(&command_dir, server_url, auth_token, data_dir, strategy)
+        render_pool_output(
+            host,
+            &command_dir,
+            server_url,
+            auth_token,
+            data_dir,
+            strategy
+        )
     );
     Ok(())
 }
 
+// Test setup may read the real environment; invariant #1 governs runtime code.
+#[allow(clippy::disallowed_methods)]
 #[cfg(test)]
 mod tests;

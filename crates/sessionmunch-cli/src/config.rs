@@ -427,6 +427,7 @@ pub struct RuntimeEnv {
     copilot_client_id: Option<String>,
     voyage_api_key: Option<SecretString>,
     opencode_api_key: Option<SecretString>,
+    backup_dir: Option<String>,
 }
 
 impl RuntimeEnv {
@@ -470,6 +471,9 @@ impl RuntimeEnv {
             copilot_client_id: env_string("SESSIONMUNCH_COPILOT_CLIENT_ID"),
             voyage_api_key: env_secret("VOYAGE_API_KEY"),
             opencode_api_key: env_secret("OPENCODE_API_KEY"),
+            // Raw, not `env_string`: callers apply their own blank handling
+            // and the legacy `AI_MEMORY_` alias never applied to it.
+            backup_dir: env_raw("SESSIONMUNCH_BACKUP_DIR"),
         }
     }
 
@@ -502,6 +506,13 @@ impl RuntimeEnv {
     #[must_use]
     pub fn project_strategy(&self) -> Option<&str> {
         self.project_strategy.as_deref()
+    }
+
+    /// Pre-migration backup destination (`SESSIONMUNCH_BACKUP_DIR`), exactly
+    /// as set.
+    #[must_use]
+    pub fn backup_dir(&self) -> Option<&str> {
+        self.backup_dir.as_deref()
     }
 
     /// Claude Code lifecycle session id inherited by an stdio MCP subprocess.
@@ -1240,7 +1251,7 @@ impl Config {
         // JSON-encoded env var instead — perfect for charts that
         // `toJson` a values.yaml list. Overrides anything figment loaded
         // from file/other env layers.
-        if let Ok(raw) = std::env::var("SESSIONMUNCH_ADMISSION_WEBHOOKS_JSON")
+        if let Some(raw) = env_raw("SESSIONMUNCH_ADMISSION_WEBHOOKS_JSON")
             && !raw.trim().is_empty()
         {
             let parsed: Vec<sessionmunch_wiki::WebhookConfig> = serde_json::from_str(&raw)
@@ -1840,9 +1851,17 @@ fn provider_choice_from_str(raw: &str) -> Option<ProviderChoice> {
     })
 }
 
+/// `std::env::var(name).ok()`: the one place `Config::load` touches the
+/// process environment (figment's `Env` provider aside).
+// The sanctioned config-read path (AGENTS.md invariant #1).
+#[allow(clippy::disallowed_methods)]
+fn env_raw(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
 fn env_string(name: &str) -> Option<String> {
     let resolve = |key: &str| {
-        std::env::var(key).ok().and_then(|s| {
+        env_raw(key).and_then(|s| {
             let trimmed = s.trim();
             if trimmed.is_empty() {
                 None
@@ -2038,6 +2057,8 @@ fn normalize_home_dir(home: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
+// Test setup may read the real environment; invariant #1 governs runtime code.
+#[allow(clippy::disallowed_methods)]
 #[cfg(test)]
 mod tests {
 

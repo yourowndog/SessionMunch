@@ -197,11 +197,16 @@ pub struct LaunchPlan {
 /// User arguments are never validated or rewritten. Adapter-owned session
 /// selectors are inserted only when the invocation is session-bearing and the
 /// user did not provide an explicit native selector.
+///
+/// `host_env` looks up the harness's own environment variables (its config
+/// home, e.g. `CODEX_HOME`) the way `std::env::var_os` would; the caller owns
+/// the process environment, so this crate never reads it directly.
 pub fn build_launch_plan(
     harness: ManagedHarness,
     executable: Option<OsString>,
     native_args: Vec<OsString>,
     linked_session_id: Option<&str>,
+    host_env: impl Fn(&str) -> Option<OsString>,
 ) -> Result<LaunchPlan> {
     let program = executable.unwrap_or_else(|| OsString::from(harness.executable()));
     let mut args = native_args;
@@ -210,7 +215,7 @@ pub fn build_launch_plan(
         ManagedHarness::Crush => flag_path(&args, &["--data-dir", "-D"]),
         _ => None,
     }
-    .or_else(|| environment_session_dir(harness));
+    .or_else(|| environment_session_dir(harness, host_env));
     let mut expected = explicit_session_id(harness, &args);
     let mode = launch_mode(harness, &args);
     if mode == LaunchMode::Session
@@ -890,11 +895,7 @@ fn flag_path(args: &[OsString], names: &[&str]) -> Option<PathBuf> {
     None
 }
 
-fn environment_session_dir(harness: ManagedHarness) -> Option<PathBuf> {
-    environment_session_dir_with(harness, |name| std::env::var_os(name))
-}
-
-fn environment_session_dir_with(
+fn environment_session_dir(
     harness: ManagedHarness,
     get: impl Fn(&str) -> Option<OsString>,
 ) -> Option<PathBuf> {
@@ -945,6 +946,12 @@ fn positional_after_command(args: &[OsString], commands: &[&str]) -> Option<Stri
 mod tests {
     use super::*;
 
+    /// No harness environment: plans must not depend on the developer's own
+    /// `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, ...
+    fn no_env(_: &str) -> Option<OsString> {
+        None
+    }
+
     fn strings(args: &[OsString]) -> Vec<String> {
         args.iter()
             .map(|value| value.to_string_lossy().into_owned())
@@ -953,7 +960,7 @@ mod tests {
 
     #[test]
     fn claude_generates_then_resumes_native_session() {
-        let fresh = build_launch_plan(ManagedHarness::Claude, None, vec![], None).unwrap();
+        let fresh = build_launch_plan(ManagedHarness::Claude, None, vec![], None, no_env).unwrap();
         let id = fresh.expected_session_id.clone().unwrap();
         assert_eq!(strings(&fresh.args), ["--session-id", id.as_str()]);
 
@@ -962,6 +969,7 @@ mod tests {
             None,
             vec![OsString::from("--model"), OsString::from("opus")],
             Some(&id),
+            no_env,
         )
         .unwrap();
         assert_eq!(
@@ -978,8 +986,14 @@ mod tests {
             OsString::from("gpt-5"),
             OsString::from("continue here"),
         ];
-        let plan =
-            build_launch_plan(ManagedHarness::Codex, None, native, Some("codex-id")).unwrap();
+        let plan = build_launch_plan(
+            ManagedHarness::Codex,
+            None,
+            native,
+            Some("codex-id"),
+            no_env,
+        )
+        .unwrap();
         assert_eq!(
             strings(&plan.args),
             [
@@ -1000,8 +1014,14 @@ mod tests {
             OsString::from("--json"),
             OsString::from("continue here"),
         ];
-        let plan =
-            build_launch_plan(ManagedHarness::Codex, None, native, Some("codex-id")).unwrap();
+        let plan = build_launch_plan(
+            ManagedHarness::Codex,
+            None,
+            native,
+            Some("codex-id"),
+            no_env,
+        )
+        .unwrap();
         assert_eq!(
             strings(&plan.args),
             ["exec", "resume", "codex-id", "--json", "continue here"]
@@ -1017,7 +1037,8 @@ mod tests {
             OsString::from("chosen"),
             OsString::from("continue here"),
         ];
-        let plan = build_launch_plan(ManagedHarness::Codex, None, native, Some("linked")).unwrap();
+        let plan =
+            build_launch_plan(ManagedHarness::Codex, None, native, Some("linked"), no_env).unwrap();
         assert_eq!(
             strings(&plan.args),
             ["exec", "resume", "chosen", "continue here"]
@@ -1032,6 +1053,7 @@ mod tests {
             None,
             vec![OsString::from("--session=chosen"), OsString::from("--auto")],
             Some("linked"),
+            no_env,
         )
         .unwrap();
         assert_eq!(strings(&plan.args), ["--session=chosen", "--auto"]);
@@ -1103,6 +1125,7 @@ mod tests {
             None,
             vec![OsString::from("run"), OsString::from("continue here")],
             Some("shared-id"),
+            no_env,
         )
         .unwrap();
         assert_eq!(
@@ -1126,15 +1149,26 @@ mod tests {
         ));
 
         for utility in ["service", "api", "auth"] {
-            let plan =
-                build_launch_plan(beta, None, vec![OsString::from(utility)], Some("shared-id"))
-                    .unwrap();
+            let plan = build_launch_plan(
+                beta,
+                None,
+                vec![OsString::from(utility)],
+                Some("shared-id"),
+                no_env,
+            )
+            .unwrap();
             assert_eq!(plan.mode, LaunchMode::Passthrough, "{utility}");
         }
         // `mini` is the interactive UI, not a utility: it stays
         // session-bearing.
-        let mini =
-            build_launch_plan(beta, None, vec![OsString::from("mini")], Some("shared-id")).unwrap();
+        let mini = build_launch_plan(
+            beta,
+            None,
+            vec![OsString::from("mini")],
+            Some("shared-id"),
+            no_env,
+        )
+        .unwrap();
         assert_eq!(mini.mode, LaunchMode::Session);
     }
 
@@ -1145,6 +1179,7 @@ mod tests {
             None,
             vec![OsString::from("run"), OsString::from("continue here")],
             Some("open-code-id"),
+            no_env,
         )
         .unwrap();
         assert_eq!(
@@ -1161,6 +1196,7 @@ mod tests {
             None,
             vec![OsString::from("continue here")],
             None,
+            no_env,
         )
         .unwrap();
         let id = fresh.expected_session_id.clone().unwrap();
@@ -1174,6 +1210,7 @@ mod tests {
             None,
             vec![OsString::from("continue here")],
             Some(&id),
+            no_env,
         )
         .unwrap();
         assert_eq!(
@@ -1192,6 +1229,7 @@ mod tests {
                 OsString::from("/tmp/crush-data"),
             ],
             Some("crush-id"),
+            no_env,
         )
         .unwrap();
         assert_eq!(
@@ -1247,6 +1285,7 @@ mod tests {
             None,
             vec![OsString::from("--model"), OsString::from("model-id")],
             None,
+            no_env,
         )
         .unwrap();
         assert_eq!(strings(&fresh.args), ["--model", "model-id"]);
@@ -1258,6 +1297,7 @@ mod tests {
             None,
             vec![OsString::from("--model"), OsString::from("model-id")],
             Some(id),
+            no_env,
         )
         .unwrap();
         assert_eq!(
@@ -1275,6 +1315,7 @@ mod tests {
             None,
             vec![OsString::from("--session"), OsString::from(id)],
             Some("7c1d5698-204a-4c0f-ae9c-43db7fc4e41d"),
+            no_env,
         )
         .unwrap();
         assert_eq!(strings(&exact.args), ["--session", id]);
@@ -1285,6 +1326,7 @@ mod tests {
             None,
             vec![OsString::from("--resume=auth refactor")],
             Some("7c1d5698-204a-4c0f-ae9c-43db7fc4e41d"),
+            no_env,
         )
         .unwrap();
         assert_eq!(strings(&named.args), ["--resume=auth refactor"]);
@@ -1295,8 +1337,14 @@ mod tests {
             vec![OsString::from("--no-session")],
             vec![OsString::from("--list-models")],
         ] {
-            let plan = build_launch_plan(ManagedHarness::CommandCode, None, args.clone(), Some(id))
-                .unwrap();
+            let plan = build_launch_plan(
+                ManagedHarness::CommandCode,
+                None,
+                args.clone(),
+                Some(id),
+                no_env,
+            )
+            .unwrap();
             assert_eq!(plan.args, args);
             assert_eq!(plan.mode, LaunchMode::Passthrough);
         }
@@ -1320,6 +1368,7 @@ mod tests {
             None,
             vec![OsString::from("--yolo"), OsString::from("continue here")],
             Some("omp-id"),
+            no_env,
         )
         .unwrap();
         assert_eq!(
@@ -1336,7 +1385,8 @@ mod tests {
             OsString::from("/tmp/pi sessions"),
             OsString::from("continue here"),
         ];
-        let pi = build_launch_plan(ManagedHarness::Pi, None, pi_args.clone(), None).unwrap();
+        let pi =
+            build_launch_plan(ManagedHarness::Pi, None, pi_args.clone(), None, no_env).unwrap();
         assert_eq!(
             pi.session_dir.as_deref(),
             Some(std::path::Path::new("/tmp/pi sessions"))
@@ -1348,6 +1398,7 @@ mod tests {
             None,
             vec![OsString::from("--session-dir=/tmp/omp")],
             None,
+            no_env,
         )
         .unwrap();
         assert_eq!(
@@ -1366,19 +1417,19 @@ mod tests {
             _ => None,
         };
         assert_eq!(
-            environment_session_dir_with(ManagedHarness::Claude, get).as_deref(),
+            environment_session_dir(ManagedHarness::Claude, get).as_deref(),
             Some(std::path::Path::new("/stores/claude/projects"))
         );
         assert_eq!(
-            environment_session_dir_with(ManagedHarness::Codex, get).as_deref(),
+            environment_session_dir(ManagedHarness::Codex, get).as_deref(),
             Some(std::path::Path::new("/stores/codex/sessions"))
         );
         assert_eq!(
-            environment_session_dir_with(ManagedHarness::OpenCode, get).as_deref(),
+            environment_session_dir(ManagedHarness::OpenCode, get).as_deref(),
             Some(std::path::Path::new("/stores/xdg/opencode"))
         );
         assert_eq!(
-            environment_session_dir_with(ManagedHarness::Omp, get).as_deref(),
+            environment_session_dir(ManagedHarness::Omp, get).as_deref(),
             Some(std::path::Path::new("/stores/pi-family/sessions"))
         );
     }
@@ -1390,6 +1441,7 @@ mod tests {
             None,
             vec![OsString::from("doctor")],
             Some("linked"),
+            no_env,
         )
         .unwrap();
         assert_eq!(plan.mode, LaunchMode::Passthrough);
@@ -1405,6 +1457,7 @@ mod tests {
             None,
             vec![OsString::from("continue here")],
             None,
+            no_env,
         )
         .unwrap();
         assert_eq!(strings(&plan.args), ["continue here"]);
@@ -1426,6 +1479,7 @@ mod tests {
             None,
             vec![OsString::from("--model"), OsString::from("k2")],
             Some("session_abc"),
+            no_env,
         )
         .unwrap();
         assert_eq!(
@@ -1454,6 +1508,7 @@ mod tests {
                 None,
                 native.clone(),
                 Some("session_linked"),
+                no_env,
             )
             .unwrap();
             assert_eq!(plan.args, native, "{native:?} must stay byte-identical");
@@ -1467,6 +1522,7 @@ mod tests {
                 OsString::from("session_chosen"),
             ],
             Some("session_linked"),
+            no_env,
         )
         .unwrap();
         assert_eq!(
@@ -1483,6 +1539,7 @@ mod tests {
                 None,
                 vec![OsString::from(utility)],
                 Some("session_linked"),
+                no_env,
             )
             .unwrap();
             assert_eq!(plan.mode, LaunchMode::Passthrough, "{utility}");
@@ -1517,7 +1574,7 @@ mod tests {
 
     #[test]
     fn grok_generates_then_resumes_native_session() {
-        let fresh = build_launch_plan(ManagedHarness::Grok, None, vec![], None).unwrap();
+        let fresh = build_launch_plan(ManagedHarness::Grok, None, vec![], None, no_env).unwrap();
         let id = fresh.expected_session_id.clone().unwrap();
         assert_eq!(strings(&fresh.args), ["--session-id", id.as_str()]);
 
@@ -1526,6 +1583,7 @@ mod tests {
             None,
             vec![OsString::from("--model"), OsString::from("grok-4.5")],
             Some(&id),
+            no_env,
         )
         .unwrap();
         assert_eq!(
@@ -1545,9 +1603,14 @@ mod tests {
             // choice, so nothing may be injected.
             vec![OsString::from("--resume")],
         ] {
-            let plan =
-                build_launch_plan(ManagedHarness::Grok, None, native.clone(), Some("linked"))
-                    .unwrap();
+            let plan = build_launch_plan(
+                ManagedHarness::Grok,
+                None,
+                native.clone(),
+                Some("linked"),
+                no_env,
+            )
+            .unwrap();
             assert_eq!(plan.args, native, "{native:?} must stay byte-identical");
             assert_ne!(plan.expected_session_id.as_deref(), Some("linked"));
         }
@@ -1561,6 +1624,7 @@ mod tests {
                 None,
                 vec![OsString::from(utility)],
                 Some("linked"),
+                no_env,
             )
             .unwrap();
             assert_eq!(plan.mode, LaunchMode::Passthrough, "{utility}");
@@ -1603,7 +1667,7 @@ mod tests {
     fn grok_home_environment_override_points_at_sessions_root() {
         let get = |name: &str| (name == "GROK_HOME").then(|| OsString::from("/stores/grok"));
         assert_eq!(
-            environment_session_dir_with(ManagedHarness::Grok, get).as_deref(),
+            environment_session_dir(ManagedHarness::Grok, get).as_deref(),
             Some(std::path::Path::new("/stores/grok/sessions"))
         );
     }
@@ -1613,7 +1677,7 @@ mod tests {
         let get =
             |name: &str| (name == "KIMI_CODE_HOME").then(|| OsString::from("/stores/kimi-code"));
         assert_eq!(
-            environment_session_dir_with(ManagedHarness::Kimi, get).as_deref(),
+            environment_session_dir(ManagedHarness::Kimi, get).as_deref(),
             Some(std::path::Path::new("/stores/kimi-code/sessions"))
         );
     }
@@ -1633,6 +1697,7 @@ mod tests {
             None,
             vec![OsString::from("--model"), OsString::from("sonnet")],
             None,
+            no_env,
         )
         .unwrap();
         assert_eq!(strings(&fresh.args), ["--model", "sonnet"]);
@@ -1643,6 +1708,7 @@ mod tests {
             None,
             vec![OsString::from("--model"), OsString::from("sonnet")],
             Some("3f6d1c2a-0000-4000-8000-000000000aaa"),
+            no_env,
         )
         .unwrap();
         assert_eq!(
@@ -1663,6 +1729,7 @@ mod tests {
                 OsString::from("sess_5f8f43ff-d4b0-4b46-9320-f2f756ced54b"),
             ],
             Some("sess_c3774f9d-269e-40d1-aa02-2bb0c0817b4e"),
+            no_env,
         )
         .unwrap();
         assert_eq!(
@@ -1682,6 +1749,7 @@ mod tests {
             None,
             vec![OsString::from("--model"), OsString::from("sonnet")],
             None,
+            no_env,
         )
         .unwrap();
         assert_eq!(strings(&fresh.args), ["--v3", "--model", "sonnet"]);
@@ -1692,6 +1760,7 @@ mod tests {
             None,
             vec![OsString::from("--v3"), OsString::from("--mode=vibe")],
             Some("sess_c3774f9d-269e-40d1-aa02-2bb0c0817b4e"),
+            no_env,
         )
         .unwrap();
         assert_eq!(
@@ -1741,6 +1810,7 @@ mod tests {
                 None,
                 native.clone(),
                 Some("3f6d1c2a-0000-4000-8000-000000000bbb"),
+                no_env,
             )
             .unwrap();
             assert_eq!(plan.args, native, "{native:?} must stay byte-identical");
@@ -1763,6 +1833,7 @@ mod tests {
                 None,
                 native.clone(),
                 Some("3f6d1c2a-0000-4000-8000-000000000aaa"),
+                no_env,
             )
             .unwrap();
             assert_eq!(plan.mode, LaunchMode::Passthrough, "{native:?}");
@@ -1774,6 +1845,7 @@ mod tests {
                 None,
                 vec![OsString::from("chat")],
                 None,
+                no_env,
             )
             .unwrap()
             .mode,
@@ -1814,7 +1886,7 @@ mod tests {
             ],
         ] {
             assert_eq!(
-                build_launch_plan(ManagedHarness::Kiro, None, native, None)
+                build_launch_plan(ManagedHarness::Kiro, None, native, None, no_env)
                     .unwrap()
                     .mode,
                 LaunchMode::Passthrough
@@ -1826,12 +1898,12 @@ mod tests {
     fn kiro_home_override_points_at_the_cli_session_store() {
         let get = |name: &str| (name == "KIRO_HOME").then(|| OsString::from("/stores/kiro"));
         assert_eq!(
-            environment_session_dir_with(ManagedHarness::Kiro, get).as_deref(),
+            environment_session_dir(ManagedHarness::Kiro, get).as_deref(),
             Some(std::path::Path::new("/stores/kiro/sessions/cli"))
         );
         let get = |name: &str| (name == "KIRO_HOME").then(|| OsString::from("/stores/kiro"));
         assert_eq!(
-            environment_session_dir_with(ManagedHarness::KiroV3, get).as_deref(),
+            environment_session_dir(ManagedHarness::KiroV3, get).as_deref(),
             Some(std::path::Path::new("/stores/kiro/sessions"))
         );
     }
@@ -1856,6 +1928,7 @@ mod tests {
             None,
             vec![OsString::from("--model"), OsString::from("gemini-3-pro")],
             None,
+            no_env,
         )
         .unwrap();
         assert_eq!(strings(&plan.args), ["--model", "gemini-3-pro"]);
@@ -1870,6 +1943,7 @@ mod tests {
             None,
             vec![OsString::from("--effort"), OsString::from("high")],
             Some("a0d5ac62-2501-4780-b783-76d159c56cb3"),
+            no_env,
         )
         .unwrap();
         assert_eq!(
@@ -1902,6 +1976,7 @@ mod tests {
                 None,
                 native.clone(),
                 Some("linked"),
+                no_env,
             )
             .unwrap();
             assert_eq!(plan.args, native, "{native:?} must stay byte-identical");
@@ -1924,6 +1999,7 @@ mod tests {
                 None,
                 vec![OsString::from(utility)],
                 Some("linked"),
+                no_env,
             )
             .unwrap();
             assert_eq!(plan.mode, LaunchMode::Passthrough, "{utility}");

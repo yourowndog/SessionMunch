@@ -353,7 +353,10 @@ These are carved into the architecture; each traces to a documented
 prior-art bug (see `docs/ARCHITECTURE.md` and `docs/issues-*.md`):
 
 1. **One config-read path.** `Config::load()` runs once at startup; never
-   call `std::env::var` outside it.
+   call `std::env::var` outside it. Host facts the CLI needs (harness config
+   homes, `$HOME`, `PATH`, ...) come from the `HostEnv` snapshot taken once in
+   `sessionmunch_cli::run` and passed down; library crates take values from
+   their callers. `clippy.toml` `disallowed-methods` enforces this.
 2. **Single-writer SQLite actor.** All writes go through one `mpsc`
    channel to one dedicated thread (`WriterHandle`). Batch hot-path work
    into one command/transaction; avoid N+1 reads.

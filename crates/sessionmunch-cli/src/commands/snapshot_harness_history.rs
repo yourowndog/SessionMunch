@@ -12,12 +12,12 @@ use sessionmunch_workstream::{
 };
 
 use crate::cli::{RunHarnessChoice, SnapshotHarnessHistoryArgs};
-use crate::commands::path_util;
 use crate::config::Config;
+use crate::host_env::HostEnv;
 
 const SNAPSHOT_VERSION: &str = "harness-store-v1";
 
-pub async fn run(config: &Config, args: SnapshotHarnessHistoryArgs) -> Result<()> {
+pub async fn run(config: &Config, host: &HostEnv, args: SnapshotHarnessHistoryArgs) -> Result<()> {
     let artifact_root = args
         .to
         .clone()
@@ -32,7 +32,7 @@ pub async fn run(config: &Config, args: SnapshotHarnessHistoryArgs) -> Result<()
         .home
         .clone()
         .or_else(|| config.home_dir.as_deref().map(PathBuf::from))
-        .or_else(path_util::home_dir)
+        .or_else(|| host.home_dir())
         .unwrap_or_else(|| {
             std::env::current_dir()
                 .ok()

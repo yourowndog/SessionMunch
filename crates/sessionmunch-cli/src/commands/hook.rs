@@ -24,6 +24,7 @@ use sessionmunch_hooks::{
 use sessionmunch_llm::OidcToken;
 
 use crate::cli::HookArgs;
+use crate::host_env::HostEnv;
 
 use sha2::{Digest as _, Sha256};
 
@@ -64,23 +65,23 @@ const MAX_BRIEFED_MARKERS: usize = 512;
 const INCREMENTAL_DRAIN_BUDGET: Duration = Duration::from_millis(250);
 
 /// Per-event POST timeout during a drain. Env: `SESSIONMUNCH_HOOK_DRAIN_TIMEOUT_MINUTES`.
-fn drain_event_timeout() -> Duration {
-    drain_event_timeout_from(env_lookup)
+fn drain_event_timeout(host: &HostEnv) -> Duration {
+    drain_event_timeout_from(|name| host.var(name))
 }
 /// Synchronous handoff GET timeout. Env: `SESSIONMUNCH_HOOK_HANDOFF_TIMEOUT_MINUTES`.
-fn handoff_timeout() -> Duration {
-    handoff_timeout_from(env_lookup)
+fn handoff_timeout(host: &HostEnv) -> Duration {
+    handoff_timeout_from(|name| host.var(name))
 }
 /// Total budget for the `session-start` cleanup drain (kept tight so session
 /// start stays snappy even when the server is down — leftovers wait). Env:
 /// `SESSIONMUNCH_HOOK_START_BUDGET_MINUTES`.
-fn start_drain_budget() -> Duration {
-    start_drain_budget_from(env_lookup)
+fn start_drain_budget(host: &HostEnv) -> Duration {
+    start_drain_budget_from(|name| host.var(name))
 }
 /// Total budget for detached background drains. Env:
 /// `SESSIONMUNCH_HOOK_BACKGROUND_DRAIN_BUDGET_MINUTES`.
-fn background_drain_budget() -> Duration {
-    background_drain_budget_from(env_lookup)
+fn background_drain_budget(host: &HostEnv) -> Duration {
+    background_drain_budget_from(|name| host.var(name))
 }
 
 fn drain_event_timeout_from(lookup: impl FnMut(&str) -> Option<String>) -> Duration {
@@ -105,8 +106,8 @@ fn background_drain_budget_from(lookup: impl FnMut(&str) -> Option<String>) -> D
 
 /// Backlog size at which `post-tool-use` triggers a mid-session catch-up drain.
 /// Env: `SESSIONMUNCH_HOOK_INCREMENTAL_THRESHOLD` (positive integer).
-fn incremental_drain_threshold() -> usize {
-    incremental_drain_threshold_from(env_lookup)
+fn incremental_drain_threshold(host: &HostEnv) -> usize {
+    incremental_drain_threshold_from(|name| host.var(name))
 }
 
 fn incremental_drain_threshold_from(mut lookup: impl FnMut(&str) -> Option<String>) -> usize {
@@ -288,13 +289,19 @@ fn resolve_hook_cwd_with(
 }
 
 fn cwd_query_suffix(
+    host: &HostEnv,
     agent: &str,
     raw: &serde_json::Value,
     default_strategy: Option<&str>,
 ) -> String {
-    resolve_hook_cwd_with(agent, raw, env_lookup, || std::env::current_dir().ok())
-        .map(|cwd| marker_query_suffix(&cwd, default_strategy))
-        .unwrap_or_default()
+    resolve_hook_cwd_with(
+        agent,
+        raw,
+        |name| host.var(name),
+        || std::env::current_dir().ok(),
+    )
+    .map(|cwd| marker_query_suffix(&cwd, default_strategy, host.home_dir().as_deref()))
+    .unwrap_or_default()
 }
 
 fn after_background_drain_event_enqueue(
@@ -306,15 +313,16 @@ fn after_background_drain_event_enqueue(
 }
 
 /// Hidden drain-only fast path. Reads no stdin and writes no stdout.
-pub async fn run_drain(data_dir: Option<PathBuf>) -> anyhow::Result<()> {
-    let dd = resolve_data_dir(data_dir.as_deref());
+pub async fn run_drain(host: &HostEnv, data_dir: Option<PathBuf>) -> anyhow::Result<()> {
+    let dd = resolve_data_dir(host, data_dir.as_deref());
     let spool = hook_spool::spool_dir(&dd);
     match hook_spool::drain_until_quiescent(
         &spool,
         &dd,
-        background_drain_budget(),
-        drain_event_timeout(),
+        background_drain_budget(host),
+        drain_event_timeout(host),
         hook_spool::DrainLockWait::Bounded(Duration::from_secs(30)),
+        hook_spool::live_static_token(host).as_deref(),
     )
     .await
     {
@@ -373,10 +381,6 @@ fn write_drain_report<W: std::io::Write>(
     }
 }
 
-fn env_lookup(name: &str) -> Option<String> {
-    std::env::var(name).ok()
-}
-
 fn managed_run_query_suffix_with(mut env_lookup: impl FnMut(&str) -> Option<String>) -> String {
     env_lookup(MANAGED_RUN_ENV)
         .filter(|value| value.parse::<ManagedRunId>().is_ok())
@@ -385,8 +389,8 @@ fn managed_run_query_suffix_with(mut env_lookup: impl FnMut(&str) -> Option<Stri
         })
 }
 
-fn managed_run_query_suffix() -> String {
-    managed_run_query_suffix_with(env_lookup)
+fn managed_run_query_suffix(host: &HostEnv) -> String {
+    managed_run_query_suffix_with(|name| host.var(name))
 }
 
 /// Read a positive-integer minute override from `name`, falling back to the
@@ -457,11 +461,12 @@ fn session_start_handoff_envelope(agent: AgentKind, handoff: String) -> serde_js
 ///
 /// `data_dir` is the resolved global `--data-dir` (if any); used to locate the
 /// spool and the stored OIDC token.
-pub async fn run(data_dir: Option<PathBuf>, args: HookArgs) -> anyhow::Result<()> {
+pub async fn run(host: &HostEnv, data_dir: Option<PathBuf>, args: HookArgs) -> anyhow::Result<()> {
     let mut payload = String::new();
     std::io::stdin().read_to_string(&mut payload).ok();
     let mut stdout = std::io::stdout();
     run_with_payload(
+        host,
         data_dir,
         args,
         payload,
@@ -472,6 +477,7 @@ pub async fn run(data_dir: Option<PathBuf>, args: HookArgs) -> anyhow::Result<()
 }
 
 async fn run_with_payload<W, S>(
+    host: &HostEnv,
     data_dir: Option<PathBuf>,
     args: HookArgs,
     payload: String,
@@ -524,9 +530,12 @@ where
     if sessionmunch_hooks::cap_lifecycle_body_for_client(&mut json, hook_event) {
         payload = serde_json::to_string(&json)?;
     }
-    let (policy_cwd, canonical_session_id) = hook_context(&args.agent, &json);
+    let home = host.home_dir();
+    let (policy_cwd, canonical_session_id) = hook_context(host, &args.agent, &json);
     let inspection_cwd = policy_cwd.as_deref().map(lexical_capture_cwd);
-    let policy = policy_cwd.as_deref().map(capture_policy);
+    let policy = policy_cwd
+        .as_deref()
+        .map(|cwd| capture_policy(cwd, home.as_deref()));
     let tool_event = is_tool_event(&args.event);
     let decision = policy.as_ref().filter(|_| tool_event).map(|policy| {
         policy.inspect(
@@ -538,14 +547,14 @@ where
     // Precedence: an explicit flag (tests, one-off runs) wins; otherwise the
     // persisted per-install mode; otherwise the historical default.
     let capture_mode = args.capture_mode.map_or_else(
-        || persisted_capture_mode(&resolve_data_dir(data_dir.as_deref())),
+        || persisted_capture_mode(&resolve_data_dir(host, data_dir.as_deref())),
         crate::cli::CaptureModeArg::mode,
     );
     // Marker presence is the opt-in signal under allowlist mode. Resolved from
     // the same upward walk the policy uses, so opting in needs no new file.
     let marker_present = policy_cwd
         .as_deref()
-        .is_some_and(|cwd| crate::marker::find_marker(cwd).is_some());
+        .is_some_and(|cwd| crate::marker::find_marker_with_home(cwd, home.as_deref()).is_some());
     let admits_capture = repository_admits_capture(capture_mode, marker_present);
     if args.check_capture {
         let protocol = decision.as_ref().map(|decision| decision.protocol());
@@ -602,15 +611,16 @@ where
     }
 
     let qs = cwd_query_suffix(
+        host,
         &args.agent,
         &json,
         args.project_strategy.and_then(|s| s.baked()),
     );
     let base = args.server_url.trim_end_matches('/');
-    let dd = resolve_data_dir(data_dir.as_deref());
+    let dd = resolve_data_dir(host, data_dir.as_deref());
     let spool = hook_spool::spool_dir(&dd);
     let session_qs = session_id_query_suffix(&dd, &args.agent, &args.event, &json);
-    let managed_qs = managed_run_query_suffix();
+    let managed_qs = managed_run_query_suffix(host);
     let hook_qs = format!("{qs}{session_qs}{managed_qs}");
 
     // Spool THIS event — an instant local write, never the network. The auth
@@ -671,7 +681,7 @@ where
     if should_incremental_drain(
         &args.event,
         hook_spool::spool_len(&spool),
-        incremental_drain_threshold(),
+        incremental_drain_threshold(host),
     ) {
         let _ = hook_spool::drain_exclusive(
             &spool,
@@ -679,6 +689,7 @@ where
             INCREMENTAL_DRAIN_BUDGET,
             INCREMENTAL_DRAIN_BUDGET,
             hook_spool::DrainLockWait::NoWait,
+            hook_spool::live_static_token(host).as_deref(),
         )
         .await;
     }
@@ -689,8 +700,9 @@ where
         let _ = hook_spool::drain_exclusive_within_budget(
             &spool,
             &dd,
-            start_drain_budget(),
-            drain_event_timeout(),
+            start_drain_budget(host),
+            drain_event_timeout(host),
+            hook_spool::live_static_token(host).as_deref(),
         )
         .await;
         // Only fetch the handoff for agents that inject the session-start
@@ -709,8 +721,13 @@ where
                 "{base}/handoff?agent={}{qs}{managed_qs}{native_session_qs}",
                 args.agent
             );
-            if let Some(handoff) =
-                get_handoff(&client, &handoff_url, bearer.as_deref(), handoff_timeout()).await
+            if let Some(handoff) = get_handoff(
+                &client,
+                &handoff_url,
+                bearer.as_deref(),
+                handoff_timeout(host),
+            )
+            .await
             {
                 if agent_kind == AgentKind::KiroCli {
                     // Kiro v2/v3 consume SessionStart stdout verbatim and define
@@ -754,7 +771,7 @@ where
         // after a context clear is not supported in v1.
         let briefed_path = policy_cwd
             .as_deref()
-            .filter(|cwd| marker_requests_briefing(cwd))
+            .filter(|cwd| marker_requests_briefing(cwd, home.as_deref()))
             .map(|_| {
                 briefed_marker_path(
                     &dd,
@@ -770,6 +787,7 @@ where
                     marker_query_suffix_without_briefing(
                         cwd,
                         args.project_strategy.and_then(|s| s.baked()),
+                        home.as_deref(),
                     )
                 })
                 .unwrap_or_default()
@@ -780,8 +798,13 @@ where
             "{base}/handoff?agent={}{handoff_qs}{managed_qs}{native_session_qs}",
             args.agent
         );
-        let handoff =
-            get_handoff(&client, &handoff_url, bearer.as_deref(), handoff_timeout()).await;
+        let handoff = get_handoff(
+            &client,
+            &handoff_url,
+            bearer.as_deref(),
+            handoff_timeout(host),
+        )
+        .await;
         // Mark the session as briefed only AFTER the GET completed — success
         // OR error. Fail-open on purpose: with the server down, repeating
         // the brief-flagged request on every prompt would not deliver
@@ -834,14 +857,18 @@ fn parse_hook_payload(mut payload: String) -> serde_json::Result<(String, serde_
     Ok((payload, json))
 }
 
-fn hook_context(agent: &str, raw: &serde_json::Value) -> (Option<String>, Option<String>) {
+fn hook_context(
+    host: &HostEnv,
+    agent: &str,
+    raw: &serde_json::Value,
+) -> (Option<String>, Option<String>) {
     let (cwd, session_id) = canonical_context(raw);
     if cwd.is_some() {
         return (cwd, session_id);
     }
     if AgentKind::from_wire(agent) == AgentKind::Devin {
         (
-            resolve_cwd_with_fallbacks(raw, env_lookup, || std::env::current_dir().ok()),
+            resolve_cwd_with_fallbacks(raw, |name| host.var(name), || std::env::current_dir().ok()),
             session_id,
         )
     } else {
@@ -906,10 +933,10 @@ fn is_tool_event(event: &str) -> bool {
 /// Resolve the data dir cheaply, without loading the full config (the hook
 /// fast-path skips config for latency). Mirrors `config.rs`: explicit
 /// `--data-dir`, else `SESSIONMUNCH_DATA_DIR`, else the platform local-data dir.
-fn resolve_data_dir(data_dir: Option<&Path>) -> PathBuf {
+fn resolve_data_dir(host: &HostEnv, data_dir: Option<&Path>) -> PathBuf {
     let dir = data_dir
         .map(Path::to_path_buf)
-        .or_else(|| std::env::var_os("SESSIONMUNCH_DATA_DIR").map(PathBuf::from))
+        .or_else(|| host.var_os("SESSIONMUNCH_DATA_DIR").map(PathBuf::from))
         .unwrap_or_else(|| {
             dirs::data_local_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
@@ -1017,9 +1044,10 @@ mod tests {
     #[test]
     fn resolve_data_dir_strips_verbatim_prefix_from_baked_arg() {
         // Recover safe verbatim data dirs baked by older installs (#116).
-        let resolved = resolve_data_dir(Some(Path::new(
-            r"\\?\C:\Users\me\AppData\Local\sessionmunch",
-        )));
+        let resolved = resolve_data_dir(
+            &HostEnv::default(),
+            Some(Path::new(r"\\?\C:\Users\me\AppData\Local\sessionmunch")),
+        );
         assert_eq!(
             resolved,
             PathBuf::from(r"C:\Users\me\AppData\Local\sessionmunch")
@@ -1028,8 +1056,27 @@ mod tests {
 
     #[test]
     fn resolve_data_dir_leaves_plain_path_untouched() {
-        let resolved = resolve_data_dir(Some(Path::new(r"C:\Users\me\sessionmunch")));
+        let resolved = resolve_data_dir(
+            &HostEnv::default(),
+            Some(Path::new(r"C:\Users\me\sessionmunch")),
+        );
         assert_eq!(resolved, PathBuf::from(r"C:\Users\me\sessionmunch"));
+    }
+
+    #[test]
+    fn resolve_data_dir_prefers_the_flag_then_the_env_snapshot() {
+        let host = HostEnv::from_vars([("SESSIONMUNCH_DATA_DIR", "/from/env")]);
+        assert_eq!(
+            resolve_data_dir(&host, Some(Path::new("/from/flag"))),
+            PathBuf::from("/from/flag")
+        );
+        assert_eq!(resolve_data_dir(&host, None), PathBuf::from("/from/env"));
+        assert_eq!(
+            resolve_data_dir(&HostEnv::default(), None),
+            dirs::data_local_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("sessionmunch")
+        );
     }
 
     #[test]
@@ -1206,7 +1253,7 @@ mod tests {
         assert_eq!(events.len(), 5);
         for event in events {
             let payload = &event["payload"];
-            let (cwd, session_id) = hook_context("kiro-cli", payload);
+            let (cwd, session_id) = hook_context(&HostEnv::default(), "kiro-cli", payload);
             assert_eq!(cwd.as_deref(), Some("/workspace/project"));
             assert_eq!(session_id.as_deref(), Some("kiro-v3-session"));
         }
@@ -1228,6 +1275,7 @@ mod tests {
         let data_dir = tmp.path().join("data");
         let mut stdout = Vec::new();
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir.clone()),
             antigravity_hook_args("pre-tool-use", &dead_server_url()),
             serde_json::json!({
@@ -1252,6 +1300,7 @@ mod tests {
         let data_dir = tmp.path().join("data");
         let mut stdout = Vec::new();
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir.clone()),
             antigravity_hook_args("pre-tool-use", &dead_server_url()),
             "not-json".into(),
@@ -1380,6 +1429,7 @@ mod tests {
         });
 
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir),
             devin_hook_args("session-start"),
             payload.to_string(),
@@ -1416,6 +1466,7 @@ mod tests {
         let mut stdout = Vec::new();
 
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir.clone()),
             args,
             serde_json::json!({
@@ -1472,6 +1523,7 @@ mod tests {
         });
 
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir),
             devin_hook_args("post-tool-use"),
             payload.to_string(),
@@ -1506,6 +1558,7 @@ mod tests {
         let mut stdout = Vec::new();
 
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir.clone()),
             devin_hook_args("session-start"),
             serde_json::json!({
@@ -1519,6 +1572,7 @@ mod tests {
         .await
         .unwrap();
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir),
             devin_hook_args("post-tool-use"),
             serde_json::json!({
@@ -1665,6 +1719,7 @@ mod tests {
         let mut stdout = Vec::new();
 
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir.clone()),
             devin_hook_args("session-start"),
             serde_json::json!({
@@ -1678,6 +1733,7 @@ mod tests {
         .await
         .unwrap();
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir),
             devin_hook_args("post-compaction"),
             serde_json::json!({
@@ -1719,6 +1775,7 @@ mod tests {
         };
 
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir.clone()),
             args,
             r#"{"session_id":"s","cwd":"/tmp"}"#.into(),
@@ -1762,6 +1819,7 @@ mod tests {
             };
 
             run_with_payload(
+                &HostEnv::default(),
                 Some(data_dir.clone()),
                 args,
                 r#"{"session_id":"s","cwd":"/tmp"}"#.into(),
@@ -1804,6 +1862,7 @@ mod tests {
         };
 
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir),
             args,
             "{}".into(),
@@ -1836,6 +1895,7 @@ mod tests {
         };
 
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir.clone()),
             args,
             r#"{"hook_event_name":"SessionEnd"}"#.into(),
@@ -1927,7 +1987,7 @@ mod tests {
         let called = std::cell::Cell::new(false);
         let mut args = devin_hook_args("post-tool-use");
         args.server_url = dead_server_url();
-        run_with_payload(Some(data_dir.clone()), args, serde_json::json!({"cwd":tmp.path(),"tool_name":"Edit","tool_input":{"path":"secret/SENTINEL"}}).to_string(), &mut stdout, |_, _| { called.set(true); Ok(()) }).await.unwrap();
+        run_with_payload(&HostEnv::default(), Some(data_dir.clone()), args, serde_json::json!({"cwd":tmp.path(),"tool_name":"Edit","tool_input":{"path":"secret/SENTINEL"}}).to_string(), &mut stdout, |_, _| { called.set(true); Ok(()) }).await.unwrap();
         assert_eq!(stdout, b"{}\n");
         assert!(!called.get());
         assert_eq!(hook_spool::spool_len(&hook_spool::spool_dir(&data_dir)), 0);
@@ -1969,6 +2029,7 @@ mod tests {
                 });
                 let mut stdout = Vec::new();
                 run_with_payload(
+                    &HostEnv::default(),
                     Some(data_dir.clone()),
                     args,
                     raw.to_string(),
@@ -2034,6 +2095,7 @@ mod tests {
             "extra": {"tool_call_id": "call-42", "status": "ok"}
         });
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir.clone()),
             args,
             raw.to_string(),
@@ -2075,6 +2137,7 @@ mod tests {
             "cwd": tmp.path()
         });
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir.clone()),
             args,
             raw.to_string(),
@@ -2110,6 +2173,7 @@ mod tests {
         let mut stdout = Vec::new();
         let called = std::cell::Cell::new(false);
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir.clone()),
             devin_hook_args("post-tool-use"),
             serde_json::json!({
@@ -2142,7 +2206,7 @@ mod tests {
         .unwrap();
         let data_dir = tmp.path().join("data");
         let mut stdout = Vec::new();
-        run_with_payload(Some(data_dir.clone()), devin_hook_args("post-tool-use"), serde_json::json!({"cwd":tmp.path(),"tool_name":"Edit","tool_input":{"path":"SENTINEL_PATH","args":"SENTINEL_ARGS"},"output":"SENTINEL_OUTPUT","error":"SENTINEL_ERROR","nested":{"raw":"SENTINEL_NESTED"}}).to_string(), &mut stdout, |_, _| Ok(())).await.unwrap();
+        run_with_payload(&HostEnv::default(), Some(data_dir.clone()), devin_hook_args("post-tool-use"), serde_json::json!({"cwd":tmp.path(),"tool_name":"Edit","tool_input":{"path":"SENTINEL_PATH","args":"SENTINEL_ARGS"},"output":"SENTINEL_OUTPUT","error":"SENTINEL_ERROR","nested":{"raw":"SENTINEL_NESTED"}}).to_string(), &mut stdout, |_, _| Ok(())).await.unwrap();
         let entry = read_spooled_entries(&hook_spool::spool_dir(&data_dir))
             .pop()
             .unwrap();
@@ -2165,7 +2229,7 @@ mod tests {
         let mut args = devin_hook_args("post-tool-use");
         args.check_capture = true;
         let mut stdout = Vec::new();
-        run_with_payload(Some(data_dir.clone()), args, serde_json::json!({"cwd":tmp.path(),"tool_name":"Edit","tool_input":{"path":"SENTINEL"}}).to_string(), &mut stdout, |_, _| Err(std::io::Error::other("must not spawn"))).await.unwrap();
+        run_with_payload(&HostEnv::default(), Some(data_dir.clone()), args, serde_json::json!({"cwd":tmp.path(),"tool_name":"Edit","tool_input":{"path":"SENTINEL"}}).to_string(), &mut stdout, |_, _| Err(std::io::Error::other("must not spawn"))).await.unwrap();
         let output: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
         // Pin the exact key set, not just its size: `--check-capture` is how an
         // operator verifies an opt-out, so a field silently appearing or
@@ -2204,6 +2268,7 @@ mod tests {
                 .to_string();
         let mut stdout = Vec::new();
         run_with_payload(
+            &HostEnv::default(),
             Some(inactive_data.clone()),
             devin_hook_args("post-tool-use"),
             inactive_payload.clone(),
@@ -2224,6 +2289,7 @@ mod tests {
         .unwrap();
         let active_data = tmp.path().join("active-data");
         run_with_payload(
+            &HostEnv::default(),
             Some(active_data.clone()),
             devin_hook_args("post-tool-use"),
             serde_json::json!({"cwd":tmp.path(),"tool_name":"Edit","tool_input":{"path":"public"}})
@@ -2254,8 +2320,12 @@ mod tests {
         args.agent = "antigravity-cli".into();
         let mut stdout = Vec::new();
         let raw = serde_json::json!({"workspacePaths":[tmp.path()],"toolCall":{"name":"Edit","args":{"path":"secret/a"}}});
-        assert!(cwd_query_suffix("antigravity-cli", &raw, None).contains("workspace=canonical"));
+        assert!(
+            cwd_query_suffix(&HostEnv::default(), "antigravity-cli", &raw, None)
+                .contains("workspace=canonical")
+        );
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir.clone()),
             args,
             raw.to_string(),
@@ -2289,6 +2359,7 @@ mod tests {
                 .insert(key.into(), value.clone());
             let mut stdout = Vec::new();
             run_with_payload(
+                &HostEnv::default(),
                 Some(data_dir.clone()),
                 devin_hook_args("post-tool-use"),
                 raw.to_string(),
@@ -2390,6 +2461,7 @@ mod tests {
         let (base, mut requests) = serve_requests("200 OK", "AGY-HANDOFF").await;
         let mut stdout = Vec::new();
         run_with_payload(
+            &HostEnv::default(),
             Some(tmp.path().join("data")),
             antigravity_hook_args("session-start", &base),
             serde_json::json!({
@@ -2438,6 +2510,7 @@ mod tests {
         let (base, mut requests) = serve_requests("200 OK", "MUST-NOT-BE-CONSUMED").await;
         let mut stdout = Vec::new();
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir.clone()),
             antigravity_hook_args("session-start", &base),
             serde_json::json!({
@@ -2464,6 +2537,7 @@ mod tests {
         let (base, mut requests) = serve_requests("200 OK", "KIRO-HANDOFF").await;
         let mut stdout = Vec::new();
         run_with_payload(
+            &HostEnv::default(),
             Some(tmp.path().join("data")),
             kiro_hook_args("session-start", &base),
             serde_json::json!({
@@ -2498,6 +2572,7 @@ mod tests {
         let (base, mut requests) = serve_requests("200 OK", "AMWS-HANDOFF-DELTA").await;
         let mut stdout = Vec::new();
         run_with_payload(
+            &HostEnv::default(),
             Some(tmp.path().to_path_buf()),
             kimi_hook_args("user-prompt", &base),
             serde_json::json!({
@@ -2533,6 +2608,7 @@ mod tests {
         let (base, mut requests) = serve_requests("200 OK", "AMWS-HANDOFF-DELTA").await;
         let mut stdout = Vec::new();
         run_with_payload(
+            &HostEnv::default(),
             Some(tmp.path().to_path_buf()),
             kimi_hook_args("user-prompt-submit", &base),
             serde_json::json!({"sessionId": "session_abc", "cwd": tmp.path(), "prompt": "hi"})
@@ -2550,6 +2626,7 @@ mod tests {
         let (base, mut requests) = serve_requests("404 Not Found", "").await;
         let mut stdout = Vec::new();
         run_with_payload(
+            &HostEnv::default(),
             Some(tmp.path().to_path_buf()),
             kimi_hook_args("user-prompt-submit", &base),
             serde_json::json!({"sessionId": "session_abc", "cwd": tmp.path(), "prompt": "hi"})
@@ -2570,6 +2647,7 @@ mod tests {
         let (base, mut requests) = serve_requests("404 Not Found", "").await;
         let mut stdout = Vec::new();
         run_with_payload(
+            &HostEnv::default(),
             Some(tmp.path().to_path_buf()),
             kimi_hook_args("user-prompt", &base),
             serde_json::json!({"sessionId": "session_abc", "cwd": tmp.path(), "prompt": "hi"})
@@ -2597,6 +2675,7 @@ mod tests {
         let (base, mut requests) = serve_requests("200 OK", "AMWS-HANDOFF-DELTA").await;
         let mut stdout = Vec::new();
         run_with_payload(
+            &HostEnv::default(),
             Some(tmp.path().to_path_buf()),
             kimi_hook_args("session-start", &base),
             serde_json::json!({"sessionId": "session_abc", "cwd": tmp.path()}).to_string(),
@@ -2622,6 +2701,7 @@ mod tests {
         args.agent = "claude-code".into();
         let mut stdout = Vec::new();
         run_with_payload(
+            &HostEnv::default(),
             Some(tmp.path().to_path_buf()),
             args,
             serde_json::json!({"session_id": "claude-session", "cwd": tmp.path()}).to_string(),
@@ -2667,6 +2747,7 @@ mod tests {
         // on SessionStart — that hook's stdout is discarded).
         let mut stdout = Vec::new();
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir.clone()),
             kimi_hook_args("user-prompt-submit", &base),
             payload.clone(),
@@ -2688,6 +2769,7 @@ mod tests {
         // does not recompose the brief on every prompt.
         let mut stdout = Vec::new();
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir.clone()),
             kimi_hook_args("user-prompt-submit", &base),
             payload,
@@ -2720,6 +2802,7 @@ mod tests {
 
         let mut stdout = Vec::new();
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir.clone()),
             kimi_hook_args("user-prompt", &base),
             payload.clone(),
@@ -2739,6 +2822,7 @@ mod tests {
 
         let mut stdout = Vec::new();
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir.clone()),
             kimi_hook_args("user-prompt", &base),
             payload,
@@ -2763,6 +2847,7 @@ mod tests {
 
         let mut stdout = Vec::new();
         run_with_payload(
+            &HostEnv::default(),
             Some(data_dir.clone()),
             kimi_hook_args("user-prompt-submit", &base),
             serde_json::json!({
