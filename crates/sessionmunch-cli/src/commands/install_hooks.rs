@@ -27,10 +27,10 @@ use crate::commands::openclaw_plugin;
 use crate::commands::path_util::home_dir;
 use crate::commands::render_shared::{
     ANTIGRAVITY_LIFECYCLE_EVENTS, ANTIGRAVITY_TOOL_EVENTS, CODEX_PROFILE, COMMAND_CODE_PROFILE,
-    CURSOR_PROFILE, GEMINI_PROFILE, KIMI_CODE_EVENTS, KIRO_CLI_V2_EVENTS, KIRO_CLI_V3_EVENTS,
-    POOL_EVENTS, build_antigravity_payload_with_data_dir, build_claude_code_payload_with_data_dir,
-    build_devin_payload_with_data_dir, build_grok_payload_with_data_dir,
-    build_kiro_cli_v2_hooks_value, build_kiro_cli_v3_hooks_value,
+    CURSOR_PROFILE, GEMINI_PROFILE, HookProfile, KIMI_CODE_EVENTS, KIRO_CLI_V2_EVENTS,
+    KIRO_CLI_V3_EVENTS, POOL_EVENTS, build_antigravity_payload_with_data_dir,
+    build_claude_code_payload_with_data_dir, build_devin_payload_with_data_dir,
+    build_grok_payload_with_data_dir, build_kiro_cli_v2_hooks_value, build_kiro_cli_v3_hooks_value,
     build_pool_settings_yaml_with_data_dir, build_profile_payload_for_agent,
     hook_script_for_claude_code, hook_script_for_current_platform, kimi_code_hook_commands,
     local_hook_policy_v1_supported, ts_capture_policy_v1, ts_string_literal,
@@ -447,103 +447,58 @@ pub fn run(config: &Config, mut args: InstallHooksArgs) -> Result<()> {
         // into `args` here means every downstream renderer picks it up with no
         // per-agent plumbing.
         args.project_strategy = install_project_strategy(&args);
+        let hooks_dir =
+            || resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir);
+        let json_hooks = |target: &JsonHookTarget| {
+            apply_json_hooks(
+                target,
+                &hooks_dir()?,
+                &server_url,
+                auth,
+                &config.data_dir,
+                &args,
+            )
+        };
+        let generated_file = |target: &GeneratedFileTarget| {
+            apply_generated_file(target, &server_url, auth, &args, &capture_mode)
+        };
         return match args.agent {
-            AgentChoice::OpenCode => {
-                apply_to_opencode_plugin(&server_url, auth, &args, &capture_mode)
-            }
-            AgentChoice::OpenCode2 => {
-                apply_to_opencode2_plugin(&server_url, auth, &args, &capture_mode)
-            }
-            AgentChoice::Pi => apply_to_pi_extension(&server_url, auth, &args, &capture_mode),
-            AgentChoice::Omp => apply_to_omp_extension(&server_url, auth, &args, &capture_mode),
-            AgentChoice::ClaudeCode => {
-                let hooks_dir =
-                    resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
-                apply_to_claude_code_settings(
-                    &hooks_dir,
-                    &server_url,
-                    auth,
-                    &config.data_dir,
-                    &args,
-                )
-            }
-            AgentChoice::Codex => {
-                let hooks_dir =
-                    resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
-                apply_to_codex_settings(&hooks_dir, &server_url, auth, &config.data_dir, &args)
-            }
-            AgentChoice::CommandCode => {
-                let hooks_dir =
-                    resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
-                apply_to_command_code_settings(
-                    &hooks_dir,
-                    &server_url,
-                    auth,
-                    &config.data_dir,
-                    &args,
-                )
-            }
-            AgentChoice::Cursor => {
-                let hooks_dir =
-                    resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
-                apply_to_cursor_settings(&hooks_dir, &server_url, auth, &config.data_dir, &args)
-            }
-            AgentChoice::GeminiCli => {
-                let hooks_dir =
-                    resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
-                apply_to_gemini_settings(&hooks_dir, &server_url, auth, &config.data_dir, &args)
-            }
-            AgentChoice::AntigravityCli => {
-                let hooks_dir =
-                    resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
-                apply_to_antigravity_settings(
-                    &hooks_dir,
-                    &server_url,
-                    auth,
-                    &config.data_dir,
-                    &args,
-                )
-            }
-            AgentChoice::Grok => {
-                let hooks_dir =
-                    resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
-                apply_to_grok_settings(&hooks_dir, &server_url, auth, &config.data_dir, &args)
-            }
+            AgentChoice::OpenCode => generated_file(&OPENCODE_PLUGIN),
+            AgentChoice::OpenCode2 => generated_file(&OPENCODE2_PLUGIN),
+            AgentChoice::Pi => generated_file(&PI_EXTENSION),
+            AgentChoice::Omp => generated_file(&OMP_EXTENSION),
+            AgentChoice::ClaudeCode => json_hooks(&CLAUDE_CODE_HOOKS),
+            AgentChoice::Codex => json_hooks(&CODEX_HOOKS),
+            AgentChoice::CommandCode => json_hooks(&COMMAND_CODE_HOOKS),
+            AgentChoice::Cursor => json_hooks(&CURSOR_HOOKS),
+            AgentChoice::GeminiCli => json_hooks(&GEMINI_HOOKS),
+            AgentChoice::AntigravityCli => json_hooks(&ANTIGRAVITY_HOOKS),
+            AgentChoice::Grok => json_hooks(&GROK_HOOKS),
+            AgentChoice::Devin => json_hooks(&DEVIN_HOOKS),
             AgentChoice::Zero => apply_to_zero_hooks(&server_url, auth, &config.data_dir, &args),
             AgentChoice::Zcode => apply_to_zcode_hooks(&server_url, auth, &config.data_dir, &args),
-            AgentChoice::Devin => {
-                let hooks_dir =
-                    resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
-                apply_to_devin_settings(&hooks_dir, &server_url, auth, &config.data_dir, &args)
-            }
             AgentChoice::Openclaw => {
                 openclaw_plugin::apply(&server_url, auth, &args, &capture_mode)
             }
             AgentChoice::KimiCode => {
-                let hooks_dir =
-                    resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
-                apply_to_kimi_code_config(&hooks_dir, &server_url, auth, &config.data_dir, &args)
+                apply_to_kimi_code_config(&hooks_dir()?, &server_url, auth, &config.data_dir, &args)
             }
-            AgentChoice::KiroCli => {
-                let hooks_dir =
-                    resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
-                apply_to_kiro_cli_agent_configs(
-                    &hooks_dir,
-                    &server_url,
-                    auth,
-                    &config.data_dir,
-                    &args,
-                )
-            }
-            AgentChoice::KiroCliV3 => {
-                let hooks_dir =
-                    resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
-                apply_to_kiro_cli_v3_hooks(&hooks_dir, &server_url, auth, &config.data_dir, &args)
-            }
+            AgentChoice::KiroCli => apply_to_kiro_cli_agent_configs(
+                &hooks_dir()?,
+                &server_url,
+                auth,
+                &config.data_dir,
+                &args,
+            ),
+            AgentChoice::KiroCliV3 => apply_to_kiro_cli_v3_hooks(
+                &hooks_dir()?,
+                &server_url,
+                auth,
+                &config.data_dir,
+                &args,
+            ),
             AgentChoice::Pool => {
-                let hooks_dir =
-                    resolve_hooks_dir(args.hooks_dir.as_deref(), args.agent, &config.data_dir)?;
-                apply_to_pool(&hooks_dir, &server_url, auth, &config.data_dir, &args)
+                apply_to_pool(&hooks_dir()?, &server_url, auth, &config.data_dir, &args)
             }
         };
     }
@@ -1472,9 +1427,6 @@ fn overlay_kiro_cli_event_hooks(
     map.insert(event.to_string(), serde_json::Value::Array(entries));
 }
 
-/// Mutate `~/.claude/settings.json` in place: replace the hook entries
-/// sessionmunch cares about (`CLAUDE_CODE_EVENTS`); preserve every other hook the
-/// user has wired up to other tools.
 /// Whether `--capture-assistant` may take effect for this agent + platform
 /// (#196): Claude Code on a native hook platform only. Any other agent or a
 /// script-fallback platform cannot honor the opt-in, so the installer bails
@@ -1501,363 +1453,143 @@ fn configure_claude_prompt_capture(
     payload
 }
 
-fn apply_to_claude_code_settings(
-    hooks_dir: &Path,
-    server_url: &str,
-    auth_token: Option<&str>,
-    data_dir: &Path,
-    args: &InstallHooksArgs,
-) -> Result<()> {
-    let staged = stage_hook_scripts(hooks_dir, "claude-code", data_dir)?;
-    apply_to_claude_code_settings_with_staged(&staged, server_url, auth_token, data_dir, args)
+/// A harness whose hook config is a JSON document holding an object of
+/// per-event hook arrays, wired to scripts staged under
+/// `<data_dir>/hooks/<label>`. Each entry below states only what differs
+/// between harnesses; [`apply_json_hooks`] runs the install they share:
+/// stage the scripts, render our entries, overlay them onto the existing
+/// file (dropping prior sessionmunch entries, keeping everyone else's),
+/// and report the outcome.
+struct JsonHookTarget {
+    /// Staging subdirectory, and the agent name profile payloads carry.
+    label: &'static str,
+    /// Where the config lives when `--config-file` is not given.
+    default_path: fn() -> Result<PathBuf>,
+    /// Stage the scripts before resolving the config path rather than
+    /// after. Each installer keeps the order it has always had; the two
+    /// differ only when the default path cannot be resolved (no `$HOME`),
+    /// where this order has already staged the scripts before failing.
+    stage_before_path: bool,
+    payload: HookPayload,
+    table: HookTable,
+    /// The file named in the "`<key>` is present but not an object" error.
+    config_name: &'static str,
+    /// Top-level `version` written unconditionally, for schemas that are
+    /// versioned at the root.
+    schema_version: Option<u64>,
+    /// Harness-specific guidance printed after the outcome line.
+    after_report: Option<fn(ApplyOutcome)>,
 }
 
-#[cfg(test)]
-fn apply_to_claude_code_settings_in(
-    hooks_dir: &Path,
-    server_url: &str,
-    auth_token: Option<&str>,
-    data_dir: &Path,
-    staging_data_local: &Path,
-    args: &InstallHooksArgs,
-) -> Result<()> {
-    let staged = stage_hook_scripts_in(hooks_dir, "claude-code", staging_data_local)?;
-    let command_dir = staged_command_dir(&staged, "claude-code");
-    let capture_prompts = install_claude_prompt_capture(args);
-    let payload = configure_claude_prompt_capture(
-        crate::commands::render_shared::build_claude_code_script_payload_for_test(
-            &command_dir,
-            server_url,
-            auth_token,
-            Some(data_dir),
-            args.project_strategy.and_then(ProjectStrategyArg::baked),
-            args.capture_assistant,
-        ),
-        capture_prompts,
-    );
-    apply_to_claude_code_settings_with_payload(payload, args, capture_prompts)
+/// How a [`JsonHookTarget`] renders sessionmunch's entries.
+enum HookPayload {
+    /// Claude Code's payload, which also honours `--capture-assistant` and
+    /// the prompt-capture opt-out.
+    ClaudeCode,
+    /// A shared [`HookProfile`], rendered under the target's label.
+    Profile(&'static HookProfile),
+    /// A dedicated builder whose payload keeps the events under `key`.
+    Builder {
+        build: HookPayloadBuilder,
+        key: &'static str,
+    },
 }
 
-fn apply_to_claude_code_settings_with_staged(
-    staged: &Path,
-    server_url: &str,
-    auth_token: Option<&str>,
-    data_dir: &Path,
-    args: &InstallHooksArgs,
-) -> Result<()> {
-    let command_dir = staged_command_dir(staged, "claude-code");
-    let capture_prompts = install_claude_prompt_capture(args);
-    let payload = configure_claude_prompt_capture(
-        build_claude_code_payload_with_data_dir(
-            &command_dir,
-            server_url,
-            auth_token,
-            Some(data_dir),
-            args.project_strategy.and_then(ProjectStrategyArg::baked),
-            args.capture_assistant,
-        ),
-        capture_prompts,
-    );
-    apply_to_claude_code_settings_with_payload(payload, args, capture_prompts)
+/// `build_*_payload_with_data_dir(command_dir, server_url, auth_token,
+/// data_dir, project_strategy)`.
+type HookPayloadBuilder =
+    fn(&Path, &str, Option<&str>, Option<&Path>, Option<&str>) -> serde_json::Value;
+
+/// Where in the config document the per-event arrays live.
+enum HookTable {
+    /// Under this top-level key, created when absent.
+    Key(&'static str),
+    /// Devin: a file with this name is itself the event object; any other
+    /// file (`config.json`) keeps the events under `hooks`.
+    RootWhenNamed(&'static str),
 }
 
-fn apply_to_claude_code_settings_with_payload(
-    payload: serde_json::Value,
-    args: &InstallHooksArgs,
-    capture_prompts: bool,
-) -> Result<()> {
-    let path = match &args.config_file {
-        Some(p) => p.clone(),
-        None => claude_settings_path()?,
-    };
-    let our_hooks = payload
-        .get("hooks")
-        .and_then(|v| v.as_object())
-        .context("internal: build_claude_code_payload didn't return a hooks object")?
-        .clone();
-    let outcome = apply_atomic(&path, |existing| {
-        mutate_json(existing, |root| {
-            // Get-or-create the top-level `hooks` table, then merge our
-            // event keys in via `overlay_event_hooks`: our entries replace
-            // any prior sessionmunch entries, while hooks the user (or another
-            // tool) wired under the same event — or under a non-overlapping
-            // event name (e.g. a hand-written "Notification" hook) — survive.
-            let hooks = root
-                .entry("hooks")
-                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
-                .as_object_mut()
-                .context("`hooks` is present in settings.json but not an object")?;
-            for (event, value) in &our_hooks {
-                overlay_event_hooks(hooks, event, value);
-            }
-            if !capture_prompts {
-                remove_sessionmunch_event_hooks(hooks, CLAUDE_PROMPT_EVENT);
-            }
-            Ok(())
-        })
-    })?;
-    println!(
-        "✓ {} {} ({})",
-        outcome.verb(),
-        path.display(),
-        match outcome {
-            ApplyOutcome::Created => "new file",
-            ApplyOutcome::Updated => "backup written next to it",
-            ApplyOutcome::NoOp => "already up to date",
-        }
-    );
-    Ok(())
+/// sessionmunch's side of one JSON hook install.
+struct JsonHookPayload {
+    /// Our entries per event, overlaid onto the user's for that event.
+    events: serde_json::Map<String, serde_json::Value>,
+    /// Events we register nothing under this run, whose earlier
+    /// sessionmunch entries are withdrawn (and the key dropped once empty).
+    withdrawn: &'static [&'static str],
 }
 
-/// Mutate `~/.grok/hooks/sessionmunch.json` so Grok Build CLI fires the sessionmunch
-/// lifecycle hooks. Grok's hook config is structurally identical to Claude
-/// Code's nested hook JSON and uses the same CamelCase event names, but
-/// its script bundle carries `agent=grok` and skips destructive SessionStart
-/// handoff fetches. We merge into a dedicated `sessionmunch.json` (Grok discovers
-/// every `~/.grok/hooks/*.json`), so a pre-existing third-party hook file is
-/// left untouched.
-fn apply_to_grok_settings(
-    hooks_dir: &Path,
-    server_url: &str,
-    auth_token: Option<&str>,
-    data_dir: &Path,
-    args: &InstallHooksArgs,
-) -> Result<()> {
-    let path = match &args.config_file {
-        Some(p) => p.clone(),
-        None => grok_hooks_path()?,
-    };
-    let staged = stage_hook_scripts(hooks_dir, "grok", data_dir)?;
-    let command_dir = staged_command_dir(&staged, "grok");
-    let strategy = args.project_strategy.and_then(ProjectStrategyArg::baked);
-    let payload = build_grok_payload_with_data_dir(
-        &command_dir,
-        server_url,
-        auth_token,
-        Some(data_dir),
-        strategy,
-    );
-    let our_hooks = payload
-        .get("hooks")
-        .and_then(|v| v.as_object())
-        .context("internal: build_grok_payload didn't return a hooks object")?
-        .clone();
-    let outcome = apply_atomic(&path, |existing| {
-        mutate_json(existing, |root| {
-            let hooks = root
-                .entry("hooks")
-                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
-                .as_object_mut()
-                .context("`hooks` is present in sessionmunch.json but not an object")?;
-            for (event, value) in &our_hooks {
-                overlay_event_hooks(hooks, event, value);
-            }
-            Ok(())
-        })
-    })?;
-    println!(
-        "✓ {} {} ({})",
-        outcome.verb(),
-        path.display(),
-        match outcome {
-            ApplyOutcome::Created => "new file",
-            ApplyOutcome::Updated => "backup written next to it",
-            ApplyOutcome::NoOp => "already up to date",
-        }
-    );
-    Ok(())
-}
+/// `~/.claude/settings.json`: replace the hook entries sessionmunch cares
+/// about (`CLAUDE_CODE_EVENTS`); preserve every other hook the user has
+/// wired up to other tools — under the same event, or under an event
+/// name we never write (e.g. a hand-written `Notification` hook).
+static CLAUDE_CODE_HOOKS: JsonHookTarget = JsonHookTarget {
+    label: "claude-code",
+    default_path: claude_settings_path,
+    stage_before_path: true,
+    payload: HookPayload::ClaudeCode,
+    table: HookTable::Key("hooks"),
+    config_name: "settings.json",
+    schema_version: None,
+    after_report: None,
+};
 
-/// Mutate Devin's hook config (either `~/.devin/hooks.v1.json` or `~/.devin/config.json` hooks key).
-/// Devin uses the same nested hook JSON shape as Claude Code/Grok, but with DEVIN_EVENTS
-/// (PostCompaction instead of PreCompact, no subagent events). SessionStart injects
-/// the handoff via hookSpecificOutput.additionalContext.
-fn apply_to_devin_settings(
-    hooks_dir: &Path,
-    server_url: &str,
-    auth_token: Option<&str>,
-    data_dir: &Path,
-    args: &InstallHooksArgs,
-) -> Result<()> {
-    let staged = stage_hook_scripts(hooks_dir, "devin", data_dir)?;
-    apply_to_devin_settings_with_staged(&staged, server_url, auth_token, data_dir, args)
-}
+/// `~/.grok/hooks/sessionmunch.json`. Grok's hook config is structurally
+/// identical to Claude Code's nested hook JSON and uses the same CamelCase
+/// event names, but its script bundle carries `agent=grok` and skips
+/// destructive SessionStart handoff fetches. We merge into a dedicated
+/// `sessionmunch.json` (Grok discovers every `~/.grok/hooks/*.json`), so a
+/// pre-existing third-party hook file is left untouched.
+static GROK_HOOKS: JsonHookTarget = JsonHookTarget {
+    label: "grok",
+    default_path: grok_hooks_path,
+    stage_before_path: false,
+    payload: HookPayload::Builder {
+        build: build_grok_payload_with_data_dir,
+        key: "hooks",
+    },
+    table: HookTable::Key("hooks"),
+    config_name: "sessionmunch.json",
+    schema_version: None,
+    after_report: None,
+};
 
-#[cfg(test)]
-fn apply_to_devin_settings_in(
-    hooks_dir: &Path,
-    server_url: &str,
-    auth_token: Option<&str>,
-    data_dir: &Path,
-    staging_data_local: &Path,
-    args: &InstallHooksArgs,
-) -> Result<()> {
-    let staged = stage_hook_scripts_in(hooks_dir, "devin", staging_data_local)?;
-    apply_to_devin_settings_with_staged(&staged, server_url, auth_token, data_dir, args)
-}
+/// Devin's hook config: either `~/.devin/hooks.v1.json` (the whole file is
+/// the hooks object) or the `hooks` key of `~/.devin/config.json`. Devin
+/// uses the same nested hook JSON shape as Claude Code/Grok, but with
+/// DEVIN_EVENTS (PostCompaction instead of PreCompact, no subagent
+/// events). SessionStart injects the handoff via
+/// hookSpecificOutput.additionalContext.
+static DEVIN_HOOKS: JsonHookTarget = JsonHookTarget {
+    label: "devin",
+    default_path: devin_hooks_path,
+    stage_before_path: true,
+    payload: HookPayload::Builder {
+        build: build_devin_payload_with_data_dir,
+        key: "hooks",
+    },
+    table: HookTable::RootWhenNamed("hooks.v1.json"),
+    config_name: "config.json",
+    schema_version: None,
+    after_report: None,
+};
 
-fn apply_to_devin_settings_with_staged(
-    staged: &Path,
-    server_url: &str,
-    auth_token: Option<&str>,
-    data_dir: &Path,
-    args: &InstallHooksArgs,
-) -> Result<()> {
-    let path = match &args.config_file {
-        Some(p) => p.clone(),
-        None => devin_hooks_path()?,
-    };
-    let command_dir = staged_command_dir(staged, "devin");
-    let strategy = args.project_strategy.and_then(ProjectStrategyArg::baked);
-    let payload = build_devin_payload_with_data_dir(
-        &command_dir,
-        server_url,
-        auth_token,
-        Some(data_dir),
-        strategy,
-    );
-    let our_hooks = payload
-        .get("hooks")
-        .and_then(|v| v.as_object())
-        .context("internal: build_devin_payload didn't return a hooks object")?
-        .clone();
-    let outcome = apply_atomic(&path, |existing| {
-        // For hooks.v1.json, the entire file IS the hooks object
-        // For config.json hooks key, we merge into the hooks object
-        if path.file_name() == Some("hooks.v1.json".as_ref()) {
-            mutate_json(existing, |root| {
-                for (event, value) in &our_hooks {
-                    overlay_event_hooks(root, event, value);
-                }
-                Ok(())
-            })
-        } else {
-            mutate_json(existing, |root| {
-                let hooks = root
-                    .entry("hooks")
-                    .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
-                    .as_object_mut()
-                    .context("`hooks` is present in config.json but not an object")?;
-                for (event, value) in &our_hooks {
-                    overlay_event_hooks(hooks, event, value);
-                }
-                Ok(())
-            })
-        }
-    })?;
-    println!(
-        "✓ {} {} ({})",
-        outcome.verb(),
-        path.display(),
-        match outcome {
-            ApplyOutcome::Created => "new file",
-            ApplyOutcome::Updated => "backup written next to it",
-            ApplyOutcome::NoOp => "already up to date",
-        }
-    );
-    Ok(())
-}
+/// `~/.commandcode/settings.json`, the stable four-event lifecycle
+/// integration. Command Code's schema requires the outer `matcher` to be
+/// omitted for SessionStart and Stop, so its profile must not reuse the
+/// otherwise similar Claude/Codex payload byte-for-byte.
+static COMMAND_CODE_HOOKS: JsonHookTarget = JsonHookTarget {
+    label: "command-code",
+    default_path: command_code_settings_path,
+    stage_before_path: true,
+    payload: HookPayload::Profile(&COMMAND_CODE_PROFILE),
+    table: HookTable::Key("hooks"),
+    config_name: "settings.json",
+    schema_version: None,
+    after_report: None,
+};
 
-/// Mutate `~/.commandcode/settings.json` so Command Code fires the stable
-/// four-event lifecycle integration. Command Code's schema requires the outer
-/// `matcher` to be omitted for SessionStart and Stop, so its profile must not
-/// reuse the otherwise similar Claude/Codex payload byte-for-byte.
-fn apply_to_command_code_settings(
-    hooks_dir: &Path,
-    server_url: &str,
-    auth_token: Option<&str>,
-    data_dir: &Path,
-    args: &InstallHooksArgs,
-) -> Result<()> {
-    let staged = stage_hook_scripts(hooks_dir, "command-code", data_dir)?;
-    apply_to_command_code_settings_with_staged(&staged, server_url, auth_token, data_dir, args)
-}
-
-#[cfg(test)]
-fn apply_to_command_code_settings_in(
-    hooks_dir: &Path,
-    server_url: &str,
-    auth_token: Option<&str>,
-    data_dir: &Path,
-    staging_data_local: &Path,
-    args: &InstallHooksArgs,
-) -> Result<()> {
-    let staged = stage_hook_scripts_in(hooks_dir, "command-code", staging_data_local)?;
-    let command_dir = staged_command_dir(&staged, "command-code");
-    let payload = crate::commands::render_shared::build_profile_script_payload_for_test(
-        &COMMAND_CODE_PROFILE,
-        &command_dir,
-        server_url,
-        auth_token,
-        "command-code",
-        Some(data_dir),
-        args.project_strategy.and_then(ProjectStrategyArg::baked),
-    );
-    apply_to_command_code_settings_with_payload(payload, args)
-}
-
-fn apply_to_command_code_settings_with_staged(
-    staged: &Path,
-    server_url: &str,
-    auth_token: Option<&str>,
-    data_dir: &Path,
-    args: &InstallHooksArgs,
-) -> Result<()> {
-    let command_dir = staged_command_dir(staged, "command-code");
-    let payload = build_profile_payload_for_agent(
-        &COMMAND_CODE_PROFILE,
-        &command_dir,
-        server_url,
-        auth_token,
-        "command-code",
-        Some(data_dir),
-        args.project_strategy.and_then(ProjectStrategyArg::baked),
-    );
-    apply_to_command_code_settings_with_payload(payload, args)
-}
-
-fn apply_to_command_code_settings_with_payload(
-    payload: serde_json::Value,
-    args: &InstallHooksArgs,
-) -> Result<()> {
-    let path = match &args.config_file {
-        Some(path) => path.clone(),
-        None => command_code_settings_path()?,
-    };
-    let our_hooks = payload
-        .get("hooks")
-        .and_then(serde_json::Value::as_object)
-        .context("internal: Command Code payload did not return a hooks object")?
-        .clone();
-    let outcome = apply_atomic(&path, |existing| {
-        mutate_json(existing, |root| {
-            let hooks = root
-                .entry("hooks")
-                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
-                .as_object_mut()
-                .context("`hooks` is present in settings.json but not an object")?;
-            for (event, value) in &our_hooks {
-                overlay_event_hooks(hooks, event, value);
-            }
-            Ok(())
-        })
-    })?;
-    println!(
-        "✓ {} {} ({})",
-        outcome.verb(),
-        path.display(),
-        match outcome {
-            ApplyOutcome::Created => "new file",
-            ApplyOutcome::Updated => "backup written next to it",
-            ApplyOutcome::NoOp => "already up to date",
-        }
-    );
-    Ok(())
-}
-
-/// Mutate `~/.codex/hooks.json` (creating it if absent) so Codex's
-/// lifecycle hook runner fires the sessionmunch scripts on every
-/// session/prompt/tool event.
+/// `~/.codex/hooks.json`, so Codex's lifecycle hook runner fires the
+/// sessionmunch scripts on every session/prompt/tool event.
 ///
 /// Codex's hook config is structurally identical to Claude Code's
 /// (verified against `openai/codex/codex-rs/config/src/hooks_tests.rs`):
@@ -1870,6 +1602,7 @@ fn apply_to_command_code_settings_with_payload(
 ///       ], ...
 ///   } }
 ///
+/// The event list differs only by the Claude-Code-only subagent events.
 /// Codex looks for hooks in `~/.codex/hooks.json` by default (or
 /// wherever `hooks = "./relative-path.json"` in config.toml points).
 /// We write the standalone file and don't touch config.toml — Codex
@@ -1878,82 +1611,20 @@ fn apply_to_command_code_settings_with_payload(
 /// Trust note: Codex refuses to RUN new hooks until the user accepts
 /// them in the TUI ("Trust all and continue") or sets
 /// `--dangerously-bypass-hook-trust`. We print a reminder.
-fn apply_to_codex_settings(
-    hooks_dir: &Path,
-    server_url: &str,
-    auth_token: Option<&str>,
-    data_dir: &Path,
-    args: &InstallHooksArgs,
-) -> Result<()> {
-    let staged = stage_hook_scripts(hooks_dir, "codex", data_dir)?;
-    apply_to_codex_settings_with_staged(&staged, server_url, auth_token, data_dir, args)
-}
+static CODEX_HOOKS: JsonHookTarget = JsonHookTarget {
+    label: "codex",
+    default_path: codex_hooks_path,
+    stage_before_path: true,
+    payload: HookPayload::Profile(&CODEX_PROFILE),
+    table: HookTable::Key("hooks"),
+    config_name: "hooks.json",
+    schema_version: None,
+    after_report: Some(print_codex_trust_reminder),
+};
 
-#[cfg(test)]
-fn apply_to_codex_settings_in(
-    hooks_dir: &Path,
-    server_url: &str,
-    auth_token: Option<&str>,
-    data_dir: &Path,
-    staging_data_local: &Path,
-    args: &InstallHooksArgs,
-) -> Result<()> {
-    let staged = stage_hook_scripts_in(hooks_dir, "codex", staging_data_local)?;
-    let command_dir = staged_command_dir(&staged, "codex");
-    let payload = crate::commands::render_shared::build_profile_script_payload_for_test(
-        &super::render_shared::CODEX_PROFILE,
-        &command_dir,
-        server_url,
-        auth_token,
-        "codex",
-        Some(data_dir),
-        args.project_strategy.and_then(ProjectStrategyArg::baked),
-    );
-    apply_to_codex_settings_with_payload(payload, args)
-}
-
-fn apply_to_codex_settings_with_staged(
-    staged: &Path,
-    server_url: &str,
-    auth_token: Option<&str>,
-    data_dir: &Path,
-    args: &InstallHooksArgs,
-) -> Result<()> {
-    let command_dir = staged_command_dir(staged, "codex");
-    let payload = build_profile_payload_for_agent(
-        &super::render_shared::CODEX_PROFILE,
-        &command_dir,
-        server_url,
-        auth_token,
-        "codex",
-        Some(data_dir),
-        args.project_strategy.and_then(ProjectStrategyArg::baked),
-    );
-    apply_to_codex_settings_with_payload(payload, args)
-}
-
-fn apply_to_codex_settings_with_payload(
-    payload: serde_json::Value,
-    args: &InstallHooksArgs,
-) -> Result<()> {
-    let path = match &args.config_file {
-        Some(p) => p.clone(),
-        None => codex_hooks_path()?,
-    };
-    let outcome = merge_codex_payload(payload, &path)?;
-    println!(
-        "✓ {} {} ({})",
-        outcome.verb(),
-        path.display(),
-        match outcome {
-            ApplyOutcome::Created => "new file",
-            ApplyOutcome::Updated => "backup written next to it",
-            ApplyOutcome::NoOp => "already up to date",
-        }
-    );
-    // First-time trust reminder. Codex's TUI flags new/changed
-    // hooks on startup; users must explicitly trust them before
-    // they fire.
+/// First-time trust reminder. Codex's TUI flags new/changed hooks on
+/// startup; users must explicitly trust them before they fire.
+fn print_codex_trust_reminder(outcome: ApplyOutcome) {
     if !matches!(outcome, ApplyOutcome::NoOp) {
         println!();
         println!("Codex requires explicit trust for new hooks. Next time you start `codex`:");
@@ -1962,59 +1633,11 @@ fn apply_to_codex_settings_with_payload(
         println!("To bypass the prompt for automated installs, start with");
         println!("`codex --dangerously-bypass-hook-trust` (review hook scripts first).");
     }
-    Ok(())
 }
 
-#[cfg(test)]
-fn merge_codex_hooks(
-    staged: &Path,
-    server_url: &str,
-    auth_token: Option<&str>,
-    data_dir: &Path,
-    project_strategy: Option<&str>,
-    config_path: &Path,
-) -> Result<ApplyOutcome> {
-    // Build the Codex-flavoured payload. The JSON shape is identical
-    // to Claude Code's matcher + nested hooks form — the event list
-    // differs only by the Claude-Code-only subagent events.
-    let payload = build_profile_payload_for_agent(
-        &super::render_shared::CODEX_PROFILE,
-        staged,
-        server_url,
-        auth_token,
-        "codex",
-        Some(data_dir),
-        project_strategy,
-    );
-    merge_codex_payload(payload, config_path)
-}
-
-fn merge_codex_payload(payload: serde_json::Value, config_path: &Path) -> Result<ApplyOutcome> {
-    let our_hooks = payload
-        .get("hooks")
-        .and_then(|v| v.as_object())
-        .context("internal: payload builder didn't return a hooks object")?
-        .clone();
-    apply_atomic(config_path, |existing| {
-        mutate_json(existing, |root| {
-            let hooks = root
-                .entry("hooks")
-                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
-                .as_object_mut()
-                .context("`hooks` is present in hooks.json but not an object")?;
-            for (event, value) in &our_hooks {
-                overlay_event_hooks(hooks, event, value);
-            }
-            Ok(())
-        })
-    })
-}
-
-/// Mutate `~/.cursor/hooks.json` (creating it if absent) so Cursor's
-/// agent fires the sessionmunch scripts on lifecycle events.
-///
-/// Cursor's hook schema (per <https://cursor.com/docs/agent/hooks>) is
-/// *flatter* than Claude Code's / Codex's:
+/// `~/.cursor/hooks.json`. Cursor's hook schema (per
+/// <https://cursor.com/docs/agent/hooks>) is *flatter* than Claude Code's /
+/// Codex's:
 ///
 ///   { "version": 1,
 ///     "hooks": {
@@ -2025,89 +1648,23 @@ fn merge_codex_payload(payload: serde_json::Value, config_path: &Path) -> Result
 ///   }
 ///
 /// — no inner `hooks: [...]` array, camelCase event names, plus a
-/// required top-level `version: 1` key. We use `CURSOR_PROFILE`
-/// (HookShape::Flat) to produce the right payload, then merge into
-/// the existing file (preserving any non-overlapping events the
-/// user has wired up to other tools).
-fn apply_to_cursor_settings(
-    hooks_dir: &Path,
-    server_url: &str,
-    auth_token: Option<&str>,
-    data_dir: &Path,
-    args: &InstallHooksArgs,
-) -> Result<()> {
-    let path = match &args.config_file {
-        Some(p) => p.clone(),
-        None => cursor_hooks_path()?,
-    };
-    let staged = stage_hook_scripts(hooks_dir, "cursor", data_dir)?;
-    let command_dir = staged_command_dir(&staged, "cursor");
-    let strategy = args.project_strategy.and_then(ProjectStrategyArg::baked);
-    let outcome = merge_cursor_hooks(
-        &command_dir,
-        server_url,
-        auth_token,
-        data_dir,
-        strategy,
-        &path,
-    )?;
-    println!(
-        "✓ {} {} ({})",
-        outcome.verb(),
-        path.display(),
-        match outcome {
-            ApplyOutcome::Created => "new file",
-            ApplyOutcome::Updated => "backup written next to it",
-            ApplyOutcome::NoOp => "already up to date",
-        }
-    );
-    Ok(())
-}
+/// required top-level `version: 1` key. `CURSOR_PROFILE`
+/// (HookShape::Flat) produces the right payload. The version is
+/// overwritten unconditionally — the schema is versioned so future Cursor
+/// releases can bump this; we'll bump here too when that happens.
+static CURSOR_HOOKS: JsonHookTarget = JsonHookTarget {
+    label: "cursor",
+    default_path: cursor_hooks_path,
+    stage_before_path: false,
+    payload: HookPayload::Profile(&CURSOR_PROFILE),
+    table: HookTable::Key("hooks"),
+    config_name: "hooks.json",
+    schema_version: Some(1),
+    after_report: None,
+};
 
-fn merge_cursor_hooks(
-    staged: &Path,
-    server_url: &str,
-    auth_token: Option<&str>,
-    data_dir: &Path,
-    project_strategy: Option<&str>,
-    config_path: &Path,
-) -> Result<ApplyOutcome> {
-    let payload = build_profile_payload_for_agent(
-        &CURSOR_PROFILE,
-        staged,
-        server_url,
-        auth_token,
-        "cursor",
-        Some(data_dir),
-        project_strategy,
-    );
-    let our_hooks = payload
-        .get("hooks")
-        .and_then(|v| v.as_object())
-        .context("internal: payload builder didn't return a hooks object")?
-        .clone();
-    apply_atomic(config_path, |existing| {
-        mutate_json(existing, |root| {
-            // Cursor requires "version": 1 at the top level.
-            // Overwrite unconditionally — the schema is versioned
-            // so future Cursor releases can bump this; we'll bump
-            // here too when that happens.
-            root.insert("version".into(), serde_json::json!(1));
-            let hooks = root
-                .entry("hooks")
-                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
-                .as_object_mut()
-                .context("`hooks` is present in hooks.json but not an object")?;
-            for (event, value) in &our_hooks {
-                overlay_event_hooks(hooks, event, value);
-            }
-            Ok(())
-        })
-    })
-}
-
-/// Mutate `~/.gemini/settings.json` so Gemini CLI fires the sessionmunch
-/// scripts on its (Gemini-specific) lifecycle events.
+/// `~/.gemini/settings.json`, which mixes MCP servers, hooks, and other
+/// config under one document.
 ///
 /// Gemini's schema (per <https://geminicli.com/docs/hooks/reference>)
 /// is the same nested shape as Claude Code's (`matcher` +
@@ -2121,125 +1678,42 @@ fn merge_cursor_hooks(
 /// Like Claude Code, Gemini doesn't honour an `env` field at the
 /// inner-hook level, so the env vars get inlined into the command
 /// string by the shared payload builder.
-fn apply_to_gemini_settings(
-    hooks_dir: &Path,
-    server_url: &str,
-    auth_token: Option<&str>,
-    data_dir: &Path,
-    args: &InstallHooksArgs,
-) -> Result<()> {
-    let path = match &args.config_file {
-        Some(p) => p.clone(),
-        None => gemini_settings_path()?,
-    };
-    let staged = stage_hook_scripts(hooks_dir, "gemini-cli", data_dir)?;
-    let command_dir = staged_command_dir(&staged, "gemini-cli");
-    let strategy = args.project_strategy.and_then(ProjectStrategyArg::baked);
-    let outcome = merge_gemini_hooks(
-        &command_dir,
-        server_url,
-        auth_token,
-        data_dir,
-        strategy,
-        &path,
-    )?;
-    println!(
-        "✓ {} {} ({})",
-        outcome.verb(),
-        path.display(),
-        match outcome {
-            ApplyOutcome::Created => "new file",
-            ApplyOutcome::Updated => "backup written next to it",
-            ApplyOutcome::NoOp => "already up to date",
-        }
-    );
-    Ok(())
-}
+static GEMINI_HOOKS: JsonHookTarget = JsonHookTarget {
+    label: "gemini-cli",
+    default_path: gemini_settings_path,
+    stage_before_path: false,
+    payload: HookPayload::Profile(&GEMINI_PROFILE),
+    table: HookTable::Key("hooks"),
+    config_name: "settings.json",
+    schema_version: None,
+    after_report: None,
+};
 
-fn merge_gemini_hooks(
-    staged: &Path,
-    server_url: &str,
-    auth_token: Option<&str>,
-    data_dir: &Path,
-    project_strategy: Option<&str>,
-    config_path: &Path,
-) -> Result<ApplyOutcome> {
-    let payload = build_profile_payload_for_agent(
-        &GEMINI_PROFILE,
-        staged,
-        server_url,
-        auth_token,
-        "gemini-cli",
-        Some(data_dir),
-        project_strategy,
-    );
-    let our_hooks = payload
-        .get("hooks")
-        .and_then(|v| v.as_object())
-        .context("internal: payload builder didn't return a hooks object")?
-        .clone();
-    apply_atomic(config_path, |existing| {
-        mutate_json(existing, |root| {
-            // Gemini's settings.json mixes MCP servers, hooks, and
-            // other config under one document. Get-or-create the
-            // `hooks` table; overlay our events; preserve siblings.
-            let hooks = root
-                .entry("hooks")
-                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
-                .as_object_mut()
-                .context("`hooks` is present in settings.json but not an object")?;
-            for (event, value) in &our_hooks {
-                overlay_event_hooks(hooks, event, value);
-            }
-            Ok(())
-        })
-    })
-}
-
-/// Mutate `~/.gemini/config/hooks.json` so Antigravity CLI (`agy`)
-/// fires the sessionmunch scripts on its lifecycle events.
+/// `~/.gemini/config/hooks.json`, for Antigravity CLI (`agy`).
 ///
 /// Antigravity CLI uses a named-groups format where hook groups are
 /// top-level keys (e.g. `"sessionmunch"`) containing event arrays. Tool
 /// events (`PreToolUse`, `PostToolUse`) use nested shape with matcher;
-/// lifecycle events (`PreInvocation`, `Stop`) use flat shape.
-///
-/// Config file: `~/.gemini/config/hooks.json`
-fn apply_to_antigravity_settings(
-    hooks_dir: &Path,
-    server_url: &str,
-    auth_token: Option<&str>,
-    data_dir: &Path,
-    args: &InstallHooksArgs,
-) -> Result<()> {
-    let path = match &args.config_file {
-        Some(p) => p.clone(),
-        None => antigravity_hooks_path()?,
-    };
-    let staged = stage_hook_scripts(hooks_dir, "antigravity-cli", data_dir)?;
-    let command_dir = staged_command_dir(&staged, "antigravity-cli");
-    let strategy = args.project_strategy.and_then(ProjectStrategyArg::baked);
-    let outcome = merge_antigravity_hooks(
-        &command_dir,
-        server_url,
-        auth_token,
-        data_dir,
-        strategy,
-        &path,
-    )?;
-    println!(
-        "✓ {} {} ({})",
-        outcome.verb(),
-        path.display(),
-        match outcome {
-            ApplyOutcome::Created => "new file",
-            ApplyOutcome::Updated => "backup written next to it",
-            ApplyOutcome::NoOp => "already up to date",
-        }
-    );
+/// lifecycle events (`PreInvocation`, `Stop`) use flat shape. We
+/// get-or-create the `sessionmunch` group; other named groups survive
+/// untouched.
+static ANTIGRAVITY_HOOKS: JsonHookTarget = JsonHookTarget {
+    label: "antigravity-cli",
+    default_path: antigravity_hooks_path,
+    stage_before_path: false,
+    payload: HookPayload::Builder {
+        build: build_antigravity_payload_with_data_dir,
+        key: "sessionmunch",
+    },
+    table: HookTable::Key("sessionmunch"),
+    config_name: "hooks.json",
+    schema_version: None,
+    after_report: Some(print_antigravity_finalization_guidance),
+};
+
+fn print_antigravity_finalization_guidance(_outcome: ApplyOutcome) {
     println!();
     print!("{ANTIGRAVITY_FINALIZATION_GUIDANCE}");
-    Ok(())
 }
 
 const ANTIGRAVITY_FINALIZATION_GUIDANCE: &str = "\
@@ -2247,41 +1721,189 @@ Antigravity `Stop` ends one execution loop, not the conversation. After the\n\
 final turn, run `sessionmunch finalize-session --agent antigravity-cli` to create\n\
 the final summary and handoff and to queue opt-in SessionEnd consolidation.\n";
 
-fn merge_antigravity_hooks(
-    staged: &Path,
+fn apply_json_hooks(
+    target: &JsonHookTarget,
+    hooks_dir: &Path,
+    server_url: &str,
+    auth_token: Option<&str>,
+    data_dir: &Path,
+    args: &InstallHooksArgs,
+) -> Result<()> {
+    let path = if target.stage_before_path {
+        None
+    } else {
+        Some(apply_target_path(args, target.default_path)?)
+    };
+    let staged = stage_hook_scripts(hooks_dir, target.label, data_dir)?;
+    let payload = json_hook_payload(
+        target,
+        &staged_command_dir(&staged, target.label),
+        server_url,
+        auth_token,
+        data_dir,
+        args.project_strategy.and_then(ProjectStrategyArg::baked),
+        args,
+    )?;
+    write_json_hooks(target, &payload, path, args)
+}
+
+fn json_hook_payload(
+    target: &JsonHookTarget,
+    command_dir: &Path,
     server_url: &str,
     auth_token: Option<&str>,
     data_dir: &Path,
     project_strategy: Option<&str>,
+    args: &InstallHooksArgs,
+) -> Result<JsonHookPayload> {
+    let (payload, key, withdrawn): (_, _, &'static [&'static str]) = match target.payload {
+        HookPayload::ClaudeCode => {
+            let capture_prompts = install_claude_prompt_capture(args);
+            let payload = configure_claude_prompt_capture(
+                build_claude_code_payload_with_data_dir(
+                    command_dir,
+                    server_url,
+                    auth_token,
+                    Some(data_dir),
+                    project_strategy,
+                    args.capture_assistant,
+                ),
+                capture_prompts,
+            );
+            let withdrawn: &'static [&'static str] = if capture_prompts {
+                &[]
+            } else {
+                &[CLAUDE_PROMPT_EVENT]
+            };
+            (payload, "hooks", withdrawn)
+        }
+        HookPayload::Profile(profile) => (
+            build_profile_payload_for_agent(
+                profile,
+                command_dir,
+                server_url,
+                auth_token,
+                target.label,
+                Some(data_dir),
+                project_strategy,
+            ),
+            "hooks",
+            &[],
+        ),
+        HookPayload::Builder { build, key } => (
+            build(
+                command_dir,
+                server_url,
+                auth_token,
+                Some(data_dir),
+                project_strategy,
+            ),
+            key,
+            &[],
+        ),
+    };
+    Ok(JsonHookPayload {
+        events: json_hook_events(&payload, key, target.label)?,
+        withdrawn,
+    })
+}
+
+fn json_hook_events(
+    payload: &serde_json::Value,
+    key: &str,
+    label: &str,
+) -> Result<serde_json::Map<String, serde_json::Value>> {
+    payload
+        .get(key)
+        .and_then(serde_json::Value::as_object)
+        .cloned()
+        .with_context(|| format!("internal: the {label} payload has no `{key}` object"))
+}
+
+/// Merge `payload` into the target's config and report the outcome. `path`
+/// is the already-resolved config path, or `None` to resolve it now.
+fn write_json_hooks(
+    target: &JsonHookTarget,
+    payload: &JsonHookPayload,
+    path: Option<PathBuf>,
+    args: &InstallHooksArgs,
+) -> Result<()> {
+    let path = match path {
+        Some(path) => path,
+        None => apply_target_path(args, target.default_path)?,
+    };
+    let outcome = merge_json_hooks(target, payload, &path)?;
+    report_apply_outcome(&path, outcome, "new file", "already up to date");
+    if let Some(after_report) = target.after_report {
+        after_report(outcome);
+    }
+    Ok(())
+}
+
+fn merge_json_hooks(
+    target: &JsonHookTarget,
+    payload: &JsonHookPayload,
     config_path: &Path,
 ) -> Result<ApplyOutcome> {
-    let payload = build_antigravity_payload_with_data_dir(
-        staged,
-        server_url,
-        auth_token,
-        Some(data_dir),
-        project_strategy,
-    );
-    let our_group = payload
-        .get("sessionmunch")
-        .and_then(|v| v.as_object())
-        .context("internal: build_antigravity_payload didn't return an sessionmunch group")?
-        .clone();
+    let key = match target.table {
+        HookTable::Key(key) => Some(key),
+        HookTable::RootWhenNamed(name) if config_path.file_name() == Some(name.as_ref()) => None,
+        HookTable::RootWhenNamed(_) => Some("hooks"),
+    };
     apply_atomic(config_path, |existing| {
         mutate_json(existing, |root| {
-            // Get-or-create the "sessionmunch" named group; overlay
-            // our events. Other named groups survive untouched.
-            let group = root
-                .entry("sessionmunch")
-                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
-                .as_object_mut()
-                .context("`sessionmunch` is present in hooks.json but not an object")?;
-            for (event, value) in &our_group {
-                overlay_event_hooks(group, event, value);
+            if let Some(version) = target.schema_version {
+                root.insert("version".into(), serde_json::json!(version));
+            }
+            let events = match key {
+                None => root,
+                Some(key) => root
+                    .entry(key)
+                    .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
+                    .as_object_mut()
+                    .with_context(|| {
+                        format!(
+                            "`{key}` is present in {} but not an object",
+                            target.config_name
+                        )
+                    })?,
+            };
+            for (event, value) in &payload.events {
+                overlay_event_hooks(events, event, value);
+            }
+            for event in payload.withdrawn {
+                remove_sessionmunch_event_hooks(events, event);
             }
             Ok(())
         })
     })
+}
+
+/// The config file an `--apply` writes: `--config-file` when given, else
+/// the agent's default location.
+fn apply_target_path(
+    args: &InstallHooksArgs,
+    default_path: fn() -> Result<PathBuf>,
+) -> Result<PathBuf> {
+    match &args.config_file {
+        Some(path) => Ok(path.clone()),
+        None => default_path(),
+    }
+}
+
+/// The `✓ <verb> <path> (<detail>)` line every `--apply` ends with. Only
+/// the wording for a new file and for a no-op varies between harnesses.
+fn report_apply_outcome(path: &Path, outcome: ApplyOutcome, created: &str, unchanged: &str) {
+    println!(
+        "✓ {} {} ({})",
+        outcome.verb(),
+        path.display(),
+        match outcome {
+            ApplyOutcome::Created => created,
+            ApplyOutcome::Updated => "backup written next to it",
+            ApplyOutcome::NoOp => unchanged,
+        }
+    );
 }
 
 /// Mutate Kimi Code's `config.toml` (`$KIMI_CODE_HOME/config.toml` when
@@ -2302,10 +1924,7 @@ fn apply_to_kimi_code_config(
     data_dir: &Path,
     args: &InstallHooksArgs,
 ) -> Result<()> {
-    let path = match &args.config_file {
-        Some(p) => p.clone(),
-        None => kimi_code_config_path()?,
-    };
+    let path = apply_target_path(args, kimi_code_config_path)?;
     let staged = stage_hook_scripts(hooks_dir, "kimi-code", data_dir)?;
     let command_dir = staged_command_dir(&staged, "kimi-code");
     let strategy = args.project_strategy.and_then(ProjectStrategyArg::baked);
@@ -2317,16 +1936,7 @@ fn apply_to_kimi_code_config(
         strategy,
         &path,
     )?;
-    println!(
-        "✓ {} {} ({})",
-        outcome.verb(),
-        path.display(),
-        match outcome {
-            ApplyOutcome::Created => "new file",
-            ApplyOutcome::Updated => "backup written next to it",
-            ApplyOutcome::NoOp => "already up to date",
-        }
-    );
+    report_apply_outcome(&path, outcome, "new file", "already up to date");
     Ok(())
 }
 
@@ -2456,16 +2066,7 @@ fn apply_to_kiro_cli_agent_configs(
             strategy.and_then(ProjectStrategyArg::baked),
             &path,
         )?;
-        println!(
-            "✓ {} {} ({})",
-            outcome.verb(),
-            path.display(),
-            match outcome {
-                ApplyOutcome::Created => "new file",
-                ApplyOutcome::Updated => "backup written next to it",
-                ApplyOutcome::NoOp => "already up to date",
-            }
-        );
+        report_apply_outcome(&path, outcome, "new file", "already up to date");
     }
     Ok(())
 }
@@ -2566,10 +2167,7 @@ fn apply_to_kiro_cli_v3_hooks(
     data_dir: &Path,
     args: &InstallHooksArgs,
 ) -> Result<()> {
-    let path = match &args.config_file {
-        Some(path) => path.clone(),
-        None => kiro_cli_v3_hooks_path()?,
-    };
+    let path = apply_target_path(args, kiro_cli_v3_hooks_path)?;
     let existing = match fs::read_to_string(&path) {
         Ok(existing) => existing,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -2593,16 +2191,7 @@ fn apply_to_kiro_cli_v3_hooks(
         strategy,
         &path,
     )?;
-    println!(
-        "✓ {} {} ({})",
-        outcome.verb(),
-        path.display(),
-        match outcome {
-            ApplyOutcome::Created => "new file",
-            ApplyOutcome::Updated => "backup written next to it",
-            ApplyOutcome::NoOp => "already up to date",
-        }
-    );
+    report_apply_outcome(&path, outcome, "new file", "already up to date");
     Ok(())
 }
 
@@ -2772,42 +2361,140 @@ pub(crate) fn is_sessionmunch_kiro_hook_command(command: &str) -> bool {
         })
 }
 
-/// Generate an OpenCode plugin at `~/.config/opencode/plugins/sessionmunch.ts`.
+/// A harness integrated through one generated TypeScript file that
+/// `--apply` writes whole (no merge with the existing content). Each entry
+/// states what differs; [`apply_generated_file`] runs the shared install.
+struct GeneratedFileTarget {
+    resolve_path: fn(&InstallHooksArgs) -> Result<PathBuf>,
+    /// Renders the file from server URL, token, baked strategy and capture
+    /// mode.
+    build: fn(&str, Option<&str>, Option<&str>, &str) -> Result<String>,
+    /// Outcome detail printed when the file is new.
+    created: &'static str,
+    /// Pi and OMP: the agent name whose shared-directory warning and
+    /// pre-rename `sessionmunch.ts` cleanup run after the write.
+    extension_agent: Option<&'static str>,
+    /// Restart guidance printed after a blank line unless the file was
+    /// already up to date.
+    restart_note: &'static [&'static str],
+}
+
+/// `~/.config/opencode/plugins/sessionmunch.ts`.
 ///
 /// OpenCode's integration surface is a TypeScript plugin, not a JSON
 /// hook table. The plugin posts normalized lifecycle payloads directly
 /// to `/hook` and injects pending handoffs through
 /// `experimental.chat.system.transform`, because plugin shell stdout is
 /// not prepended to the model context the way Claude Code hook stdout is.
-fn apply_to_opencode_plugin(
+static OPENCODE_PLUGIN: GeneratedFileTarget = GeneratedFileTarget {
+    resolve_path: |args| apply_target_path(args, opencode_plugin_path),
+    build: |server_url, auth_token, strategy, capture_mode| {
+        Ok(build_opencode_plugin(
+            server_url,
+            auth_token,
+            strategy,
+            capture_mode,
+        ))
+    },
+    created: "new plugin file",
+    extension_agent: None,
+    restart_note: &[
+        "OpenCode auto-loads plugins from ~/.config/opencode/plugins/ on next start.",
+        "If you're already inside an `opencode` session, restart it for the",
+        "new plugin to take effect.",
+    ],
+};
+
+/// `~/.config/opencode/plugins/sessionmunch-opencode2.ts`.
+///
+/// The beta's plugin API (`Plugin.define({ id, setup })` with
+/// `ctx.session.hook` / `ctx.tool.hook` / `ctx.event.subscribe`) is
+/// incompatible with v1's function plugin, so the beta gets its own file.
+/// Both files share the one auto-loaded dir while the beta is side-by-side;
+/// a host may warn about its sibling's file (API mismatch) — that warning
+/// is benign, and `uninstall` removes each file only on its own ownership
+/// markers.
+static OPENCODE2_PLUGIN: GeneratedFileTarget = GeneratedFileTarget {
+    resolve_path: |args| apply_target_path(args, opencode2_plugin_path),
+    build: build_opencode2_plugin,
+    created: "new plugin file",
+    extension_agent: None,
+    restart_note: &[
+        "OpenCode 2 auto-loads plugins from ~/.config/opencode/plugins/ on next start.",
+        "If you're already inside an `opencode2` session, restart it for the",
+        "new plugin to take effect.",
+    ],
+};
+
+/// `~/.omp/agent/extensions/sessionmunch-omp.ts` (or the `--profile` /
+/// `$OMP_PROFILE` profile's extensions dir).
+///
+/// OMP discovers direct `*.ts` / `*.js` files under `~/.omp/agent/extensions/`
+/// at startup, so no separate settings merge is needed. The extension uses OMP's
+/// lifecycle API for capture and `before_agent_start` for handoff injection.
+static OMP_EXTENSION: GeneratedFileTarget = GeneratedFileTarget {
+    resolve_path: resolve_omp_extension_path,
+    build: |server_url, auth_token, strategy, capture_mode| {
+        Ok(build_omp_extension(
+            server_url,
+            auth_token,
+            strategy,
+            capture_mode,
+        ))
+    },
+    created: "new extension file",
+    extension_agent: Some("omp"),
+    restart_note: &[
+        "OMP auto-loads direct TypeScript extensions from ~/.omp/agent/extensions/ on next start.",
+        "If you're already inside an `omp` session, restart it for the",
+        "new extension to take effect.",
+    ],
+};
+
+/// `~/.pi/agent/extensions/sessionmunch-pi.ts`: the OMP extension adapted to
+/// Pi, plus the bridge that exposes sessionmunch's MCP tools inside Pi.
+static PI_EXTENSION: GeneratedFileTarget = GeneratedFileTarget {
+    resolve_path: resolve_pi_extension_path,
+    build: |server_url, auth_token, strategy, capture_mode| {
+        Ok(build_pi_extension(
+            server_url,
+            auth_token,
+            strategy,
+            capture_mode,
+        ))
+    },
+    created: "new Pi extension file",
+    extension_agent: Some("pi"),
+    restart_note: &[
+        "Pi loads TypeScript extensions from ~/.pi/agent/extensions/ on next start.",
+        "Restart Pi for lifecycle capture and MCP tools to take effect.",
+    ],
+};
+
+fn apply_generated_file(
+    target: &GeneratedFileTarget,
     server_url: &str,
     auth_token: Option<&str>,
     args: &InstallHooksArgs,
     capture_mode: &str,
 ) -> Result<()> {
-    let path = match &args.config_file {
-        Some(p) => p.clone(),
-        None => opencode_plugin_path()?,
-    };
+    let path = (target.resolve_path)(args)?;
     let strategy = args.project_strategy.and_then(ProjectStrategyArg::baked);
-    let body = build_opencode_plugin(server_url, auth_token, strategy, capture_mode);
+    let body = (target.build)(server_url, auth_token, strategy, capture_mode)?;
 
-    let outcome = apply_atomic(&path, move |_existing| Ok(body.clone()))?;
-    println!(
-        "✓ {} {} ({})",
-        outcome.verb(),
-        path.display(),
-        match outcome {
-            ApplyOutcome::Created => "new plugin file",
-            ApplyOutcome::Updated => "backup written next to it",
-            ApplyOutcome::NoOp => "already up to date",
-        }
-    );
+    let outcome = apply_atomic(&path, move |_existing| Ok(body))?;
+    report_apply_outcome(&path, outcome, target.created, "already up to date");
+
+    if let Some(agent) = target.extension_agent {
+        warn_if_agents_share_extensions_dir(agent, &path);
+        remove_legacy_extension(&path, agent);
+    }
+
     if !matches!(outcome, ApplyOutcome::NoOp) {
         println!();
-        println!("OpenCode auto-loads plugins from ~/.config/opencode/plugins/ on next start.");
-        println!("If you're already inside an `opencode` session, restart it for the");
-        println!("new plugin to take effect.");
+        for line in target.restart_note {
+            println!("{line}");
+        }
     }
     Ok(())
 }
@@ -2840,49 +2527,6 @@ pub(crate) fn opencode2_plugin_path() -> anyhow::Result<std::path::PathBuf> {
         .join("opencode")
         .join("plugins")
         .join("sessionmunch-opencode2.ts"))
-}
-
-/// Generate an OpenCode 2.0 beta plugin at
-/// `~/.config/opencode/plugins/sessionmunch-opencode2.ts`.
-///
-/// The beta's plugin API (`Plugin.define({ id, setup })` with
-/// `ctx.session.hook` / `ctx.tool.hook` / `ctx.event.subscribe`) is
-/// incompatible with v1's function plugin, so the beta gets its own file.
-/// Both files share the one auto-loaded dir while the beta is side-by-side;
-/// a host may warn about its sibling's file (API mismatch) — that warning
-/// is benign, and `uninstall` removes each file only on its own ownership
-/// markers.
-fn apply_to_opencode2_plugin(
-    server_url: &str,
-    auth_token: Option<&str>,
-    args: &InstallHooksArgs,
-    capture_mode: &str,
-) -> Result<()> {
-    let path = match &args.config_file {
-        Some(p) => p.clone(),
-        None => opencode2_plugin_path()?,
-    };
-    let strategy = args.project_strategy.and_then(ProjectStrategyArg::baked);
-    let body = build_opencode2_plugin(server_url, auth_token, strategy, capture_mode)?;
-
-    let outcome = apply_atomic(&path, move |_existing| Ok(body.clone()))?;
-    println!(
-        "✓ {} {} ({})",
-        outcome.verb(),
-        path.display(),
-        match outcome {
-            ApplyOutcome::Created => "new plugin file",
-            ApplyOutcome::Updated => "backup written next to it",
-            ApplyOutcome::NoOp => "already up to date",
-        }
-    );
-    if !matches!(outcome, ApplyOutcome::NoOp) {
-        println!();
-        println!("OpenCode 2 auto-loads plugins from ~/.config/opencode/plugins/ on next start.");
-        println!("If you're already inside an `opencode2` session, restart it for the");
-        println!("new plugin to take effect.");
-    }
-    Ok(())
 }
 
 fn render_opencode2_plugin(
@@ -2957,148 +2601,7 @@ fn replace_opencode_anchor(haystack: &str, from: &str, to: &str, what: &str) -> 
 /// `experimental.chat.system.transform` to the `context` hook, which edits
 /// the outgoing model call without persisting into history — guarded to
 /// inject once per session because it fires on every continuation.
-const OPENCODE2_BINDING: &str = r#"
-// `Plugin.define` is an identity wrapper, so the binding exports the
-// `{ id, setup }` shape directly and keeps the shared `import type` line:
-// a runtime import of `@opencode-ai/plugin` does not resolve from the
-// global plugins dir and fails the load.
-const SessionMunchOpencode2: Plugin = {
-  id: "sessionmunch-opencode2",
-  setup: async (ctx) => {
-    const ctxAny = ctx as any;
-    const directory = ctxAny?.location?.directory;
-    const controller = new AbortController();
-    void (async () => {
-      try {
-        for await (const evt of ctx.event.subscribe({ signal: controller.signal })) {
-          const event = evt as any;
-          const type = event?.type;
-          const data = event?.data ?? event?.properties ?? {};
-          const info = data?.info ?? {};
-          const loc = data?.location?.directory ?? data?.directory
-            ?? event?.location?.directory ?? directory;
-          if (type === "session.created") {
-            const id = data?.sessionID ?? data?.id ?? info?.id;
-            startSession(id, data?.location?.directory ?? loc, {
-              title: data?.title ?? info?.title,
-              projectID: data?.projectID ?? info?.projectID,
-            });
-          }
-          if (type === "session.idle") {
-            const id = data?.sessionID ?? data?.id;
-            startSession(id, cwdFor(id, loc));
-            postHook("stop", { sessionID: id, cwd: cwdFor(id, loc) });
-          }
-          if (type === "session.deleted") {
-            const id = data?.sessionID ?? data?.id ?? info?.id;
-            endSession(id, loc, data?.directory ?? info?.directory);
-          }
-          if (type === "session.compaction.started") {
-            const id = data?.sessionID ?? data?.id;
-            postPreCompact(id, loc);
-          }
-          if (type === "session.compacted") {
-            const id = data?.sessionID ?? data?.id;
-            postPreCompact(id, loc);
-          }
-        }
-      } catch (_e) {
-        // The stream ends on unload. Capture is best-effort and must never
-        // break the host.
-      }
-    })();
-    const promptRegistration = await ctx.session.hook("prompt", (event) => {
-      const e = event as any;
-      const id = e?.sessionID;
-      const prompt = e?.prompt ?? {};
-      const cwd = cwdFor(id, directory);
-      startSession(id, cwd, { agent: prompt?.agent, model: prompt?.model });
-      postHook("user-prompt", {
-        sessionID: id,
-        cwd,
-        agent: prompt?.agent,
-        model: prompt?.model,
-        messageID: e?.messageID,
-        prompt: typeof prompt?.text === "string" ? prompt.text : textFromParts(prompt?.parts),
-      });
-    });
-    const handoffInjected = new Set<string>();
-    const contextRegistration = await ctx.session.hook("context", async (event) => {
-      const e = event as any;
-      const id = e?.sessionID;
-      if (!id || handoffInjected.has(id)) return;
-      startSession(id, cwdFor(id, directory));
-      let pending = handoffFetches.get(id);
-      if (!pending) {
-        pending = fetchHandoff(cwdFor(id, directory), id);
-        handoffFetches.set(id, pending);
-      }
-      const handoff = await pending;
-      if (handoff) {
-        // SystemPart is `{ type: "text", text }` — the `type` discriminator
-        // is required: without it the host fails the model call with a
-        // schema validation error (observed live on beta-18999).
-        e.system.push({ type: "text", text: handoff });
-        handoffInjected.add(id);
-      }
-    });
-    const beforeRegistration = await ctx.tool.hook("execute.before", (event) => {
-      const e = event as any;
-      const id = e?.sessionID;
-      startSession(id, cwdFor(id, directory));
-      postHook("pre-tool-use", {
-        sessionID: id,
-        cwd: cwdFor(id, directory),
-        tool: e?.tool,
-        callID: e?.id,
-        args: e?.input,
-      });
-    });
-    const afterRegistration = await ctx.tool.hook("execute.after", (event) => {
-      const e = event as any;
-      const id = e?.sessionID;
-      startSession(id, cwdFor(id, directory));
-      // The beta reports failures on the same channel (`status: "error"`,
-      // no `result`); keep the message where v1 kept output so the
-      // failure reason survives consolidation.
-      const failed = e?.status === "error";
-      postHook("post-tool-use", {
-        sessionID: id,
-        cwd: cwdFor(id, directory),
-        tool: e?.tool,
-        callID: e?.id,
-        args: e?.input,
-        title: failed ? undefined : e?.result?.title,
-        output: failed
-          ? String(e?.error?.message ?? e?.error ?? "tool failed")
-          : e?.result?.output,
-        metadata: failed ? undefined : e?.result?.metadata,
-      });
-    });
-    return async () => {
-      controller.abort();
-      for (const registration of [
-        promptRegistration,
-        contextRegistration,
-        beforeRegistration,
-        afterRegistration,
-      ]) {
-        try {
-          await registration.dispose();
-        } catch (_e) {
-          // Unload is best-effort; a dead host has nothing to unregister.
-        }
-      }
-      for (const id of Array.from(startedSessions)) {
-        endSession(id, directory);
-      }
-      await drainHookQueueForDispose();
-    };
-  },
-};
-
-export default SessionMunchOpencode2;
-"#;
+const OPENCODE2_BINDING: &str = include_str!("../../templates/plugins/opencode2_binding.ts");
 /// `findSettingsMarker` mirrors the native `find_settings_marker` (`marker.rs`)
 /// and the shell `sessionmunch_find_settings_marker` (`hooks/_lib.sh`), #668:
 /// the same ancestor walk and HOME/`.git` boundary as `findMarker`, but a
@@ -3354,373 +2857,15 @@ fn build_opencode_plugin(
         .unwrap_or_else(|| "const TOKEN: string | null = null;\n".to_string());
     let apply_marker_params = ts_apply_marker_params(project_strategy);
     let capture_policy = ts_capture_policy_v1(capture_mode);
-    let body = format!(
-        r#"// Auto-generated by `sessionmunch install-hooks --agent opencode --apply`.
-// Edit by re-running the command, not by hand — install-hooks
-// will overwrite this file (with a `.bak-<ts>` backup) on each
-// re-run.
-
-import type {{ Plugin }} from "@opencode-ai/plugin";
-import {{ execFileSync }} from "node:child_process";
-import {{ closeSync, existsSync, openSync, readFileSync as readMarkerText, readSync }} from "node:fs";
-import {{ basename, dirname, join, resolve, sep }} from "node:path";
-import {{ homedir }} from "node:os";
-
-const SERVER = {server_literal}.replace(/\/+$/, "");
-const AGENT = "open-code";
-{token_line}
-{capture_policy}
-
-function timeoutSignal(ms: number): AbortSignal | undefined {{
-  if (typeof AbortSignal === "undefined") return undefined;
-  const factory = (AbortSignal as unknown as {{ timeout?: (ms: number) => AbortSignal }}).timeout;
-  return factory ? factory(ms) : undefined;
-}}
-
-function authHeaders(): Record<string, string> {{
-  const token = resolveToken();
-  return token ? {{ Authorization: `Bearer ${{token}}` }} : {{}};
-}}
-
-const HOOK_QUEUE_MAX = 100;
-const HOOK_FLUSH_INTERVAL_MS = 2000;
-const HOOK_FLUSH_THRESHOLD = 20;
-const HOOK_INTER_REQUEST_DELAY_MS = 50;
-const HOOK_REQUEST_TIMEOUT_MS = 2000;
-const HOOK_DISPOSE_DRAIN_BUDGET_MS = 2000;
-const HOOK_IMMEDIATE_EVENTS = new Set(["session-start", "stop", "session-end", "pre-compact"]);
-
-type HookQueueItem = {{ event: string; url: URL; payload: Record<string, unknown> }};
-const hookQueue: HookQueueItem[] = [];
-let hookFlushTimer: ReturnType<typeof setTimeout> | undefined;
-let hookDraining = false;
-let hookDrainPromise: Promise<void> | undefined;
-
-function sleep(ms: number): Promise<void> {{
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}}
-
-function scheduleHookFlush(): void {{
-  if (hookFlushTimer) return;
-  hookFlushTimer = setTimeout(() => {{
-    hookFlushTimer = undefined;
-    void requestHookDrain();
-  }}, HOOK_FLUSH_INTERVAL_MS);
-  hookFlushTimer.unref?.();
-}}
-
-function requestHookDrain(): Promise<void> {{
-  if (!hookDrainPromise) {{
-    hookDrainPromise = drainHookQueue().finally(() => {{
-      hookDrainPromise = undefined;
-      if (hookQueue.length > 0) void requestHookDrain();
-    }});
-  }}
-  return hookDrainPromise;
-}}
-
-function disposeDrainTimeout(): Promise<void> {{
-  return new Promise((resolve) => {{
-    const timer = setTimeout(resolve, HOOK_DISPOSE_DRAIN_BUDGET_MS);
-    timer.unref?.();
-  }});
-}}
-
-async function drainHookQueueForDispose(): Promise<void> {{
-  await Promise.race([requestHookDrain(), disposeDrainTimeout()]);
-}}
-
-function enqueueHook(event: string, url: URL, payload: Record<string, unknown>): void {{
-  if (hookQueue.length >= HOOK_QUEUE_MAX) hookQueue.shift();
-  hookQueue.push({{ event, url, payload }});
-  if (HOOK_IMMEDIATE_EVENTS.has(event) || hookQueue.length >= HOOK_FLUSH_THRESHOLD) {{
-    void requestHookDrain();
-  }} else {{
-    scheduleHookFlush();
-  }}
-}}
-
-async function drainHookQueue(): Promise<void> {{
-  if (hookDraining) return;
-  hookDraining = true;
-  if (hookFlushTimer) {{
-    clearTimeout(hookFlushTimer);
-    hookFlushTimer = undefined;
-  }}
-  try {{
-    while (hookQueue.length > 0) {{
-      const item = hookQueue.shift();
-      if (!item) break;
-      try {{
-        await fetch(item.url, {{
-          method: "POST",
-          headers: {{ "Content-Type": "application/json", ...authHeaders() }},
-          body: JSON.stringify(item.payload),
-          signal: timeoutSignal(HOOK_REQUEST_TIMEOUT_MS),
-        }}).catch(() => undefined);
-      }} catch (_e) {{
-        // Best-effort capture. Hooks must never block the agent.
-      }}
-      if (hookQueue.length > 0) await sleep(HOOK_INTER_REQUEST_DELAY_MS);
-    }}
-  }} finally {{
-    hookDraining = false;
-  }}
-}}
-
-function findMarker(cwd: string | undefined): string | undefined {{
-  if (!cwd) return undefined;
-  let dir = resolve(cwd);
-  const home = homedir();
-  let boundary: string | undefined;
-  if (home && (dir === home || dir.startsWith(home.endsWith(sep) ? home : home + sep))) {{
-    boundary = home;
-  }} else if (home) {{
-    let probe = dir;
-    while (probe && probe !== dirname(probe)) {{
-      if (existsSync(join(probe, ".git"))) {{
-        boundary = probe;
-        break;
-      }}
-      probe = dirname(probe);
-    }}
-    boundary ??= dir;
-  }}
-  while (dir && dir !== dirname(dir)) {{
-    const marker = join(dir, ".sessionmunch.toml");
-    if (existsSync(marker)) return marker;
-    if (boundary && dir === boundary) return undefined;
-    dir = dirname(dir);
-  }}
-  return undefined;
-}}
-
-function tomlKey(text: string, key: string): string | undefined {{
-  const re = new RegExp(`^\\s*${{key}}\\s*=\\s*"([^"]*)"`);
-  for (const line of text.split(/\r?\n/)) {{
-    const match = re.exec(line);
-    if (match) return match[1];
-  }}
-  return undefined;
-}}
-
-
-function repoRootProject(cwd: string | undefined): string | undefined {{
-  if (!cwd) return undefined;
-  try {{
-    const inside = execFileSync("git", ["-C", cwd, "rev-parse", "--is-inside-work-tree"], {{
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }}).trim();
-    if (inside !== "true") return undefined;
-    const common = execFileSync("git", ["-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"], {{
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }}).trim();
-    if (!common) return undefined;
-    const root = dirname(common);
-    if (!root || root === dirname(root)) return undefined;
-    return basename(root);
-  }} catch (_e) {{
-    return undefined;
-  }}
-}}
-{apply_marker_params}
-
-function sessionID(input: unknown): string | undefined {{
-  const value = input as any;
-  return value?.sessionID ?? value?.sessionId ?? value?.session_id ?? value?.info?.id;
-}}
-
-function textFromParts(parts: unknown): string {{
-  if (!Array.isArray(parts)) return "";
-  return parts
-    .map((part: any) => {{
-      if (part?.type === "text" && typeof part.text === "string") return part.text;
-      if (part?.type === "subtask" && typeof part.prompt === "string") return part.prompt;
-      if (part?.type === "file" && typeof part.filename === "string") return `[file: ${{part.filename}}]`;
-      return "";
-    }})
-    .filter(Boolean)
-    .join("\n\n")
-    .trim();
-}}
-
-const sessionCwds = new Map<string, string>();
-const startedSessions = new Set<string>();
-const handoffFetches = new Map<string, Promise<string | undefined>>();
-const preCompactLast = new Map<string, number>();
-
-function cwdFor(id: string | undefined, directory: string): string {{
-  return (id && sessionCwds.get(id)) || directory;
-}}
-
-function rememberCwd(id: string | undefined, cwd: string | undefined): void {{
-  if (id && cwd) sessionCwds.set(id, cwd);
-}}
-
-function startSession(id: string | undefined, cwd: string, extra: Record<string, unknown> = {{}}): void {{
-  if (!id || startedSessions.has(id)) return;
-  startedSessions.add(id);
-  rememberCwd(id, cwd);
-  // Generated integrations inject through fetchHandoff below. In managed mode
-  // a queued SessionStart response is not model-visible and must not consume
-  // the workstream context before that synchronous fetch receives it.
-  if (!process.env.SESSIONMUNCH_RUN_ID) {{
-    postHook("session-start", {{ sessionID: id, cwd, ...extra }});
-  }}
-}}
-
-function endSession(id: string | undefined, directory: string, cwd?: string): void {{
-  if (!id || !startedSessions.delete(id)) return;
-  const resolvedCwd = cwd || cwdFor(id, directory);
-  postHook("session-end", {{ sessionID: id, cwd: resolvedCwd }});
-  sessionCwds.delete(id);
-  handoffFetches.delete(id);
-  preCompactLast.delete(id);
-}}
-
-function postPreCompact(id: string | undefined, directory: string): void {{
-  startSession(id, cwdFor(id, directory));
-  const key = id || "unknown";
-  const now = Date.now();
-  const last = preCompactLast.get(key) ?? 0;
-  if (now - last < 1000) return;
-  preCompactLast.set(key, now);
-  postHook("pre-compact", {{ sessionID: id, cwd: cwdFor(id, directory) }});
-}}
-
-function postHook(event: string, payload: Record<string, unknown>): void {{
-  const url = new URL(`${{SERVER}}/hook`);
-  url.searchParams.set("event", event);
-  url.searchParams.set("agent", AGENT);
-  applyMarkerParams(url, typeof payload.cwd === "string" ? payload.cwd : undefined);
-  const policy = capturePolicy(payload, typeof payload.cwd === "string" ? payload.cwd : undefined);
-  if (policy.disposition === "drop") return;
-  try {{
-    enqueueHook(event, url, policy.payload);
-  }} catch (_e) {{
-    // Best-effort capture. Hooks must never block the agent.
-  }}
-}}
-
-async function fetchHandoff(cwd: string, id: string | undefined): Promise<string | undefined> {{
-  const url = new URL(`${{SERVER}}/handoff`);
-  url.searchParams.set("agent", AGENT);
-  url.searchParams.set("cwd", cwd);
-  if (id) url.searchParams.set("session_id", id);
-  applyMarkerParams(url, cwd);
-  try {{
-    const response = await fetch(url, {{
-      headers: authHeaders(),
-      signal: timeoutSignal(1000),
-    }});
-    if (!response.ok) return undefined;
-    const text = (await response.text()).trim();
-    return text.length > 0 ? text : undefined;
-  }} catch (_e) {{
-    return undefined;
-  }}
-}}
-
-export const SessionMunchHooks: Plugin = async ({{ directory }}) => {{
-  return {{
-    dispose: async () => {{
-      for (const id of Array.from(startedSessions)) {{
-        endSession(id, directory);
-      }}
-      await drainHookQueueForDispose();
-    }},
-    event: async (input) => {{
-      const event = (input as any).event;
-      const properties = event?.properties ?? {{}};
-      if (event?.type === "session.created") {{
-        const info = properties.info ?? {{}};
-        const id = properties.sessionID ?? info.id;
-        const cwd = info.directory ?? directory;
-        startSession(id, cwd, {{
-          title: info.title,
-          projectID: info.projectID,
-        }});
-      }}
-      if (event?.type === "session.idle") {{
-        const id = properties.sessionID;
-        startSession(id, cwdFor(id, directory));
-        postHook("stop", {{ sessionID: id, cwd: cwdFor(id, directory) }});
-      }}
-      if (event?.type === "session.deleted") {{
-        const info = properties.info ?? {{}};
-        const id = properties.sessionID ?? info.id;
-        endSession(id, directory, info.directory);
-      }}
-      if (event?.type === "session.compacted") {{
-        const id = properties.sessionID;
-        postPreCompact(id, directory);
-      }}
-    }},
-    "chat.message": async (input, output) => {{
-      const id = sessionID(input);
-      const cwd = cwdFor(id, directory);
-      startSession(id, cwd, {{ agent: (input as any).agent, model: (input as any).model }});
-      postHook("user-prompt", {{
-        sessionID: id,
-        cwd,
-        agent: (input as any).agent,
-        model: (input as any).model,
-        messageID: (input as any).messageID,
-        prompt: textFromParts((output as any).parts),
-      }});
-    }},
-    "tool.execute.before": async (input, output) => {{
-      const id = sessionID(input);
-      startSession(id, cwdFor(id, directory));
-      postHook("pre-tool-use", {{
-        sessionID: id,
-        cwd: cwdFor(id, directory),
-        tool: (input as any).tool,
-        callID: (input as any).callID,
-        args: (output as any).args,
-      }});
-    }},
-    "tool.execute.after": async (input, output) => {{
-      const id = sessionID(input);
-      startSession(id, cwdFor(id, directory));
-      postHook("post-tool-use", {{
-        sessionID: id,
-        cwd: cwdFor(id, directory),
-        tool: (input as any).tool,
-        callID: (input as any).callID,
-        args: (input as any).args,
-        title: (output as any).title,
-        output: (output as any).output,
-        metadata: (output as any).metadata,
-      }});
-    }},
-    "experimental.session.compacting": async (input) => {{
-      const id = sessionID(input);
-      postPreCompact(id, directory);
-    }},
-    "experimental.chat.system.transform": async (input, output) => {{
-      const id = sessionID(input);
-      if (!id) return;
-      startSession(id, cwdFor(id, directory));
-      let pending = handoffFetches.get(id);
-      if (!pending) {{
-        pending = fetchHandoff(cwdFor(id, directory), id);
-        handoffFetches.set(id, pending);
-      }}
-      const handoff = await pending;
-      if (handoff) (output as any).system.push(handoff);
-    }},
-  }};
-}};
-
-export default SessionMunchHooks;
-"#,
-        server_literal = ts_string_literal(server_url),
-        token_line = token_line,
-    );
-    // Anchors are compile-time constants over this same file's template;
+    let body = include_str!("../../templates/plugins/opencode_plugin.ts")
+        .replace("__SESSIONMUNCH_CAPTURE_POLICY__", &capture_policy)
+        .replace("__SESSIONMUNCH_APPLY_MARKER_PARAMS__", &apply_marker_params)
+        .replace(
+            "__SESSIONMUNCH_SERVER_LITERAL__",
+            &ts_string_literal(server_url),
+        )
+        .replace("__SESSIONMUNCH_TOKEN_LINE__", &token_line);
+    // Anchors are compile-time constants over the bundled template;
     // a mismatch is a template edit that forgot the spool patch.
     add_hook_spooling(body).expect("generated TS integration lost its hook-spool anchors")
 }
@@ -3808,47 +2953,6 @@ fn remove_legacy_extension(new_path: &Path, agent: &str) {
     }
 }
 
-/// Generate an Oh My Pi extension at `~/.omp/agent/extensions/sessionmunch-omp.ts`.
-///
-/// OMP discovers direct `*.ts` / `*.js` files under `~/.omp/agent/extensions/`
-/// at startup, so no separate settings merge is needed. The extension uses OMP's
-/// lifecycle API for capture and `before_agent_start` for handoff injection.
-fn apply_to_omp_extension(
-    server_url: &str,
-    auth_token: Option<&str>,
-    args: &InstallHooksArgs,
-    capture_mode: &str,
-) -> Result<()> {
-    let path = resolve_omp_extension_path(args)?;
-    let strategy = args.project_strategy.and_then(ProjectStrategyArg::baked);
-    let body = build_omp_extension(server_url, auth_token, strategy, capture_mode);
-
-    let outcome = apply_atomic(&path, move |_existing| Ok(body.clone()))?;
-    println!(
-        "✓ {} {} ({})",
-        outcome.verb(),
-        path.display(),
-        match outcome {
-            ApplyOutcome::Created => "new extension file",
-            ApplyOutcome::Updated => "backup written next to it",
-            ApplyOutcome::NoOp => "already up to date",
-        }
-    );
-
-    warn_if_agents_share_extensions_dir("omp", &path);
-    remove_legacy_extension(&path, "omp");
-
-    if !matches!(outcome, ApplyOutcome::NoOp) {
-        println!();
-        println!(
-            "OMP auto-loads direct TypeScript extensions from ~/.omp/agent/extensions/ on next start."
-        );
-        println!("If you're already inside an `omp` session, restart it for the");
-        println!("new extension to take effect.");
-    }
-    Ok(())
-}
-
 fn omp_extension_hint_in(
     env_override: Option<std::ffi::OsString>,
     profile: Option<&str>,
@@ -3910,39 +3014,6 @@ fn resolve_omp_extension_path(args: &InstallHooksArgs) -> Result<PathBuf> {
     omp_extension_path(profile)
 }
 
-fn apply_to_pi_extension(
-    server_url: &str,
-    auth_token: Option<&str>,
-    args: &InstallHooksArgs,
-    capture_mode: &str,
-) -> Result<()> {
-    let path = resolve_pi_extension_path(args)?;
-    let strategy = args.project_strategy.and_then(ProjectStrategyArg::baked);
-    let body = build_pi_extension(server_url, auth_token, strategy, capture_mode);
-
-    let outcome = apply_atomic(&path, move |_existing| Ok(body.clone()))?;
-    println!(
-        "✓ {} {} ({})",
-        outcome.verb(),
-        path.display(),
-        match outcome {
-            ApplyOutcome::Created => "new Pi extension file",
-            ApplyOutcome::Updated => "backup written next to it",
-            ApplyOutcome::NoOp => "already up to date",
-        }
-    );
-
-    warn_if_agents_share_extensions_dir("pi", &path);
-    remove_legacy_extension(&path, "pi");
-
-    if !matches!(outcome, ApplyOutcome::NoOp) {
-        println!();
-        println!("Pi loads TypeScript extensions from ~/.pi/agent/extensions/ on next start.");
-        println!("Restart Pi for lifecycle capture and MCP tools to take effect.");
-    }
-    Ok(())
-}
-
 fn render_pi_extension(
     server_url: &str,
     auth_token: Option<&str>,
@@ -4000,89 +3071,7 @@ fn build_pi_extension(
 }
 
 fn pi_mcp_bridge_source() -> &'static str {
-    r#"
-// ---- MCP bridge ------------------------------------------------------------
-const MCP_SERVER = deriveMcpServer(SERVER);
-const MCP_REQUEST_TIMEOUT_MS = 10000;
-let mcpRequestId = 0;
-
-function deriveMcpServer(server: string): string {
-  const trimmed = server.replace(/\/+$/, "");
-  return trimmed.endsWith("/mcp") ? trimmed : `${trimmed}/mcp`;
-}
-
-function mcpSessionId(ctx: any): string | undefined {
-  const id = sessionID(ctx) ?? ctx?.sessionId ?? ctx?.sessionID ?? ctx?.session?.id;
-  return typeof id === "string" && id.length > 0 ? id : undefined;
-}
-
-function mcpSignal(signal?: AbortSignal): AbortSignal | undefined {
-  const timeout = timeoutSignal(MCP_REQUEST_TIMEOUT_MS);
-  if (!signal) return timeout;
-  if (!timeout) return signal;
-  const anyFactory = (AbortSignal as unknown as { any?: (signals: AbortSignal[]) => AbortSignal }).any;
-  return anyFactory ? anyFactory([signal, timeout]) : timeout;
-}
-
-async function mcpRpc(method: string, params?: unknown, ctx?: any, signal?: AbortSignal): Promise<any> {
-  const id = ++mcpRequestId;
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "Accept": "application/json, text/event-stream",
-    ...authHeaders(),
-  };
-  const session = mcpSessionId(ctx);
-  if (session) {
-    headers["X-Memory-Actor-Session-Id"] = session;
-    headers["Mcp-Session-Id"] = session;
-  }
-  const response = await fetch(MCP_SERVER, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ jsonrpc: "2.0", id, method, params: params ?? {} }),
-    signal: mcpSignal(signal),
-  });
-  if (!response.ok) throw new Error(`sessionmunch MCP ${method} failed: HTTP ${response.status}`);
-  const payload = await response.json();
-  if (payload?.error) throw new Error(`sessionmunch MCP ${method} failed: ${payload.error.message ?? JSON.stringify(payload.error)}`);
-  if (payload?.result?.isError) throw new Error(`sessionmunch MCP ${method} returned isError`);
-  return payload?.result;
-}
-
-function toolInputSchema(tool: any): any {
-  return tool?.inputSchema ?? { type: "object", additionalProperties: true };
-}
-
-async function bootstrapMcpBridge(pi: any): Promise<void> {
-  try {
-    await mcpRpc("initialize", {
-      protocolVersion: "2025-03-26",
-      capabilities: {},
-      clientInfo: { name: "sessionmunch-pi-extension", version: "0.0.0" },
-    });
-    try { await mcpRpc("notifications/initialized"); } catch (_e) {}
-    const listed = await mcpRpc("tools/list");
-    for (const tool of listed?.tools ?? []) {
-      try {
-        pi.registerTool({
-          name: tool.name,
-          label: tool.name,
-          description: tool.description,
-          parameters: toolInputSchema(tool),
-          execute: async (_toolCallId: string, params: unknown, signal?: AbortSignal, _onUpdate?: unknown, ctx?: any) => {
-            const result = await mcpRpc("tools/call", { name: tool.name, arguments: params ?? {} }, ctx, signal);
-            return { content: result?.content ?? [], details: result };
-          },
-        });
-      } catch (_e) {
-        // Duplicate registration or tool-shape mismatch must not break lifecycle capture.
-      }
-    }
-  } catch (_e) {
-    // MCP bridge is best-effort; extension load and lifecycle capture must survive.
-  }
-}
-"#
+    include_str!("../../templates/plugins/pi_mcp_bridge.ts")
 }
 
 fn build_omp_extension(
@@ -4096,359 +3085,15 @@ fn build_omp_extension(
         .unwrap_or_else(|| "const TOKEN: string | null = null;\n".to_string());
     let apply_marker_params = ts_apply_marker_params(project_strategy);
     let capture_policy = ts_capture_policy_v1(capture_mode);
-    let body = format!(
-        r#"// Auto-generated by `sessionmunch install-hooks --agent omp --apply`.
-// Edit by re-running the command, not by hand — install-hooks
-// will overwrite this file (with a `.bak-<ts>` backup) on each
-// re-run.
-
-import {{ execFileSync }} from "node:child_process";
-import {{ closeSync, existsSync, openSync, readFileSync as readMarkerText, readSync }} from "node:fs";
-import {{ basename, dirname, join, resolve, sep }} from "node:path";
-import {{ homedir }} from "node:os";
-
-const SERVER = {server_literal}.replace(/\/+$/, "");
-const AGENT = "omp";
-{token_line}
-{capture_policy}
-
-function timeoutSignal(ms: number): AbortSignal | undefined {{
-  if (typeof AbortSignal === "undefined") return undefined;
-  const factory = (AbortSignal as unknown as {{ timeout?: (ms: number) => AbortSignal }}).timeout;
-  return factory ? factory(ms) : undefined;
-}}
-
-function authHeaders(): Record<string, string> {{
-  const token = resolveToken();
-  return token ? {{ Authorization: `Bearer ${{token}}` }} : {{}};
-}}
-
-const HOOK_QUEUE_MAX = 100;
-const HOOK_FLUSH_INTERVAL_MS = 2000;
-const HOOK_FLUSH_THRESHOLD = 20;
-const HOOK_INTER_REQUEST_DELAY_MS = 50;
-const HOOK_REQUEST_TIMEOUT_MS = 2000;
-const HOOK_DISPOSE_DRAIN_BUDGET_MS = 2000;
-const HOOK_IMMEDIATE_EVENTS = new Set(["session-start", "stop", "session-end", "pre-compact"]);
-
-type HookQueueItem = {{ event: string; url: URL; payload: Record<string, unknown> }};
-const hookQueue: HookQueueItem[] = [];
-let hookFlushTimer: ReturnType<typeof setTimeout> | undefined;
-let hookDraining = false;
-let hookDrainPromise: Promise<void> | undefined;
-
-function sleep(ms: number): Promise<void> {{
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}}
-
-function scheduleHookFlush(): void {{
-  if (hookFlushTimer) return;
-  hookFlushTimer = setTimeout(() => {{
-    hookFlushTimer = undefined;
-    void requestHookDrain();
-  }}, HOOK_FLUSH_INTERVAL_MS);
-  hookFlushTimer.unref?.();
-}}
-
-function requestHookDrain(): Promise<void> {{
-  if (!hookDrainPromise) {{
-    hookDrainPromise = drainHookQueue().finally(() => {{
-      hookDrainPromise = undefined;
-      if (hookQueue.length > 0) void requestHookDrain();
-    }});
-  }}
-  return hookDrainPromise;
-}}
-
-function disposeDrainTimeout(): Promise<void> {{
-  return new Promise((resolve) => {{
-    const timer = setTimeout(resolve, HOOK_DISPOSE_DRAIN_BUDGET_MS);
-    timer.unref?.();
-  }});
-}}
-
-async function drainHookQueueForDispose(): Promise<void> {{
-  await Promise.race([requestHookDrain(), disposeDrainTimeout()]);
-}}
-
-function enqueueHook(event: string, url: URL, payload: Record<string, unknown>): void {{
-  if (hookQueue.length >= HOOK_QUEUE_MAX) hookQueue.shift();
-  hookQueue.push({{ event, url, payload }});
-  if (HOOK_IMMEDIATE_EVENTS.has(event) || hookQueue.length >= HOOK_FLUSH_THRESHOLD) {{
-    void requestHookDrain();
-  }} else {{
-    scheduleHookFlush();
-  }}
-}}
-
-async function drainHookQueue(): Promise<void> {{
-  if (hookDraining) return;
-  hookDraining = true;
-  if (hookFlushTimer) {{
-    clearTimeout(hookFlushTimer);
-    hookFlushTimer = undefined;
-  }}
-  try {{
-    while (hookQueue.length > 0) {{
-      const item = hookQueue.shift();
-      if (!item) break;
-      try {{
-        await fetch(item.url, {{
-          method: "POST",
-          headers: {{ "Content-Type": "application/json", ...authHeaders() }},
-          body: JSON.stringify(item.payload),
-          signal: timeoutSignal(HOOK_REQUEST_TIMEOUT_MS),
-        }}).catch(() => undefined);
-      }} catch (_e) {{
-        // Best-effort capture. Hooks must never block the agent.
-      }}
-      if (hookQueue.length > 0) await sleep(HOOK_INTER_REQUEST_DELAY_MS);
-    }}
-  }} finally {{
-    hookDraining = false;
-  }}
-}}
-
-function findMarker(cwd: string | undefined): string | undefined {{
-  if (!cwd) return undefined;
-  let dir = resolve(cwd);
-  const home = homedir();
-  let boundary: string | undefined;
-  if (home && (dir === home || dir.startsWith(home.endsWith(sep) ? home : home + sep))) {{
-    boundary = home;
-  }} else if (home) {{
-    let probe = dir;
-    while (probe && probe !== dirname(probe)) {{
-      if (existsSync(join(probe, ".git"))) {{
-        boundary = probe;
-        break;
-      }}
-      probe = dirname(probe);
-    }}
-    boundary ??= dir;
-  }}
-  while (dir && dir !== dirname(dir)) {{
-    const marker = join(dir, ".sessionmunch.toml");
-    if (existsSync(marker)) return marker;
-    if (boundary && dir === boundary) return undefined;
-    dir = dirname(dir);
-  }}
-  return undefined;
-}}
-
-function tomlKey(text: string, key: string): string | undefined {{
-  const re = new RegExp(`^\\s*${{key}}\\s*=\\s*"([^"]*)"`);
-  for (const line of text.split(/\r?\n/)) {{
-    const match = re.exec(line);
-    if (match) return match[1];
-  }}
-  return undefined;
-}}
-
-
-function repoRootProject(cwd: string | undefined): string | undefined {{
-  if (!cwd) return undefined;
-  try {{
-    const inside = execFileSync("git", ["-C", cwd, "rev-parse", "--is-inside-work-tree"], {{
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }}).trim();
-    if (inside !== "true") return undefined;
-    const common = execFileSync("git", ["-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"], {{
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }}).trim();
-    if (!common) return undefined;
-    const root = dirname(common);
-    if (!root || root === dirname(root)) return undefined;
-    return basename(root);
-  }} catch (_e) {{
-    return undefined;
-  }}
-}}
-{apply_marker_params}
-
-function sessionID(ctx: any): string | undefined {{
-  const id = ctx?.sessionManager?.getSessionId?.();
-  return typeof id === "string" && id.length > 0 ? id : undefined;
-}}
-
-function modelName(model: any): string | undefined {{
-  const name = model?.id ?? model?.name ?? model?.model;
-  return typeof name === "string" && name.length > 0 ? name : undefined;
-}}
-
-function sessionPayload(ctx: any): Record<string, unknown> {{
-  return {{
-    sessionID: sessionID(ctx),
-    cwd: ctx?.cwd,
-    model: modelName(ctx?.model),
-  }};
-}}
-
-function stringify(value: unknown): string {{
-  if (value === null || value === undefined) return "";
-  if (typeof value === "string") return value;
-  try {{
-    return JSON.stringify(value);
-  }} catch (_e) {{
-    return String(value);
-  }}
-}}
-
-function contentToText(content: unknown): string {{
-  if (content === null || content === undefined) return "";
-  if (!Array.isArray(content)) return stringify(content);
-  return content
-    .map((part: any) => {{
-      if (typeof part?.text === "string") return part.text;
-      if (typeof part?.content === "string") return part.content;
-      if (typeof part?.type === "string") return `[${{part.type}}]`;
-      return stringify(part);
-    }})
-    .filter(Boolean)
-    .join("\n\n")
-    .trim();
-}}
-
-const startedSessions = new Set<string>();
-const handoffChecked = new Set<string>();
-const preCompactLast = new Map<string, number>();
-
-function startSession(ctx: any, extra: Record<string, unknown> = {{}}): void {{
-  const id = sessionID(ctx);
-  if (!id || startedSessions.has(id)) return;
-  startedSessions.add(id);
-  // Generated integrations inject through fetchHandoff below. In managed mode
-  // a queued SessionStart response is not model-visible and must not consume
-  // the workstream context before that synchronous fetch receives it.
-  if (!process.env.SESSIONMUNCH_RUN_ID) {{
-    postHook("session-start", {{ ...sessionPayload(ctx), ...extra }});
-  }}
-}}
-
-function postPreCompact(ctx: any): void {{
-  startSession(ctx);
-  const key = sessionID(ctx) || "unknown";
-  const now = Date.now();
-  const last = preCompactLast.get(key) ?? 0;
-  if (now - last < 1000) return;
-  preCompactLast.set(key, now);
-  postHook("pre-compact", sessionPayload(ctx));
-}}
-
-function postHook(event: string, payload: Record<string, unknown>): void {{
-  const url = new URL(`${{SERVER}}/hook`);
-  url.searchParams.set("event", event);
-  url.searchParams.set("agent", AGENT);
-  applyMarkerParams(url, typeof payload.cwd === "string" ? payload.cwd : undefined);
-  const policy = capturePolicy(payload, typeof payload.cwd === "string" ? payload.cwd : undefined);
-  if (policy.disposition === "drop") return;
-  try {{
-    enqueueHook(event, url, policy.payload);
-  }} catch (_e) {{
-    // Best-effort capture. Hooks must never block the agent.
-  }}
-}}
-
-async function fetchHandoff(cwd: string, id: string | undefined): Promise<string | undefined> {{
-  const url = new URL(`${{SERVER}}/handoff`);
-  url.searchParams.set("agent", AGENT);
-  url.searchParams.set("cwd", cwd);
-  if (id) url.searchParams.set("session_id", id);
-  applyMarkerParams(url, cwd);
-  try {{
-    const response = await fetch(url, {{
-      headers: authHeaders(),
-      signal: timeoutSignal(1000),
-    }});
-    if (!response.ok) return undefined;
-    const text = (await response.text()).trim();
-    return text.length > 0 ? text : undefined;
-  }} catch (_e) {{
-    return undefined;
-  }}
-}}
-
-export default function SessionMunchExtension(api: any): void {{
-  api.on("session_start", (_event: any, ctx: any) => {{
-    startSession(ctx);
-  }});
-
-  api.on("before_agent_start", async (event: any, ctx: any) => {{
-    startSession(ctx);
-    postHook("user-prompt", {{
-      ...sessionPayload(ctx),
-      prompt: event?.prompt,
-      imageCount: Array.isArray(event?.images) ? event.images.length : undefined,
-    }});
-
-    const id = sessionID(ctx);
-    if (!id || handoffChecked.has(id)) return;
-    handoffChecked.add(id);
-    const handoff = await fetchHandoff(ctx?.cwd ?? "", id);
-    if (!handoff) return;
-    return {{
-      message: {{
-        customType: "sessionmunch-handoff",
-        content: handoff,
-        display: false,
-        attribution: "agent",
-      }},
-    }};
-  }});
-
-  api.on("tool_call", (event: any, ctx: any) => {{
-    startSession(ctx);
-    postHook("pre-tool-use", {{
-      ...sessionPayload(ctx),
-      tool: event?.toolName,
-      callID: event?.toolCallId,
-      args: event?.input,
-    }});
-  }});
-
-  api.on("tool_result", (event: any, ctx: any) => {{
-    startSession(ctx);
-    postHook("post-tool-use", {{
-      ...sessionPayload(ctx),
-      tool: event?.toolName,
-      callID: event?.toolCallId,
-      args: event?.input,
-      output: contentToText(event?.content),
-      details: event?.details,
-      isError: event?.isError,
-    }});
-  }});
-
-  api.on("session_before_compact", (_event: any, ctx: any) => {{
-    postPreCompact(ctx);
-  }});
-
-  api.on("session_compact", (_event: any, ctx: any) => {{
-    postPreCompact(ctx);
-  }});
-
-  api.on("session.compacting", (_event: any, ctx: any) => {{
-    postPreCompact(ctx);
-  }});
-
-  api.on("agent_end", (_event: any, ctx: any) => {{
-    startSession(ctx);
-    postHook("stop", sessionPayload(ctx));
-  }});
-
-  api.on("session_shutdown", async (_event: any, ctx: any) => {{
-    startSession(ctx);
-    postHook("session-end", sessionPayload(ctx));
-    await drainHookQueueForDispose();
-  }});
-}}
-"#,
-        server_literal = ts_string_literal(server_url),
-        token_line = token_line,
-    );
-    // Anchors are compile-time constants over this same file's template;
+    let body = include_str!("../../templates/plugins/omp_extension.ts")
+        .replace("__SESSIONMUNCH_CAPTURE_POLICY__", &capture_policy)
+        .replace("__SESSIONMUNCH_APPLY_MARKER_PARAMS__", &apply_marker_params)
+        .replace(
+            "__SESSIONMUNCH_SERVER_LITERAL__",
+            &ts_string_literal(server_url),
+        )
+        .replace("__SESSIONMUNCH_TOKEN_LINE__", &token_line);
+    // Anchors are compile-time constants over the bundled template;
     // a mismatch is a template edit that forgot the spool patch.
     add_hook_spooling(body).expect("generated TS integration lost its hook-spool anchors")
 }
@@ -4998,10 +3643,7 @@ fn apply_to_zero_hooks(
     data_dir: &Path,
     args: &InstallHooksArgs,
 ) -> Result<()> {
-    let path = match &args.config_file {
-        Some(p) => p.clone(),
-        None => zero_hooks_path()?,
-    };
+    let path = apply_target_path(args, zero_hooks_path)?;
     let strategy = args.project_strategy.and_then(ProjectStrategyArg::baked);
     let payload = super::render_shared::build_zero_hooks_config(
         server_url,
@@ -5036,16 +3678,7 @@ fn apply_to_zero_hooks(
             Ok(())
         })
     })?;
-    println!(
-        "✓ {} {} ({})",
-        outcome.verb(),
-        path.display(),
-        match outcome {
-            ApplyOutcome::Created => "new file",
-            ApplyOutcome::Updated => "backup written next to it",
-            ApplyOutcome::NoOp => "already up to date",
-        }
-    );
+    report_apply_outcome(&path, outcome, "new file", "already up to date");
     if hooks_disabled {
         eprintln!(
             "# warning: this hooks.json sets \"enabled\": false at the top level, \
@@ -5176,10 +3809,7 @@ fn apply_to_zcode_hooks(
     data_dir: &Path,
     args: &InstallHooksArgs,
 ) -> Result<()> {
-    let path = match &args.config_file {
-        Some(p) => p.clone(),
-        None => zcode_config_path()?,
-    };
+    let path = apply_target_path(args, zcode_config_path)?;
     let strategy = args.project_strategy.and_then(ProjectStrategyArg::baked);
     let payload = super::render_shared::build_zcode_hooks_config(
         server_url,
@@ -5260,22 +3890,17 @@ fn apply_to_zcode_hooks(
             Ok(())
         })
     })?;
-    println!(
-        "✓ {} {} ({})",
-        outcome.verb(),
-        path.display(),
-        match outcome {
-            ApplyOutcome::Created => "new file",
-            ApplyOutcome::Updated => "backup written next to it",
-            // Only claim the install is current when nothing turned up
-            // that can stop ZCode loading it. Saying "already up to date"
-            // over a block ZCode rejects is the whole of #600, and the
-            // notes explaining it go to stderr, so a redirected stdout
-            // would otherwise carry the reassurance and none of the cause.
-            ApplyOutcome::NoOp if stale.is_empty() => "already up to date",
-            ApplyOutcome::NoOp => "unchanged; see the notes below",
-        }
-    );
+    // Only claim the install is current when nothing turned up that can
+    // stop ZCode loading it. Saying "already up to date" over a block ZCode
+    // rejects is the whole of #600, and the notes explaining it go to
+    // stderr, so a redirected stdout would otherwise carry the reassurance
+    // and none of the cause.
+    let unchanged = if stale.is_empty() {
+        "already up to date"
+    } else {
+        "unchanged; see the notes below"
+    };
+    report_apply_outcome(&path, outcome, "new file", unchanged);
     if hooks_disabled {
         eprintln!(
             "# warning: this config sets \"enabled\": false inside `hooks`, \

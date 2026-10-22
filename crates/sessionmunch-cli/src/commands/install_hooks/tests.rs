@@ -472,6 +472,191 @@ fn stub_scripts(dir: &Path, names: &[&str]) {
     }
 }
 
+/// Stage `hooks_dir` under `staging_data_local` and install `payload`
+/// (built against the staged scripts) through `target`'s shared apply path.
+fn apply_staged_json_hooks_in(
+    target: &JsonHookTarget,
+    hooks_dir: &Path,
+    staging_data_local: &Path,
+    args: &InstallHooksArgs,
+    payload: impl FnOnce(&Path) -> Result<JsonHookPayload>,
+) -> Result<()> {
+    let staged = stage_hook_scripts_in(hooks_dir, target.label, staging_data_local)?;
+    let payload = payload(&staged_command_dir(&staged, target.label))?;
+    write_json_hooks(target, &payload, None, args)
+}
+
+/// Claude Code's apply path with the script-form payload, so assertions on
+/// staged script paths hold on every platform.
+fn apply_to_claude_code_settings_in(
+    hooks_dir: &Path,
+    server_url: &str,
+    auth_token: Option<&str>,
+    data_dir: &Path,
+    staging_data_local: &Path,
+    args: &InstallHooksArgs,
+) -> Result<()> {
+    apply_staged_json_hooks_in(
+        &CLAUDE_CODE_HOOKS,
+        hooks_dir,
+        staging_data_local,
+        args,
+        |command_dir| {
+            let capture_prompts = install_claude_prompt_capture(args);
+            let payload = configure_claude_prompt_capture(
+                crate::commands::render_shared::build_claude_code_script_payload_for_test(
+                    command_dir,
+                    server_url,
+                    auth_token,
+                    Some(data_dir),
+                    args.project_strategy.and_then(ProjectStrategyArg::baked),
+                    args.capture_assistant,
+                ),
+                capture_prompts,
+            );
+            let withdrawn: &'static [&'static str] = if capture_prompts {
+                &[]
+            } else {
+                &[CLAUDE_PROMPT_EVENT]
+            };
+            Ok(JsonHookPayload {
+                events: json_hook_events(&payload, "hooks", "claude-code")?,
+                withdrawn,
+            })
+        },
+    )
+}
+
+fn apply_to_devin_settings_in(
+    hooks_dir: &Path,
+    server_url: &str,
+    auth_token: Option<&str>,
+    data_dir: &Path,
+    staging_data_local: &Path,
+    args: &InstallHooksArgs,
+) -> Result<()> {
+    apply_staged_json_hooks_in(
+        &DEVIN_HOOKS,
+        hooks_dir,
+        staging_data_local,
+        args,
+        |command_dir| {
+            json_hook_payload(
+                &DEVIN_HOOKS,
+                command_dir,
+                server_url,
+                auth_token,
+                data_dir,
+                args.project_strategy.and_then(ProjectStrategyArg::baked),
+                args,
+            )
+        },
+    )
+}
+
+fn apply_to_command_code_settings_in(
+    hooks_dir: &Path,
+    server_url: &str,
+    auth_token: Option<&str>,
+    data_dir: &Path,
+    staging_data_local: &Path,
+    args: &InstallHooksArgs,
+) -> Result<()> {
+    apply_staged_json_hooks_in(
+        &COMMAND_CODE_HOOKS,
+        hooks_dir,
+        staging_data_local,
+        args,
+        |command_dir| {
+            profile_script_payload(
+                &COMMAND_CODE_HOOKS,
+                &COMMAND_CODE_PROFILE,
+                command_dir,
+                server_url,
+                auth_token,
+                data_dir,
+                args,
+            )
+        },
+    )
+}
+
+fn apply_to_codex_settings_in(
+    hooks_dir: &Path,
+    server_url: &str,
+    auth_token: Option<&str>,
+    data_dir: &Path,
+    staging_data_local: &Path,
+    args: &InstallHooksArgs,
+) -> Result<()> {
+    apply_staged_json_hooks_in(
+        &CODEX_HOOKS,
+        hooks_dir,
+        staging_data_local,
+        args,
+        |command_dir| {
+            profile_script_payload(
+                &CODEX_HOOKS,
+                &CODEX_PROFILE,
+                command_dir,
+                server_url,
+                auth_token,
+                data_dir,
+                args,
+            )
+        },
+    )
+}
+
+/// A profile target's payload in script form, so assertions on staged
+/// script paths hold on every platform.
+fn profile_script_payload(
+    target: &JsonHookTarget,
+    profile: &HookProfile,
+    command_dir: &Path,
+    server_url: &str,
+    auth_token: Option<&str>,
+    data_dir: &Path,
+    args: &InstallHooksArgs,
+) -> Result<JsonHookPayload> {
+    let payload = crate::commands::render_shared::build_profile_script_payload_for_test(
+        profile,
+        command_dir,
+        server_url,
+        auth_token,
+        target.label,
+        Some(data_dir),
+        args.project_strategy.and_then(ProjectStrategyArg::baked),
+    );
+    Ok(JsonHookPayload {
+        events: json_hook_events(&payload, "hooks", target.label)?,
+        withdrawn: &[],
+    })
+}
+
+/// Render `target`'s payload against `command_dir` and merge it into
+/// `config_path`, without staging or reporting.
+fn merge_json_target(
+    target: &JsonHookTarget,
+    command_dir: &Path,
+    server_url: &str,
+    auth_token: Option<&str>,
+    data_dir: &Path,
+    project_strategy: Option<&str>,
+    config_path: &Path,
+) -> Result<ApplyOutcome> {
+    let payload = json_hook_payload(
+        target,
+        command_dir,
+        server_url,
+        auth_token,
+        data_dir,
+        project_strategy,
+        &default_hook_args(),
+    )?;
+    merge_json_hooks(target, &payload, config_path)
+}
+
 fn default_hook_args() -> InstallHooksArgs {
     InstallHooksArgs {
         profile: None,
@@ -3267,7 +3452,8 @@ fn cursor_preserves_existing_user_hooks_and_adds_ours() {
     )
     .unwrap();
 
-    merge_cursor_hooks(
+    merge_json_target(
+        &CURSOR_HOOKS,
         hooks_tmp.path(),
         "http://127.0.0.1:49374",
         None,
@@ -3315,7 +3501,8 @@ fn cursor_apply_is_idempotent() {
     let config_tmp = TempDir::new().unwrap();
     let config_path = config_tmp.path().join("hooks.json");
 
-    let first = merge_cursor_hooks(
+    let first = merge_json_target(
+        &CURSOR_HOOKS,
         hooks_tmp.path(),
         "http://127.0.0.1:49374",
         None,
@@ -3330,7 +3517,8 @@ fn cursor_apply_is_idempotent() {
         "first apply should not be a no-op"
     );
 
-    let second = merge_cursor_hooks(
+    let second = merge_json_target(
+        &CURSOR_HOOKS,
         hooks_tmp.path(),
         "http://127.0.0.1:49374",
         None,
@@ -3367,7 +3555,8 @@ fn codex_preserves_unrelated_keys_and_adds_hooks() {
     // Pre-existing settings with an unrelated key.
     fs::write(&config_path, r#"{"theme":"dark"}"#).unwrap();
 
-    merge_codex_hooks(
+    merge_json_target(
+        &CODEX_HOOKS,
         hooks_tmp.path(),
         "http://127.0.0.1:49374",
         None,
@@ -3417,7 +3606,8 @@ fn codex_session_end_preserves_third_party_and_adds_ours() {
         )
         .unwrap();
 
-    merge_codex_hooks(
+    merge_json_target(
+        &CODEX_HOOKS,
         hooks_tmp.path(),
         "http://127.0.0.1:49374",
         None,
@@ -3537,7 +3727,8 @@ fn gemini_preserves_mcp_servers_and_adds_hooks() {
     // Pre-existing settings with an mcpServers entry.
     fs::write(&config_path, r#"{"mcpServers":{"foo":{}}}"#).unwrap();
 
-    merge_gemini_hooks(
+    merge_json_target(
+        &GEMINI_HOOKS,
         hooks_tmp.path(),
         "http://127.0.0.1:49374",
         None,
@@ -3596,7 +3787,8 @@ fn antigravity_preserves_existing_hooks_and_adds_ours() {
         )
         .unwrap();
 
-    merge_antigravity_hooks(
+    merge_json_target(
+        &ANTIGRAVITY_HOOKS,
         hooks_tmp.path(),
         "http://127.0.0.1:49374",
         None,
@@ -3648,7 +3840,8 @@ fn antigravity_apply_is_idempotent() {
     let config_tmp = TempDir::new().unwrap();
     let config_path = config_tmp.path().join("hooks.json");
 
-    let first = merge_antigravity_hooks(
+    let first = merge_json_target(
+        &ANTIGRAVITY_HOOKS,
         hooks_tmp.path(),
         "http://127.0.0.1:49374",
         None,
@@ -3663,7 +3856,8 @@ fn antigravity_apply_is_idempotent() {
         "first apply should not be a no-op"
     );
 
-    let second = merge_antigravity_hooks(
+    let second = merge_json_target(
+        &ANTIGRAVITY_HOOKS,
         hooks_tmp.path(),
         "http://127.0.0.1:49374",
         None,
@@ -4929,4 +5123,31 @@ fn grok_project_overlay_outside_repo_checks_only_cwd() {
     fs::create_dir_all(cwd_overlay.parent().unwrap()).unwrap();
     fs::write(&cwd_overlay, "# active").unwrap();
     assert_eq!(find_grok_project_overlay(&cwd, None), Some(cwd_overlay));
+}
+
+#[test]
+fn bundled_plugin_templates_fill_every_placeholder() {
+    let url = "http://127.0.0.1:49374/";
+    for (token, strategy, capture) in [
+        (None, None, "denylist"),
+        (Some("tok"), Some("git-root"), "allowlist"),
+    ] {
+        for (name, source) in [
+            (
+                "opencode",
+                build_opencode_plugin(url, token, strategy, capture),
+            ),
+            (
+                "opencode2",
+                build_opencode2_plugin(url, token, strategy, capture).unwrap(),
+            ),
+            ("omp", build_omp_extension(url, token, strategy, capture)),
+            ("pi", build_pi_extension(url, token, strategy, capture)),
+        ] {
+            assert!(
+                !source.contains("__SESSIONMUNCH_"),
+                "{name} plugin left a template placeholder unfilled"
+            );
+        }
+    }
 }
