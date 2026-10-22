@@ -57,10 +57,10 @@ impl BackupReceipt {
     }
 }
 
-/// Whether this process runs inside a container. Same signals as the
-/// serve handler: the official image sets `SESSIONMUNCH_IN_CONTAINER`;
-/// `/.dockerenv` (Docker) and `/run/.containerenv` (Podman) cover
-/// images that do not.
+/// Whether this process runs inside a container, for backups, `serve` and
+/// `install-hooks` alike: the official image sets `SESSIONMUNCH_IN_CONTAINER`;
+/// `/.dockerenv` (Docker) and `/run/.containerenv` (Podman) cover images
+/// that do not.
 #[must_use]
 pub fn running_in_container() -> bool {
     if std::env::var("SESSIONMUNCH_IN_CONTAINER").is_ok_and(|v| !v.trim().is_empty()) {
