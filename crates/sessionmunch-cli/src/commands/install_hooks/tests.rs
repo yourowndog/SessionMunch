@@ -4930,3 +4930,30 @@ fn grok_project_overlay_outside_repo_checks_only_cwd() {
     fs::write(&cwd_overlay, "# active").unwrap();
     assert_eq!(find_grok_project_overlay(&cwd, None), Some(cwd_overlay));
 }
+
+#[test]
+fn bundled_plugin_templates_fill_every_placeholder() {
+    let url = "http://127.0.0.1:49374/";
+    for (token, strategy, capture) in [
+        (None, None, "denylist"),
+        (Some("tok"), Some("git-root"), "allowlist"),
+    ] {
+        for (name, source) in [
+            (
+                "opencode",
+                build_opencode_plugin(url, token, strategy, capture),
+            ),
+            (
+                "opencode2",
+                build_opencode2_plugin(url, token, strategy, capture).unwrap(),
+            ),
+            ("omp", build_omp_extension(url, token, strategy, capture)),
+            ("pi", build_pi_extension(url, token, strategy, capture)),
+        ] {
+            assert!(
+                !source.contains("__SESSIONMUNCH_"),
+                "{name} plugin left a template placeholder unfilled"
+            );
+        }
+    }
+}
