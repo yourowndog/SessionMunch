@@ -90,16 +90,28 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
             let snapshots = dir
                 .clone()
                 .unwrap_or_else(|| config.data_dir.join("snapshots"));
-            let staging = import_dir.join("snapshot-home");
-            remove_staging(&staging)?;
-            let staged = stage_snapshot_home(&snapshots, &staging)
+            // One staging home per run, so concurrent imports (or a dry run
+            // beside a real one) never read or delete each other's files.
+            // Dropping the guard removes it, on error paths too.
+            std::fs::create_dir_all(&import_dir)
+                .with_context(|| format!("creating {}", import_dir.display()))?;
+            let staging = tempfile::Builder::new()
+                .prefix("snapshot-home-")
+                .tempdir_in(&import_dir)
+                .with_context(|| format!("creating a staging home in {}", import_dir.display()))?;
+            let staged = stage_snapshot_home(&snapshots, staging.path())
                 .with_context(|| format!("staging snapshots from {}", snapshots.display()))?;
             staging_losses = staged.losses;
             let harnesses = harnesses
                 .into_iter()
                 .filter(|harness| staged.harnesses.contains(harness))
                 .collect();
-            (staging.clone(), harnesses, false, Some(staging))
+            (
+                staging.path().to_path_buf(),
+                harnesses,
+                false,
+                Some(staging),
+            )
         }
         None => {
             let home = args
@@ -203,8 +215,11 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
         reports.push(report);
     }
     // Every transcript has been read; the staged links are no longer needed.
-    if let Some(staging) = &staging {
-        remove_staging(staging)?;
+    if let Some(staging) = staging {
+        let path = staging.path().to_path_buf();
+        staging
+            .close()
+            .with_context(|| format!("removing {}", path.display()))?;
     }
 
     let mut events_delivered = 0;
@@ -284,17 +299,6 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
         ));
     }
     Ok(())
-}
-
-/// Clear the staged snapshot home. It only ever holds links to, or copies of,
-/// snapshot blobs, so removing it loses nothing.
-fn remove_staging(staging: &Path) -> Result<()> {
-    match std::fs::remove_dir_all(staging) {
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-            Err(error).with_context(|| format!("clearing {}", staging.display()))
-        }
-        _ => Ok(()),
-    }
 }
 
 /// Reads one session's transcript tail after an optional cursor.

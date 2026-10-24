@@ -267,9 +267,19 @@ fn snapshot_imports_after_the_live_store_is_gone_and_artifacts_read_back() {
         imported["harnesses"][0]["artifacts_uploaded"], 1,
         "{imported}"
     );
+    let leftovers: Vec<_> = std::fs::read_dir(node_data.join("history-import"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("snapshot-home")
+        })
+        .collect();
     assert!(
-        !node_data.join("history-import/snapshot-home").exists(),
-        "the staged home is removed after the import"
+        leftovers.is_empty(),
+        "the staged home is removed: {leftovers:?}"
     );
 
     let hits = run_json(child(&node_data, &home, &url).args(["search-events", PROBE, "--json"]));
