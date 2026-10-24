@@ -1,0 +1,10 @@
+# AGENTS.md invariant #1: one config-read path. sessionmunch's own settings are
+# read by `Config::load`; host facts (harness config homes, $HOME, PATH, ...)
+# by the CLI's `HostEnv` snapshot. Both are taken once at the entry point and
+# passed down, so a stray read here is a missing parameter.
+disallowed-methods = [
+    { path = "std::env::var", reason = "read env in Config::load or take it from the CLI's HostEnv snapshot (AGENTS.md invariant #1)" },
+    { path = "std::env::var_os", reason = "read env in Config::load or take it from the CLI's HostEnv snapshot (AGENTS.md invariant #1)" },
+    { path = "std::env::vars", reason = "read env in Config::load or take it from the CLI's HostEnv snapshot (AGENTS.md invariant #1)" },
+    { path = "std::env::vars_os", reason = "read env in Config::load or take it from the CLI's HostEnv snapshot (AGENTS.md invariant #1)" },
+]

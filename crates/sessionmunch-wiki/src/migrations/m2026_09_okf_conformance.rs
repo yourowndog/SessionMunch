@@ -26,23 +26,13 @@ use crate::error::{WikiError, WikiResult};
 use crate::markdown::{Markdown, emit, parse};
 
 pub struct OkfConformance {
-    /// Where the backup archive lands; `None` = the user's home. The
-    /// registry fills it from `SESSIONMUNCH_BACKUP_DIR`; tests inject a
+    /// Where the backup archive lands; `None` = the default resolution. The
+    /// server fills it from `SESSIONMUNCH_BACKUP_DIR`; tests inject a
     /// tempdir directly.
     pub dest_override: Option<PathBuf>,
-}
-
-impl OkfConformance {
-    /// Construct with the destination taken from `SESSIONMUNCH_BACKUP_DIR`.
-    #[must_use]
-    pub fn from_env() -> Self {
-        Self {
-            dest_override: std::env::var("SESSIONMUNCH_BACKUP_DIR")
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .map(PathBuf::from),
-        }
-    }
+    /// [`crate::backup::running_in_container`]'s answer, which picks the
+    /// default destination.
+    pub in_container: bool,
 }
 
 const BACKUP_LABEL: &str = "okf-v0.2";
@@ -61,7 +51,8 @@ const BACKUP_LABEL: &str = "okf-v0.2";
 /// - otherwise archive the whole data dir now.
 ///
 /// `dest_override` is the destination directory (the serve path passes
-/// `SESSIONMUNCH_BACKUP_DIR`); `None` uses the default resolution. A `None`
+/// `SESSIONMUNCH_BACKUP_DIR`); `None` uses the default resolution, which
+/// `in_container` ([`crate::backup::running_in_container`]) steers. A `None`
 /// *return* means "no backup was needed/taken here".
 ///
 /// # Errors
@@ -69,6 +60,7 @@ const BACKUP_LABEL: &str = "okf-v0.2";
 pub fn snapshot_before_db_migration(
     data_dir: &Path,
     dest_override: Option<&Path>,
+    in_container: bool,
 ) -> WikiResult<Option<crate::backup::BackupReceipt>> {
     if crate::backup::BackupReceipt::load(data_dir).is_some_and(|r| r.archive_present()) {
         // A prior boot in this same upgrade already captured the pre-migration
@@ -80,8 +72,12 @@ pub fn snapshot_before_db_migration(
         // No pre-OKF wiki files → not a 1.x store being upgraded.
         return Ok(None);
     }
-    let receipt =
-        crate::backup::create_pre_migration_backup(data_dir, BACKUP_LABEL, dest_override)?;
+    let receipt = crate::backup::create_pre_migration_backup(
+        data_dir,
+        BACKUP_LABEL,
+        dest_override,
+        in_container,
+    )?;
     tracing::info!(
         archive = %receipt.archive_path.display(),
         size_bytes = receipt.size_bytes,
@@ -139,6 +135,7 @@ impl WikiMigration for OkfConformance {
                     data_dir,
                     BACKUP_LABEL,
                     self.dest_override.as_deref(),
+                    self.in_container,
                 )?;
                 tracing::info!(
                     archive = %receipt.archive_path.display(),
@@ -495,6 +492,7 @@ mod tests {
         let dest = TempDir::new().unwrap();
         let migration = OkfConformance {
             dest_override: Some(dest.path().to_path_buf()),
+            in_container: false,
         };
         migration
             .up(&store.writer, &tmp.path().join("wiki"))
@@ -538,6 +536,7 @@ mod tests {
         let dest = TempDir::new().unwrap();
         let migration = OkfConformance {
             dest_override: Some(dest.path().to_path_buf()),
+            in_container: false,
         };
         migration
             .up(&store.writer, &tmp.path().join("wiki"))
@@ -566,6 +565,7 @@ mod tests {
         let dest = TempDir::new().unwrap();
         let migration = OkfConformance {
             dest_override: Some(dest.path().to_path_buf()),
+            in_container: false,
         };
         migration
             .up(&store.writer, &tmp.path().join("wiki"))
@@ -635,7 +635,7 @@ mod tests {
         }
 
         let dest = TempDir::new().unwrap();
-        let receipt = snapshot_before_db_migration(tmp.path(), Some(dest.path()))
+        let receipt = snapshot_before_db_migration(tmp.path(), Some(dest.path()), false)
             .unwrap()
             .expect("a legacy store must be snapshotted");
 
@@ -668,7 +668,7 @@ mod tests {
     async fn snapshot_backs_up_a_legacy_store() {
         let (tmp, _store, _ws, _proj) = legacy_store().await;
         let dest = TempDir::new().unwrap();
-        let receipt = snapshot_before_db_migration(tmp.path(), Some(dest.path())).unwrap();
+        let receipt = snapshot_before_db_migration(tmp.path(), Some(dest.path()), false).unwrap();
         assert!(
             receipt.is_some(),
             "a legacy store must be snapshotted pre-open"
@@ -684,7 +684,7 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join("wiki")).unwrap();
         let dest = TempDir::new().unwrap();
         assert!(
-            snapshot_before_db_migration(tmp.path(), Some(dest.path()))
+            snapshot_before_db_migration(tmp.path(), Some(dest.path()), false)
                 .unwrap()
                 .is_none()
         );
@@ -697,7 +697,7 @@ mod tests {
     async fn okf_migration_reuses_the_pre_open_snapshot() {
         let (tmp, store, _ws, _proj) = legacy_store().await;
         let pre_dest = TempDir::new().unwrap();
-        let receipt = snapshot_before_db_migration(tmp.path(), Some(pre_dest.path()))
+        let receipt = snapshot_before_db_migration(tmp.path(), Some(pre_dest.path()), false)
             .unwrap()
             .expect("legacy store snapshotted pre-open");
         assert_eq!(std::fs::read_dir(pre_dest.path()).unwrap().count(), 1);
@@ -707,6 +707,7 @@ mod tests {
         let okf_dest = TempDir::new().unwrap();
         let migration = OkfConformance {
             dest_override: Some(okf_dest.path().to_path_buf()),
+            in_container: false,
         };
         migration
             .up(&store.writer, &tmp.path().join("wiki"))
@@ -728,13 +729,13 @@ mod tests {
         let (tmp, _store, _ws, _proj) = legacy_store().await;
         let dest = TempDir::new().unwrap();
         assert!(
-            snapshot_before_db_migration(tmp.path(), Some(dest.path()))
+            snapshot_before_db_migration(tmp.path(), Some(dest.path()), false)
                 .unwrap()
                 .is_some()
         );
         let after_first = std::fs::read_dir(dest.path()).unwrap().count();
         assert!(
-            snapshot_before_db_migration(tmp.path(), Some(dest.path()))
+            snapshot_before_db_migration(tmp.path(), Some(dest.path()), false)
                 .unwrap()
                 .is_none(),
             "a second snapshot when a usable backup exists must be a no-op"
@@ -753,6 +754,7 @@ mod tests {
         std::fs::write(&blocked, b"a file, not a dir").unwrap();
         let migration = OkfConformance {
             dest_override: Some(blocked),
+            in_container: false,
         };
         let result = migration.up(&store.writer, &tmp.path().join("wiki")).await;
         assert!(result.is_err(), "migration must refuse without a backup");
@@ -824,7 +826,7 @@ mod tests {
         );
 
         let dest = TempDir::new().unwrap();
-        let receipt = snapshot_before_db_migration(tmp.path(), Some(dest.path())).unwrap();
+        let receipt = snapshot_before_db_migration(tmp.path(), Some(dest.path()), false).unwrap();
         assert!(
             receipt.is_none(),
             "a conformant store plus a ledger must not trigger a backup"
@@ -849,7 +851,7 @@ mod tests {
         assert_eq!(nonconformant_files(&wiki_root).unwrap(), vec![relative]);
         let dest = TempDir::new().unwrap();
         assert!(
-            snapshot_before_db_migration(tmp.path(), Some(dest.path()))
+            snapshot_before_db_migration(tmp.path(), Some(dest.path()), false)
                 .unwrap()
                 .is_some(),
             "ordinary legacy pages still require a pre-migration backup"
@@ -913,7 +915,7 @@ mod tests {
         );
 
         let dest = TempDir::new().unwrap();
-        let receipt = snapshot_before_db_migration(tmp.path(), Some(dest.path())).unwrap();
+        let receipt = snapshot_before_db_migration(tmp.path(), Some(dest.path()), false).unwrap();
         assert!(
             receipt.is_none(),
             "a conformant store plus a _pending/ sidecar must not trigger a backup"

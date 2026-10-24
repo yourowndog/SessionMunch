@@ -29,6 +29,7 @@ use fs2::FileExt as _;
 use serde::{Deserialize, Serialize};
 
 use super::hook_capture::{BatchOutcome, PostOutcome, build_client, post_batch, post_hook};
+use crate::host_env::HostEnv;
 
 /// Drop a spooled event after this many failed drain passes — bounds retries of
 /// a permanently-undeliverable event (e.g. a server URL that never comes back).
@@ -391,8 +392,18 @@ pub async fn drain_exclusive(
     total_budget: Duration,
     per_event_timeout: Duration,
     wait: DrainLockWait,
+    live_token: Option<&str>,
 ) -> Option<DrainResult> {
-    match drain_exclusive_result(spool, data_dir, total_budget, per_event_timeout, wait).await {
+    match drain_exclusive_result(
+        spool,
+        data_dir,
+        total_budget,
+        per_event_timeout,
+        wait,
+        live_token,
+    )
+    .await
+    {
         Ok(LockedDrainResult::Drained(result)) => Some(result),
         Ok(LockedDrainResult::LockBusy) | Err(_) => None,
     }
@@ -405,12 +416,13 @@ pub async fn drain_exclusive_result(
     total_budget: Duration,
     per_event_timeout: Duration,
     wait: DrainLockWait,
+    live_token: Option<&str>,
 ) -> std::io::Result<LockedDrainResult> {
     let Some(_lock) = acquire_drain_lock(spool, wait)? else {
         return Ok(LockedDrainResult::LockBusy);
     };
     Ok(LockedDrainResult::Drained(
-        drain(spool, data_dir, total_budget, per_event_timeout).await,
+        drain(spool, data_dir, total_budget, per_event_timeout, live_token).await,
     ))
 }
 
@@ -420,6 +432,7 @@ pub async fn drain_exclusive_within_budget(
     data_dir: &Path,
     total_budget: Duration,
     per_event_timeout: Duration,
+    live_token: Option<&str>,
 ) -> std::io::Result<LockedDrainResult> {
     let started = Instant::now();
     let Some(_lock) = acquire_drain_lock(spool, DrainLockWait::Bounded(total_budget))? else {
@@ -438,7 +451,14 @@ pub async fn drain_exclusive_within_budget(
         }));
     }
     Ok(LockedDrainResult::Drained(
-        drain(spool, data_dir, remaining_budget, per_event_timeout).await,
+        drain(
+            spool,
+            data_dir,
+            remaining_budget,
+            per_event_timeout,
+            live_token,
+        )
+        .await,
     ))
 }
 
@@ -449,6 +469,7 @@ pub async fn drain_until_quiescent(
     total_budget: Duration,
     per_event_timeout: Duration,
     wait: DrainLockWait,
+    live_token: Option<&str>,
 ) -> std::io::Result<LockedDrainResult> {
     let Some(_lock) = acquire_drain_lock(spool, wait)? else {
         return Ok(LockedDrainResult::LockBusy);
@@ -466,7 +487,14 @@ pub async fn drain_until_quiescent(
             return Ok(LockedDrainResult::Drained(combined));
         }
 
-        let result = drain(spool, data_dir, remaining_budget, per_event_timeout).await;
+        let result = drain(
+            spool,
+            data_dir,
+            remaining_budget,
+            per_event_timeout,
+            live_token,
+        )
+        .await;
         combined.sent += result.sent;
         combined.dropped += result.dropped;
         combined.remaining = result.remaining;
@@ -503,29 +531,13 @@ pub async fn drain_until_quiescent(
 ///
 /// Best-effort: returns counts and never errors, so a session boundary is never
 /// blocked beyond the budget and never fails the agent.
-pub async fn drain(
-    spool: &Path,
-    data_dir: &Path,
-    total_budget: Duration,
-    per_event_timeout: Duration,
-) -> DrainResult {
-    drain_with_live_token(
-        spool,
-        data_dir,
-        total_budget,
-        per_event_timeout,
-        live_static_token().as_deref(),
-    )
-    .await
-}
-
-/// [`drain`] with the current static bearer supplied explicitly.
 ///
-/// The environment is read once, at the boundary in [`drain`], and passed down
-/// as data. Tests drive this directly: mutating process-wide environment from a
-/// test would race every other test in the binary, and `set_var` is `unsafe` in
+/// `live_token` is the current static bearer ([`live_static_token`]), read
+/// from the environment once at the entry point and passed down as data.
+/// Tests supply it directly: mutating process-wide environment from a test
+/// would race every other test in the binary, and `set_var` is `unsafe` in
 /// this edition — which this workspace forbids outright.
-pub async fn drain_with_live_token(
+pub async fn drain(
     spool: &Path,
     data_dir: &Path,
     total_budget: Duration,
@@ -1057,8 +1069,8 @@ pub(crate) const LIVE_TOKEN_ENV: &str = "SESSIONMUNCH_AUTH_TOKEN";
 /// token, and passes it down in the child's environment. A drain started by
 /// hand, or by a hook running against a server that needs no auth, simply has
 /// none — and the re-resolve below is skipped rather than guessed at.
-fn live_static_token() -> Option<String> {
-    std::env::var(LIVE_TOKEN_ENV).ok().filter(|t| !t.is_empty())
+pub(crate) fn live_static_token(host: &HostEnv) -> Option<String> {
+    host.var(LIVE_TOKEN_ENV).filter(|t| !t.is_empty())
 }
 
 /// The token to retry a `401` with, or `None` when retrying is pointless.
@@ -1484,6 +1496,7 @@ mod tests {
             tmp.path(),
             Duration::from_secs(2),
             Duration::from_millis(200),
+            None,
         )
         .await;
         assert_eq!(r.sent, 0);
@@ -1529,6 +1542,7 @@ mod tests {
             tmp.path(),
             Duration::from_secs(1),
             Duration::from_millis(200),
+            None,
         )
         .await;
         assert_eq!(r, DrainResult::default());
@@ -1598,6 +1612,7 @@ mod tests {
             Duration::from_secs(1),
             Duration::from_millis(100),
             DrainLockWait::NoWait,
+            None,
         )
         .await;
 
@@ -1619,6 +1634,7 @@ mod tests {
             tmp.path(),
             Duration::ZERO,
             Duration::from_millis(100),
+            None,
         )
         .await
         .unwrap();
@@ -1650,6 +1666,7 @@ mod tests {
             Duration::from_secs(5),
             Duration::from_secs(2),
             DrainLockWait::NoWait,
+            None,
         )
         .await
         .expect("lock acquired");
@@ -1675,6 +1692,7 @@ mod tests {
             Duration::from_secs(1),
             Duration::from_millis(100),
             DrainLockWait::NoWait,
+            None,
         )
         .await
         .unwrap_err();
@@ -1703,6 +1721,7 @@ mod tests {
                 tmp.path(),
                 Duration::from_secs(2),
                 Duration::from_millis(100),
+                None,
             )
             .await
             .dropped;
@@ -1735,6 +1754,7 @@ mod tests {
             tmp.path(),
             Duration::from_secs(2),
             Duration::from_millis(100),
+            None,
         )
         .await;
         assert_eq!(r.dropped, 1);
@@ -1781,6 +1801,7 @@ mod tests {
                 tmp.path(),
                 Duration::from_secs(2),
                 Duration::from_millis(500),
+                None,
             )
             .await;
             assert_eq!(r.sent, 0);
@@ -1857,6 +1878,7 @@ mod tests {
             tmp.path(),
             Duration::from_secs(30),
             Duration::from_secs(5),
+            None,
         )
         .await;
 
@@ -1920,6 +1942,7 @@ mod tests {
             tmp.path(),
             Duration::from_secs(5),
             Duration::from_millis(500),
+            None,
         )
         .await;
 
@@ -1968,6 +1991,7 @@ mod tests {
             tmp.path(),
             Duration::from_secs(5),
             Duration::from_millis(300),
+            None,
         )
         .await;
 
@@ -1999,6 +2023,7 @@ mod tests {
             tmp.path(),
             Duration::from_secs(5),
             Duration::from_secs(2),
+            None,
         )
         .await;
 
@@ -2054,6 +2079,7 @@ mod tests {
             tmp.path(),
             Duration::from_secs(5),
             Duration::from_secs(2),
+            None,
         )
         .await;
 
@@ -2103,6 +2129,7 @@ mod tests {
             tmp.path(),
             Duration::from_secs(5),
             Duration::from_secs(2),
+            None,
         )
         .await;
 
@@ -2192,7 +2219,7 @@ mod tests {
         );
         enqueue(&spool, &entry).unwrap();
 
-        let r = drain_with_live_token(
+        let r = drain(
             &spool,
             tmp.path(),
             Duration::from_secs(5),
@@ -2224,7 +2251,7 @@ mod tests {
         );
         enqueue(&spool, &entry).unwrap();
 
-        let r = drain_with_live_token(
+        let r = drain(
             &spool,
             tmp.path(),
             Duration::from_secs(5),
@@ -2475,7 +2502,14 @@ mod tests {
         write_spool_entry(&spool, "evt-0.json", format!("http://{addr}/hook?event=e0"));
         std::fs::write(spool.join("evt-1.json"), b"not a spool entry").unwrap();
 
-        let r = drain(&spool, tmp.path(), Duration::ZERO, Duration::from_secs(2)).await;
+        let r = drain(
+            &spool,
+            tmp.path(),
+            Duration::ZERO,
+            Duration::from_secs(2),
+            None,
+        )
+        .await;
 
         assert_eq!(r.sent, 0);
         assert_eq!(
@@ -2506,6 +2540,7 @@ mod tests {
             tmp.path(),
             Duration::from_secs(5),
             Duration::from_secs(2),
+            None,
         )
         .await;
 
@@ -2538,6 +2573,7 @@ mod tests {
             tmp.path(),
             Duration::from_secs(2),
             Duration::from_millis(100),
+            None,
         )
         .await;
 
@@ -2550,6 +2586,7 @@ mod tests {
             tmp.path(),
             Duration::from_secs(2),
             Duration::from_millis(100),
+            None,
         )
         .await;
         assert_eq!(second, DrainResult::default());
@@ -2580,6 +2617,7 @@ mod tests {
             tmp.path(),
             Duration::from_secs(5),
             Duration::from_secs(2),
+            None,
         )
         .await;
 
@@ -2613,6 +2651,7 @@ mod tests {
             tmp.path(),
             Duration::from_secs(5),
             Duration::from_secs(2),
+            None,
         )
         .await;
 
@@ -2653,6 +2692,7 @@ mod tests {
             tmp.path(),
             Duration::from_secs(5),
             Duration::from_secs(2),
+            None,
         )
         .await;
 
@@ -2695,6 +2735,7 @@ mod tests {
             tmp.path(),
             Duration::from_secs(5),
             Duration::from_secs(2),
+            None,
         )
         .await;
 
@@ -2732,6 +2773,7 @@ mod tests {
             tmp.path(),
             Duration::from_secs(5),
             Duration::from_secs(2),
+            None,
         )
         .await;
 
@@ -2775,6 +2817,7 @@ mod tests {
             tmp.path(),
             Duration::from_secs(5),
             Duration::from_secs(2),
+            None,
         )
         .await;
 
@@ -2877,6 +2920,7 @@ mod tests {
             tmp.path(),
             Duration::from_secs(2),
             Duration::from_millis(100),
+            None,
         )
         .await;
         assert_eq!(r.sent, 0);

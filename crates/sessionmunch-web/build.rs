@@ -11,6 +11,10 @@
 //! CI runs that mode on Linux and fails if the committed file is stale, which
 //! is the only freshness check: mtimes on a fresh clone mean nothing.
 
+// Cargo hands a build script its inputs (`OUT_DIR`, `CARGO_MANIFEST_DIR`,
+// `TAILWIND_BUILD`) only through the environment; there is no `Config` here.
+#![allow(clippy::disallowed_methods)]
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

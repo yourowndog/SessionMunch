@@ -12,7 +12,6 @@ description = "SQLite storage layer with single-writer actor and FTS5/sqlite-vec
 
 [dependencies]
 sessionmunch-core.workspace = true
-anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true

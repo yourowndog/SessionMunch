@@ -16,6 +16,7 @@ sessionmunch-core.workspace = true
 sessionmunch-store.workspace = true
 sessionmunch-wiki.workspace = true
 sessionmunch-consolidate.workspace = true
+sessionmunch-workstream.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -31,10 +32,13 @@ sha2.workspace = true
 
 [dev-dependencies]
 sessionmunch-test-support.workspace = true
+sessionmunch-workstream.workspace = true
 tempfile.workspace = true
 git2.workspace = true
 sessionmunch-llm.workspace = true
 async-trait.workspace = true
+# Query the artifact provenance registry in the e2e transport test.
+rusqlite.workspace = true
 
 [lints]
 workspace = true

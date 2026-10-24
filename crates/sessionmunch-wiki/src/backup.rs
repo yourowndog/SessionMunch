@@ -57,13 +57,14 @@ impl BackupReceipt {
     }
 }
 
-/// Whether this process runs inside a container. Same signals as the
-/// serve handler: the official image sets `SESSIONMUNCH_IN_CONTAINER`;
-/// `/.dockerenv` (Docker) and `/run/.containerenv` (Podman) cover
-/// images that do not.
+/// Whether this process runs inside a container, for backups, `serve` and
+/// `install-hooks` alike: the official image sets `SESSIONMUNCH_IN_CONTAINER`
+/// (the caller passes its value as `in_container_env`; this crate does not
+/// read the environment); `/.dockerenv` (Docker) and `/run/.containerenv`
+/// (Podman) cover images that do not.
 #[must_use]
-pub fn running_in_container() -> bool {
-    if std::env::var("SESSIONMUNCH_IN_CONTAINER").is_ok_and(|v| !v.trim().is_empty()) {
+pub fn running_in_container(in_container_env: Option<&str>) -> bool {
+    if in_container_env.is_some_and(|v| !v.trim().is_empty()) {
         return true;
     }
     Path::new("/.dockerenv").exists() || Path::new("/run/.containerenv").exists()
@@ -122,15 +123,10 @@ fn destination_dir(
 /// Compress `data_dir` into a timestamped tar.gz in the destination dir,
 /// verify the archive is readable and complete, write the receipt, and
 /// return it. Any failure aborts (the caller must not migrate).
+///
+/// `in_container` is [`running_in_container`]'s answer; it picks the default
+/// destination when there is no `dest_override`.
 pub fn create_pre_migration_backup(
-    data_dir: &Path,
-    label: &str,
-    dest_override: Option<&Path>,
-) -> WikiResult<BackupReceipt> {
-    create_pre_migration_backup_inner(data_dir, label, dest_override, running_in_container())
-}
-
-fn create_pre_migration_backup_inner(
     data_dir: &Path,
     label: &str,
     dest_override: Option<&Path>,
@@ -268,7 +264,8 @@ mod tests {
     fn a_backup_archives_everything_and_writes_a_receipt() {
         let data = data_dir_with_content();
         let dest = TempDir::new().unwrap();
-        let receipt = create_pre_migration_backup(data.path(), "test", Some(dest.path())).unwrap();
+        let receipt =
+            create_pre_migration_backup(data.path(), "test", Some(dest.path()), false).unwrap();
         // TempDir spellings differ from canonical on macOS (/var vs
         // /private/var); the backup works in canonical space.
         assert!(
@@ -290,7 +287,8 @@ mod tests {
     fn the_receipt_carries_destination_free_space() {
         let data = data_dir_with_content();
         let dest = TempDir::new().unwrap();
-        let receipt = create_pre_migration_backup(data.path(), "test", Some(dest.path())).unwrap();
+        let receipt =
+            create_pre_migration_backup(data.path(), "test", Some(dest.path()), false).unwrap();
         let free = receipt
             .dest_free_bytes
             .expect("free space should be readable for a real temp dir");
@@ -305,7 +303,7 @@ mod tests {
         let dest = TempDir::new().unwrap();
         let blocked = dest.path().join("blocked-file");
         std::fs::write(&blocked, b"a file, not a dir").unwrap();
-        let err = create_pre_migration_backup(data.path(), "test", Some(&blocked));
+        let err = create_pre_migration_backup(data.path(), "test", Some(&blocked), false);
         assert!(err.is_err(), "backup must fail when it cannot write");
         assert!(
             BackupReceipt::load(data.path()).is_none(),
@@ -319,7 +317,7 @@ mod tests {
     #[test]
     fn in_a_container_the_archive_lands_on_the_data_volume() {
         let data = data_dir_with_content();
-        let receipt = create_pre_migration_backup_inner(data.path(), "test", None, true).unwrap();
+        let receipt = create_pre_migration_backup(data.path(), "test", None, true).unwrap();
         assert!(
             receipt
                 .archive_path
@@ -337,11 +335,11 @@ mod tests {
     fn a_destination_inside_the_data_dir_is_never_self_included() {
         let data = data_dir_with_content();
         let dest = data.path().join("backups");
-        let first = create_pre_migration_backup(data.path(), "test", Some(&dest)).unwrap();
+        let first = create_pre_migration_backup(data.path(), "test", Some(&dest), false).unwrap();
         assert_eq!(first.entries, 2);
         // Receipt now exists in the data dir; a second run must archive
         // it (a real file) but never the prior archive in backups/.
-        let second = create_pre_migration_backup(data.path(), "test", Some(&dest)).unwrap();
+        let second = create_pre_migration_backup(data.path(), "test", Some(&dest), false).unwrap();
         assert_eq!(second.entries, 3, "data files + first receipt");
     }
 
@@ -357,9 +355,9 @@ mod tests {
         let alias = outer.path().join("alias");
         std::os::unix::fs::symlink(real.path(), &alias).unwrap();
         let dest = alias.join("backups");
-        let first = create_pre_migration_backup(&alias, "test", Some(&dest)).unwrap();
+        let first = create_pre_migration_backup(&alias, "test", Some(&dest), false).unwrap();
         assert_eq!(first.entries, 2);
-        let second = create_pre_migration_backup(&alias, "test", Some(&dest)).unwrap();
+        let second = create_pre_migration_backup(&alias, "test", Some(&dest), false).unwrap();
         assert_eq!(
             second.entries, 3,
             "data files + first receipt, never the archive"
@@ -369,7 +367,7 @@ mod tests {
     #[test]
     fn the_data_dir_root_is_refused_as_a_destination() {
         let data = data_dir_with_content();
-        let err = create_pre_migration_backup(data.path(), "test", Some(data.path()));
+        let err = create_pre_migration_backup(data.path(), "test", Some(data.path()), false);
         assert!(err.is_err(), "data dir root must be refused");
     }
 
@@ -377,7 +375,8 @@ mod tests {
     fn a_deleted_archive_is_reported_absent() {
         let data = data_dir_with_content();
         let dest = TempDir::new().unwrap();
-        let receipt = create_pre_migration_backup(data.path(), "test", Some(dest.path())).unwrap();
+        let receipt =
+            create_pre_migration_backup(data.path(), "test", Some(dest.path()), false).unwrap();
         std::fs::remove_file(&receipt.archive_path).unwrap();
         assert!(!receipt.archive_present());
     }
@@ -396,7 +395,8 @@ mod tests {
         std::fs::write(data.path().join(".serve.lock"), b"").unwrap();
         std::fs::write(data.path().join(".serve.lock.holder"), b"pid=1").unwrap();
         let dest = TempDir::new().unwrap();
-        let receipt = create_pre_migration_backup(data.path(), "test", Some(dest.path())).unwrap();
+        let receipt =
+            create_pre_migration_backup(data.path(), "test", Some(dest.path()), false).unwrap();
         assert_eq!(
             receipt.entries, 2,
             "only the two data files; serve lock and holder never archived"

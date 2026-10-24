@@ -1137,37 +1137,51 @@ mod tests {
         assert!(snapshot.last_unreported.is_empty());
     }
 
+    /// Writers and commits interleave without a commit failing or an
+    /// append going missing. The writers are bounded and pause between
+    /// appends: unbounded writers re-take the (unfair) commit lock as soon
+    /// as they drop it, starving the committing thread while the ledger
+    /// grows without limit, so the test's run time depended on host load.
     #[test]
     fn concurrent_appends_do_not_fail_a_commit() {
+        const WRITERS: usize = 3;
+        const APPENDS: usize = 40;
+        const LINE: &[u8] = b"2026-09-08T00:00:00Z stop x\n";
         let (_tmp, root, adapter) = committed(&[("ws/proj/log.md", "")]);
         let ledger = root.join("ws/proj/log.md");
-        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let writers: Vec<_> = (0..3)
+        let writers: Vec<_> = (0..WRITERS)
             .map(|_| {
                 let adapter = adapter.clone();
                 let ledger = ledger.clone();
-                let stop = Arc::clone(&stop);
                 std::thread::spawn(move || {
-                    while !stop.load(std::sync::atomic::Ordering::Relaxed) {
-                        adapter
-                            .append(&ledger, b"2026-09-08T00:00:00Z stop x\n")
-                            .unwrap();
+                    for _ in 0..APPENDS {
+                        adapter.append(&ledger, LINE).unwrap();
+                        std::thread::sleep(Duration::from_micros(200));
                     }
                 })
             })
             .collect();
-        for i in 0..30 {
+        let mut i = 0;
+        while !writers.iter().all(std::thread::JoinHandle::is_finished) {
             std::thread::sleep(Duration::from_millis(2));
             adapter.mark_written(&ledger);
             adapter
                 .commit_all(&format!("session {i}"))
                 .unwrap_or_else(|e| panic!("commit {i} failed: {e}"));
+            i += 1;
         }
-        stop.store(true, std::sync::atomic::Ordering::Relaxed);
         for w in writers {
             w.join().unwrap();
         }
+        adapter.mark_written(&ledger);
+        adapter.commit_all("final").unwrap();
         assert!(adapter.commit_count() >= 2);
+        let expected = String::from_utf8(LINE.repeat(WRITERS * APPENDS)).unwrap();
+        assert_eq!(
+            head_blob(&adapter, "ws/proj/log.md").as_deref(),
+            Some(expected.as_str()),
+            "every append reaches the committed ledger"
+        );
     }
 
     /// Not a test: run by hand with `--ignored --nocapture`.

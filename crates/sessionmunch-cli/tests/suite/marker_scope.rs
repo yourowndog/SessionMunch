@@ -44,7 +44,7 @@ fn search_stderr(cwd: &Path, data_dir: &Path, extra_env: &[(&str, &str)], args: 
             "SESSIONMUNCH_SERVER_URL",
             sessionmunch_test_support::dead_http_endpoint(),
         )
-        // `SESSIONMUNCH_HOME` outranks `$HOME` in `path_util::home_dir`, so an
+        // `SESSIONMUNCH_HOME` outranks `$HOME` in `HostEnv::home_dir`, so an
         // exported one on the developer's machine would unpin the walk.
         .env_remove("SESSIONMUNCH_HOME")
         .env_remove("SESSIONMUNCH_HOST_CWD")

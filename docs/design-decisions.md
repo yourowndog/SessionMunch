@@ -3,7 +3,7 @@
 > Historical rationale distilled from the original research and issue-tracker
 > reports. For the current operational map, read
 > [`ARCHITECTURE.md`](ARCHITECTURE.md); for current client support, use the
-> [README Support Matrix](../README.md#support-matrix). The research files are
+> [Support Matrix](support-matrix.md). The research files are
 > the historical receipts.
 
 ## 1. Product shape

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- The README, install guide, Hermes guide and MCP reference now match the shipped code. The harness table lists the four first-class integrations plus any MCP client, and it no longer claims Aider or Windsurf. The MCP reference documents all 20 tools. The install guide explains how to build the Docker image and binary locally until the first tagged release publishes them. (#11)
 - Product-wide rename: `ai-memory` is now SessionMunch (t_3f5184b0). Binary
   `sessionmunch`; crates `sessionmunch-*`; env `SESSIONMUNCH_*`; data dir
   `<data-local>/sessionmunch`; config `~/.config/sessionmunch`; marker
@@ -22,6 +23,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   API-key prefixes are unchanged (credential contract, not branding).
 
 ### Added
+- New `sessionmunch import sessions --since <window>` (North Star §5, P1
+  global historical import). It enumerates every session the local Claude
+  Code, Codex, OpenCode (v1 and v2), Pi, OMP, Kimi Code, Command Code, Kiro
+  (v2/v3), and Grok stores changed in the window regardless of the current
+  directory, reads them through the existing read-only transcript readers,
+  sanitizes the content before anything is hashed or leaves the machine, and
+  queues it in the crash-safe P1.2 session-event spool before draining it to
+  the hub's `POST /session-events`. Imported sessions reuse the hook path's
+  session id, so transcript events and hook capture converge on one session;
+  re-runs are idempotent on each stable event id, and a local per-session
+  cursor skips tails already queued. Payloads over 16 KiB keep a head and tail
+  inline with their length and SHA-256 and upload whole to `POST /artifacts`.
+  Crush (per-project databases) and Antigravity (undecodable steps) are
+  reported unsupported instead of skipped silently, and every unreadable
+  transcript is named. `--dry-run` counts without sending; `--json` reports
+  per-harness counts and losses. (#t_8b2e4cde)
+- New MCP tool `memory_search_events` and CLI `sessionmunch search-events`
+  (backed by `GET /admin/search-events`): lexical search over the session
+  event ledger across every project, machine, and harness, filterable by
+  `machine`, `harness`, `since`, newest-first ordering, or one project. Hits
+  carry time, machine, harness, workspace/project names, cwd, session id, kind,
+  and a snippet. MCP results follow the raw-observation owner rule. This is the
+  P1 exit condition: "when did we run X on Sleeper?" is answered from
+  preserved evidence. The MCP tool count is now 20. (#t_8b2e4cde)
+- Hook observations now also land in the session event ledger in the same
+  transaction (`obs:<observation id>`), and migration V66 backfills every
+  existing observation, so hook-captured history is searchable as events and
+  not only as consolidation input. `sessionmunch hook` sends the node's host
+  name as `machine`, and the server records it once per session in
+  `sessions.machine_id`. (#t_8b2e4cde)
+- Promoted the portable workstream-event concept into a general session-owned
+  source ledger (North Star §4, P1): a new `session_events` table lets hook,
+  transcript-import, and managed events converge on one `sessions` row, with
+  idempotent insertion on the stable source-derived `event_id` and per-event
+  best-effort model/provider metadata. Sessions gain provenance columns
+  (`native_session_id`, `machine_id`, `git_root`, `git_branch`,
+  `commit_at_start`, `source`, `import_cursor`), `project_id` becomes nullable
+  for global/host-wide rows, and the `sessions.agent_kind` CHECK enum —
+  historically a full-table rebuild per new harness — is dropped so harness is
+  free text and future harnesses require no schema change. `observations`
+  remains readable for compatibility but is no longer the authoritative
+  history. New store APIs: `begin_session_with_provenance`,
+  `append_session_events`, `update_session_provenance`, and `session_events`
+  read. Migration V65 is the last of its rebuild class. (#t_9d619ad4)
+- New authenticated `POST /session-events` ingest endpoint that lets remote
+  nodes drain batched session events into the promoted ledger. It runs behind
+  the same `require_bearer` machine middleware as `/hook` and `/workstream/*`
+  (401 on a missing/bad token, 400 on a malformed or schema-invalid batch, 202
+  on a valid one), scrubs every untrusted field through the sanitizer before
+  persistence, and is idempotent on the stable `event_id` — re-draining an
+  identical batch yields identical row counts and zero duplication. (#t_d4871a5a)
+- New `sessionmunch snapshot-harness-history` command that snapshots perishable
+  native harness transcript stores into hashed, content-addressed, read-only
+  artifacts (North Star §5.9, P0 "stop losing history"). It reuses the existing
+  transcript discovery/readers (`claude`, `codex`, `opencode`/`opencode2`,
+  `pi`, `omp`, `crush`, `kimi`, `command-code`, `kiro`/`kiro-v3`, `grok`),
+  opens sources read-only so they are never modified, stores each discovered
+  transcript file as a SHA-256-named blob under `<data_dir>/snapshots/<harness>/`
+  (default; `--to` to relocate), deduplicates identical content (re-running an
+  unchanged store writes no new blobs and produces a byte-identical
+  per-harness `index.json`), and reports per harness the discovered, snapshotted,
+  already-known, unreadable, missing, and unsupported sources so no loss is
+  silent. Sanitization-before-persistence is enforced through the canonical
+  `Sanitizer` before any source bytes are hashed, written, deduplicated, or
+  indexed (North Star invariant 7); SQLite-backed stores (opencode/opencode2/
+  crush) are snapshotted transactionally via the SQLite online backup API so
+  committed WAL-resident rows are preserved, then their text cells are scrubbed
+  in place so the preserved database carries no secrets and stays reopenable.
+  Durable provenance (machine identity, harness, absolute source/store identity,
+  capture time, best-effort repository HEAD/branch) is appended to a per-run
+  `provenance.jsonl` ledger without perturbing deterministic content identity.
+  Antigravity's id-addressed per-conversation stores are reported unsupported.
+  `--harness` limits to one harness; `--json` emits a structured report.
+  (#t_0bbcdf6b, #t_d0a5e721)
+- New `[cluster]` node-topology configuration (North Star P1.3) that lets a
+  node declare its role in a Brokentooth/Sleeper deployment — `node_id`
+  (validated machine-readable id), `role` (`standalone` default, `hub`, or
+  `satellite`), `central_url`, and `auth_token`. The default posture is
+  unchanged: strictly local standalone, no remote URL, no credential. The
+  config is validated at load time and fails closed — a `node_id`,
+  `central_url`, or `auth_token` supplied while role stays `standalone`, or a
+  hub/satellite missing its `node_id`/`central_url`, is refused at startup.
+  `serve` surfaces the resolved topology once at startup for a clustered node.
+  Env overrides: `SESSIONMUNCH_CLUSTER__NODE_ID`, `SESSIONMUNCH_CLUSTER__ROLE`,
+  `SESSIONMUNCH_CLUSTER__CENTRAL_URL`, `SESSIONMUNCH_CLUSTER__AUTH_TOKEN`.
+  (#t_663c8f39)
+- New content-addressed, gzip-compressed artifact store and authoritative
+  `POST /artifacts` ingest endpoint (North Star P1.4) for shipping large
+  sanitized evidence (full tool outputs, imported transcripts) from a remote
+  node to the canonical Hub. Blobs are named by the lowercase SHA-256 hex of
+  their raw bytes (deduplicating identical content), verified on both write
+  and read, and stored under `<data_dir>/artifacts/`; a lying caller-supplied
+  receipt hash is refused (409) with nothing persisted, a corrupt or tampered
+  pre-existing blob fails verification explicitly, and a retried store repairs
+  or rejects it — never silently succeeds. Provenance (session id, node id,
+  harness, event id/source) is linked per artifact in a small registry and a
+  satellite-side `ArtifactClient` ships uploads to the same wire contract the
+  server parses, so the two can never drift. (#t_663c8f39)
 - New opt-in local cross-encoder reranker behind the existing
   `ai_memory_core::CrossEncoder` trait: `ai_memory_llm::CrossEncoderReranker`
   runs the pinned `cross-encoder/ms-marco-MiniLM-L-6-v2` candle model locally,
@@ -31,6 +130,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `[0, 1]`; nothing constructs it yet — MCP `memory_query` wiring is a
   separate card and `AI_MEMORY_RERANKER` still accepts only `llm`
   (#t_c51f1a51).
+
+### Fixed
+- Patched new certificate-validation advisories RUSTSEC-2026-0382 (rustls-webpki 0.103.16) and RUSTSEC-2026-0383 (webpki-root-certs 1.0.10). The web UI now uses askama 0.16 without its config feature, which drops the unmaintained basic-toml (RUSTSEC-2026-0374). (#11)
+- Patched RUSTSEC-2026-0386 (tokio `AsyncFd` I/O safety) by moving to tokio 1.54.1 in the workspace and the companion importer. (#16)
+- Renamed the legacy Architecture & Data Ownership guide so it no longer
+  differs from the canonical `docs/ARCHITECTURE.md` only by letter case,
+  preventing case-insensitive macOS and Windows checkouts from compiling the
+  CLI documentation test against the wrong file. (#t_e43b5210)
+- A single malformed spool batch no longer wedges the session-event spool
+  head-of-line forever. `SpoolDrainer::drain_once` previously stopped the whole
+  pass on the first non-retryable delivery error and never advanced the
+  high-water mark, so every later pass re-hit the same bad batch and the good
+  batches behind it never shipped. A per-batch poison rejection (HTTP
+  400/413/422) is now moved to a dead-letter `quarantine/` directory as
+  evidence and the pass continues with the tail, so the spool drains completely
+  on reconnection. `DrainReport` gains `stopped_on_auth`, `quarantined_batches`,
+  and `quarantined_seqs`. (#t_0474cfae)
+- The drain sink now classifies HTTP status explicitly instead of treating
+  every non-202 as a permanent rejection. Only 400/413/422 are per-batch poison
+  and quarantine-eligible; 401/403 surface as a distinct `stopped_on_auth` auth
+  wall (previously indistinguishable from offline) and are never quarantined;
+  transient 408/425/429/5xx and wrong-endpoint 404/405/501 are retryable, so a
+  restart storm, rate limit, or misconfigured base URL retains its batches
+  instead of silently discarding them. (#t_0474cfae)
+- `sessionmunch legacy-import --apply` works on Windows. Relative page paths
+  were built by string-prefix matching with a hardcoded `/`, which left a
+  leading backslash that joined back onto the source as an absolute path, so
+  every Windows import failed after planning. Paths are now derived
+  component-wise and recorded `/`-separated on every OS. (#t_8b2e4cde)
+- Updated `rustls` to 0.23.46 and `quinn-proto` to 0.11.19 in the workspace and
+  the companion importer, resolving RUSTSEC-2026-0346/0347/0348/0349 and
+  RUSTSEC-2026-0338 through 0342; the importer also takes `anyhow` 1.0.104
+  (RUSTSEC-2026-0190). The `zip` extraction advisories
+  (RUSTSEC-2026-0367/0368/0369) are ignored with a recorded reason: `zip` comes
+  only through candle-core 0.11, which never calls the affected extract APIs and
+  has no release on zip 9 yet. `unsafe-libyaml` (RUSTSEC-2024-0449, unmaintained,
+  via `serde_yaml`) is likewise ignored pending a YAML parser replacement.
+  (#t_8b2e4cde)
+- Updated `rustls` to >=0.23.45 (and `rustls-webpki` to 0.103.15) across the
+  workspace and the companion importer, resolving the RUSTSEC-2026-0285
+  advisory. No advisory ignore added. (#t_93c1c58c)
+- Lexical passage ranking now preserves BM25 relevance order into
+  `lexical_rank` and RRF fusion. `search_passages_lexical` re-sorted hits by
+  passage UUID after the SQL `ORDER BY page_passages_fts.rank`, so the
+  top-ranked lexical passage was whichever id sorted first rather than the
+  strongest BM25 match (regression-covered). (#t_cfa1bfde)
+- `sessionmunch legacy-import --create-destination` flag now correctly gated:
+  previously it was a no-op (destination always created). Without the flag and
+  with a missing destination the command now bails with a clear error, working
+  as documented. (#t_83378b5e)
+- Legacy config workspace/project detection now handles both flat
+  (`workspace = "name"`) and TOML section (`[workspace]\nname = "name"`)
+  formats. Without this the fixture's config workspace was silently ignored.
+  (#t_83378b5e)
+- Nested subdirectories in legacy wiki pages (e.g. `notes/team.md`) are now
+  created during import. Previously only the project root was ensured; pages
+  in subdirectories failed silently. (#t_83378b5e)
+- Re-import idempotency check now correctly detects when all pages are already
+  copied (manifest-based), printing "nothing to do" instead of re-running the
+  full cycle. (#t_83378b5e)
+- `docs/legacy-import.md` rewritten to document the `sessionmunch legacy-import`
+  command (detection, plan, import with --apply, integrity checks, rollback,
+  resume). Previously it only covered the companion ai-memory-importer crate.
+  (#t_83378b5e)
 
 ## [2.2.1] - 2026-09-12
 

@@ -23,9 +23,10 @@ use serde_json::json;
 
 use crate::cli::{InstallMcpArgs, McpClient};
 use crate::commands::apply_shared::{ApplyOutcome, apply_atomic, mutate_json, mutate_toml};
-use crate::commands::path_util::{claude_config_dir, home_dir};
+use crate::commands::path_util::claude_config_dir;
 use crate::commands::render_shared::bearer_header_value;
 use crate::config::{Config, DEFAULT_MCP_URL};
+use crate::host_env::HostEnv;
 
 const GEMINI_MCP_TIMEOUT_MS: u64 = 5000;
 
@@ -54,7 +55,7 @@ enum JsonMcpLocation {
 /// # Errors
 /// Returns an error if JSON serialisation fails (should never happen
 /// for our handcrafted values).
-pub fn run(config: &Config, args: InstallMcpArgs) -> Result<()> {
+pub fn run(config: &Config, host: &HostEnv, args: InstallMcpArgs) -> Result<()> {
     let server_url = effective_mcp_server_url(config, &args);
     let args = InstallMcpArgs {
         server_url: Some(server_url),
@@ -63,12 +64,12 @@ pub fn run(config: &Config, args: InstallMcpArgs) -> Result<()> {
     };
     validate_args(&args)?;
     if args.apply {
-        return apply_to_config_file(&args);
+        return apply_to_config_file(host, &args);
     }
     let snippet = match args.client {
-        McpClient::ClaudeCode => render_claude_code(&args, &resolve_config_file(&args)?)?,
+        McpClient::ClaudeCode => render_claude_code(&args, &resolve_config_file(host, &args)?)?,
         McpClient::Codex => render_codex(&args),
-        McpClient::Grok => render_grok(&args)?,
+        McpClient::Grok => render_grok(host, &args)?,
         McpClient::OpenCode => render_opencode(&args)?,
         McpClient::OpenCode2 => render_opencode2(&args)?,
         McpClient::Cursor => render_cursor(&args)?,
@@ -159,15 +160,20 @@ fn validate_kiro_remote_url(server_url: &str) -> Result<()> {
 /// # Errors
 /// Returns an error for `Pi` (no MCP config), for Claude Desktop on
 /// unsupported OSes, or when `$HOME` can't be resolved.
-pub(crate) fn mcp_config_path(client: crate::cli::McpClient) -> Result<PathBuf> {
+pub(crate) fn mcp_config_path(host: &HostEnv, client: crate::cli::McpClient) -> Result<PathBuf> {
     use crate::cli::McpClient;
-    let home = || home_dir().context("could not locate $HOME for config-file auto-detect");
+    let home = || {
+        host.home_dir()
+            .context("could not locate $HOME for config-file auto-detect")
+    };
     Ok(match client {
-        McpClient::ClaudeCode => claude_code_config_path_in(std::env::var_os("CLAUDE_CONFIG_DIR"))?,
+        McpClient::ClaudeCode => {
+            claude_code_config_path_in(host, host.var_os("CLAUDE_CONFIG_DIR"))?
+        }
         McpClient::Codex => home()?.join(".codex").join("config.toml"),
         // Project scope is `.grok/config.toml` under cwd/repo; pass
         // --config-file for that case rather than inventing a second default.
-        McpClient::Grok => grok_home()?.join("config.toml"),
+        McpClient::Grok => grok_home(host)?.join("config.toml"),
         McpClient::OpenCode => home()?
             .join(".config")
             .join("opencode")
@@ -229,8 +235,10 @@ pub(crate) fn mcp_config_path(client: crate::cli::McpClient) -> Result<PathBuf> 
         // Kimi Code keeps its data dir at $KIMI_CODE_HOME when set,
         // falling back to ~/.kimi-code; MCP servers live in mcp.json at
         // that root.
-        McpClient::KimiCode => kimi_code_home(std::env::var_os("KIMI_CODE_HOME"))?.join("mcp.json"),
-        McpClient::KiroCli => kiro_home(std::env::var_os("KIRO_HOME"))?
+        McpClient::KimiCode => {
+            kimi_code_home(host, host.var_os("KIMI_CODE_HOME"))?.join("mcp.json")
+        }
+        McpClient::KiroCli => kiro_home(host, host.var_os("KIRO_HOME"))?
             .join("settings")
             .join("mcp.json"),
         McpClient::CommandCode => home()?.join(".commandcode").join("mcp.json"),
@@ -377,11 +385,15 @@ fn packaged_claude_desktop_config_path(local_packages_dir: &Path) -> Result<Opti
 /// while the same entry under `~/.claude.json` shows up in
 /// `claude mcp list`.) The env value comes in as a parameter so tests
 /// can exercise both branches without mutating process env.
-fn claude_code_config_path_in(env_override: Option<std::ffi::OsString>) -> Result<PathBuf> {
+fn claude_code_config_path_in(
+    host: &HostEnv,
+    env_override: Option<std::ffi::OsString>,
+) -> Result<PathBuf> {
     if let Some(dir) = claude_config_dir(env_override) {
         return Ok(dir.join(".claude.json"));
     }
-    Ok(home_dir()
+    Ok(host
+        .home_dir()
         .context("could not locate $HOME for ~/.claude.json")?
         .join(".claude.json"))
 }
@@ -389,33 +401,36 @@ fn claude_code_config_path_in(env_override: Option<std::ffi::OsString>) -> Resul
 /// Kimi Code's data dir: `$KIMI_CODE_HOME` when set (non-empty), else
 /// `~/.kimi-code`. The env value comes in as a parameter so tests can
 /// exercise both branches without mutating process env.
-fn kimi_code_home(env_override: Option<std::ffi::OsString>) -> Result<PathBuf> {
+fn kimi_code_home(host: &HostEnv, env_override: Option<std::ffi::OsString>) -> Result<PathBuf> {
     if let Some(dir) = env_override.filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(dir));
     }
-    Ok(home_dir()
+    Ok(host
+        .home_dir()
         .context("could not locate $HOME for config-file auto-detect")?
         .join(".kimi-code"))
 }
 
 /// Kiro CLI's global configuration root: `$KIRO_HOME` when set, otherwise
 /// `~/.kiro`. The override is injected to keep path tests process-local.
-fn kiro_home(env_override: Option<std::ffi::OsString>) -> Result<PathBuf> {
+fn kiro_home(host: &HostEnv, env_override: Option<std::ffi::OsString>) -> Result<PathBuf> {
     if let Some(dir) = env_override.filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(dir));
     }
-    Ok(home_dir()
+    Ok(host
+        .home_dir()
         .context("could not locate $HOME for Kiro configuration")?
         .join(".kiro"))
 }
 
 /// Resolve Grok Build CLI's user configuration root. Grok honours
 /// `GROK_HOME`; otherwise it uses `~/.grok`.
-pub(crate) fn grok_home() -> Result<PathBuf> {
-    if let Some(path) = std::env::var_os("GROK_HOME").filter(|path| !path.is_empty()) {
+pub(crate) fn grok_home(host: &HostEnv) -> Result<PathBuf> {
+    if let Some(path) = host.var_os("GROK_HOME").filter(|path| !path.is_empty()) {
         return Ok(PathBuf::from(path));
     }
-    Ok(home_dir()
+    Ok(host
+        .home_dir()
         .context("could not locate $HOME for Grok configuration")?
         .join(".grok"))
 }
@@ -423,20 +438,20 @@ pub(crate) fn grok_home() -> Result<PathBuf> {
 /// Resolve the user-config file for this client. Honours
 /// `--config-file` when provided, else uses the canonical default
 /// per client.
-fn resolve_config_file(args: &InstallMcpArgs) -> Result<PathBuf> {
+fn resolve_config_file(host: &HostEnv, args: &InstallMcpArgs) -> Result<PathBuf> {
     if let Some(p) = &args.config_file {
         return Ok(p.clone());
     }
-    mcp_config_path(args.client)
+    mcp_config_path(host, args.client)
 }
 
 /// Mutate the resolved client config file in place. Idempotent —
 /// re-runs that produce the same content are reported as no-op.
-fn apply_to_config_file(args: &InstallMcpArgs) -> Result<()> {
+fn apply_to_config_file(host: &HostEnv, args: &InstallMcpArgs) -> Result<()> {
     if matches!(args.client, McpClient::Pi) {
         bail!(pi_mcp_apply_guidance(args));
     }
-    let path = resolve_config_file(args)?;
+    let path = resolve_config_file(host, args)?;
     let outcome = match args.client {
         McpClient::Codex => apply_atomic(&path, |existing| {
             mutate_toml(existing, |doc| codex_upsert_mcp_server(doc, args))
@@ -1103,13 +1118,13 @@ fn render_codex(args: &InstallMcpArgs) -> String {
     out
 }
 
-fn render_grok(args: &InstallMcpArgs) -> Result<String> {
+fn render_grok(host: &HostEnv, args: &InstallMcpArgs) -> Result<String> {
     // Grok Build CLI uses TOML under ~/.grok/config.toml. Schema differs
     // from Codex: static auth lives under `.headers` (not `http_headers`),
     // and `enabled = true` is the documented toggle.
     let mut doc = toml_edit::DocumentMut::new();
     grok_upsert_mcp_server(&mut doc, args)?;
-    let config_path = grok_home()?.join("config.toml");
+    let config_path = grok_home(host)?.join("config.toml");
     let mut out = format!(
         "# Grok Build CLI — append to {config_path}\n\
          #\n\
@@ -1571,12 +1586,14 @@ mod tests {
         } else {
             "/custom/claude"
         };
-        let path = claude_code_config_path_in(Some(std::ffi::OsString::from(custom))).unwrap();
+        let path =
+            claude_code_config_path_in(&HostEnv::default(), Some(std::ffi::OsString::from(custom)))
+                .unwrap();
         assert_eq!(path, std::path::Path::new(custom).join(".claude.json"));
 
         // Empty override and unset var both fall back to ~/.claude.json.
         for env in [None, Some(std::ffi::OsString::new())] {
-            let path = claude_code_config_path_in(env).unwrap();
+            let path = claude_code_config_path_in(&HostEnv::default(), env).unwrap();
             assert!(
                 path.ends_with(".claude.json") && !path.starts_with(custom),
                 "default must be ~/.claude.json, got {}",
@@ -1683,9 +1700,9 @@ mod tests {
         let mut args = args_with_token(McpClient::Zed);
         args.config_file = Some(config_path.clone());
 
-        apply_to_config_file(&args).unwrap();
+        apply_to_config_file(&HostEnv::default(), &args).unwrap();
         let first = fs::read_to_string(&config_path).unwrap();
-        apply_to_config_file(&args).unwrap();
+        apply_to_config_file(&HostEnv::default(), &args).unwrap();
         let second = fs::read_to_string(&config_path).unwrap();
 
         assert_eq!(first, second);
@@ -1713,7 +1730,7 @@ mod tests {
         let mut args = args_for(McpClient::Zed);
         args.config_file = Some(config_path.clone());
 
-        let error = apply_to_config_file(&args).unwrap_err();
+        let error = apply_to_config_file(&HostEnv::default(), &args).unwrap_err();
 
         assert!(error.to_string().contains("not an object"));
         assert_eq!(fs::read_to_string(config_path).unwrap(), original);
@@ -1864,9 +1881,9 @@ mod tests {
         args.session_aware = true;
         args.apply = true;
 
-        apply_to_config_file(&args).unwrap();
+        apply_to_config_file(&HostEnv::default(), &args).unwrap();
         let first = fs::read_to_string(&config_file).unwrap();
-        apply_to_config_file(&args).unwrap();
+        apply_to_config_file(&HostEnv::default(), &args).unwrap();
         let second = fs::read_to_string(&config_file).unwrap();
 
         assert_eq!(first, second);
@@ -1903,7 +1920,7 @@ mod tests {
                 render_claude_code(&args, Path::new("/home/alice/.claude.json")).unwrap()
             }
             McpClient::Codex => render_codex(&args),
-            McpClient::Grok => render_grok(&args).unwrap(),
+            McpClient::Grok => render_grok(&HostEnv::default(), &args).unwrap(),
             McpClient::OpenCode => render_opencode(&args).unwrap(),
             McpClient::OpenCode2 => render_opencode2(&args).unwrap(),
             McpClient::Cursor => render_cursor(&args).unwrap(),
@@ -2010,7 +2027,7 @@ mod tests {
                 render_claude_code(&args, Path::new("/home/alice/.claude.json")).unwrap()
             }
             McpClient::Codex => render_codex(&args),
-            McpClient::Grok => render_grok(&args).unwrap(),
+            McpClient::Grok => render_grok(&HostEnv::default(), &args).unwrap(),
             McpClient::OpenCode => render_opencode(&args).unwrap(),
             McpClient::OpenCode2 => render_opencode2(&args).unwrap(),
             McpClient::Cursor => render_cursor(&args).unwrap(),
@@ -2143,7 +2160,7 @@ mod tests {
         assert!(grok.contains("enabled = true"));
         assert!(
             grok.contains(
-                &grok_home()
+                &grok_home(&HostEnv::default())
                     .unwrap()
                     .join("config.toml")
                     .display()
@@ -2217,24 +2234,30 @@ mod tests {
     #[test]
     fn kimi_code_home_honours_env_override() {
         assert_eq!(
-            kimi_code_home(Some("/tmp/custom-kimi-home".into())).unwrap(),
+            kimi_code_home(&HostEnv::default(), Some("/tmp/custom-kimi-home".into())).unwrap(),
             PathBuf::from("/tmp/custom-kimi-home")
         );
-        let default = home_dir().unwrap().join(".kimi-code");
+        let default = HostEnv::default().home_dir().unwrap().join(".kimi-code");
         // An empty override falls back to the default home-based dir.
-        assert_eq!(kimi_code_home(Some("".into())).unwrap(), default);
-        assert_eq!(kimi_code_home(None).unwrap(), default);
+        assert_eq!(
+            kimi_code_home(&HostEnv::default(), Some("".into())).unwrap(),
+            default
+        );
+        assert_eq!(kimi_code_home(&HostEnv::default(), None).unwrap(), default);
     }
 
     #[test]
     fn kiro_home_honours_env_override() {
         assert_eq!(
-            kiro_home(Some("/tmp/custom-kiro-home".into())).unwrap(),
+            kiro_home(&HostEnv::default(), Some("/tmp/custom-kiro-home".into())).unwrap(),
             PathBuf::from("/tmp/custom-kiro-home")
         );
-        let default = home_dir().unwrap().join(".kiro");
-        assert_eq!(kiro_home(Some("".into())).unwrap(), default);
-        assert_eq!(kiro_home(None).unwrap(), default);
+        let default = HostEnv::default().home_dir().unwrap().join(".kiro");
+        assert_eq!(
+            kiro_home(&HostEnv::default(), Some("".into())).unwrap(),
+            default
+        );
+        assert_eq!(kiro_home(&HostEnv::default(), None).unwrap(), default);
     }
 
     /// Pin the Antigravity CLI config destination to the documented global
@@ -2245,8 +2268,9 @@ mod tests {
     #[test]
     fn antigravity_cli_mcp_config_path_pins_documented_location() {
         assert_eq!(
-            mcp_config_path(McpClient::AntigravityCli).unwrap(),
-            home_dir()
+            mcp_config_path(&HostEnv::default(), McpClient::AntigravityCli).unwrap(),
+            HostEnv::default()
+                .home_dir()
                 .unwrap()
                 .join(".gemini")
                 .join("config")
@@ -2261,8 +2285,9 @@ mod tests {
     #[test]
     fn zcode_mcp_config_path_pins_user_scope_location() {
         assert_eq!(
-            mcp_config_path(McpClient::Zcode).unwrap(),
-            home_dir()
+            mcp_config_path(&HostEnv::default(), McpClient::Zcode).unwrap(),
+            HostEnv::default()
+                .home_dir()
                 .unwrap()
                 .join(".zcode")
                 .join("cli")
@@ -2321,9 +2346,9 @@ mod tests {
         let mut args = args_with_token(McpClient::Zcode);
         args.config_file = Some(config_path.clone());
 
-        apply_to_config_file(&args).unwrap();
+        apply_to_config_file(&HostEnv::default(), &args).unwrap();
         let first = fs::read_to_string(&config_path).unwrap();
-        apply_to_config_file(&args).unwrap();
+        apply_to_config_file(&HostEnv::default(), &args).unwrap();
         let second = fs::read_to_string(&config_path).unwrap();
 
         assert_eq!(first, second);
@@ -2419,9 +2444,9 @@ mod tests {
         args.server_url = Some("https://memory.example/mcp".into());
         args.config_file = Some(config_path.clone());
 
-        apply_to_config_file(&args).unwrap();
+        apply_to_config_file(&HostEnv::default(), &args).unwrap();
         let first = fs::read_to_string(&config_path).unwrap();
-        apply_to_config_file(&args).unwrap();
+        apply_to_config_file(&HostEnv::default(), &args).unwrap();
         let second = fs::read_to_string(&config_path).unwrap();
 
         assert_eq!(first, second);
@@ -2445,7 +2470,9 @@ mod tests {
         args.apply = true;
         args.config_file = Some(path.clone());
 
-        let err = apply_to_config_file(&args).unwrap_err().to_string();
+        let err = apply_to_config_file(&HostEnv::default(), &args)
+            .unwrap_err()
+            .to_string();
 
         assert!(
             err.contains("has no native mcp.json"),
@@ -2694,7 +2721,7 @@ mod tests {
         let mut args_with_path = args.clone();
         args_with_path.config_file = Some(config_path.clone());
 
-        apply_to_config_file(&args_with_path).unwrap();
+        apply_to_config_file(&HostEnv::default(), &args_with_path).unwrap();
 
         let parsed: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
@@ -2719,11 +2746,11 @@ mod tests {
         let mut args_with_path = args.clone();
         args_with_path.config_file = Some(config_path.clone());
 
-        apply_to_config_file(&args_with_path).unwrap();
+        apply_to_config_file(&HostEnv::default(), &args_with_path).unwrap();
 
         let first_content = fs::read_to_string(&config_path).unwrap();
 
-        apply_to_config_file(&args_with_path).unwrap();
+        apply_to_config_file(&HostEnv::default(), &args_with_path).unwrap();
 
         let second_content = fs::read_to_string(&config_path).unwrap();
         assert_eq!(
@@ -2745,9 +2772,9 @@ mod tests {
 
         let mut args = args_with_token(McpClient::Swival);
         args.config_file = Some(config_path.clone());
-        apply_to_config_file(&args).unwrap();
+        apply_to_config_file(&HostEnv::default(), &args).unwrap();
         let first = fs::read_to_string(&config_path).unwrap();
-        apply_to_config_file(&args).unwrap();
+        apply_to_config_file(&HostEnv::default(), &args).unwrap();
         let second = fs::read_to_string(&config_path).unwrap();
 
         assert_eq!(first, second, "Swival MCP apply must be idempotent");
@@ -2802,7 +2829,7 @@ mod tests {
         args.name = "ai.memory".into();
         args.server_url = Some("https://memory.example/mcp?note=\"quoted\"".into());
 
-        let printed = render_grok(&args).unwrap();
+        let printed = render_grok(&HostEnv::default(), &args).unwrap();
         let mut applied = toml_edit::DocumentMut::new();
         grok_upsert_mcp_server(&mut applied, &args).unwrap();
         let expected = applied.to_string();
