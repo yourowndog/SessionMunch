@@ -290,6 +290,10 @@ no tiers.
   weekly. Give rust-analyzer its own target dir
   (`rust-analyzer.cargo.targetDir = true`) so a save-triggered check never
   holds the lock a `cargo t` is waiting on.
+- **Git worktrees.** Each worktree builds into its own `target/`. Do not point
+  worktrees at a shared `build.target-dir`: one worktree can then run another
+  branch's stale test binary and report a false result. Run `cargo clean` in a
+  worktree before `git worktree remove`, so its build output does not outlive it.
 - **macOS.** `SSL_CERT_FILE=/etc/ssl/cert.pem cargo t` stops reqwest
   re-reading the Keychain in every test process (workspace test time 75s to
   41s); leave it unset if you rely on a private CA in your login Keychain.
