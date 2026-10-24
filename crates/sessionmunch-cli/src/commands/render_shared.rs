@@ -25,6 +25,7 @@ use base64::Engine as _;
 use serde_json::{Value, json};
 
 use crate::commands::path_util::strip_windows_verbatim_prefix;
+use crate::host_env::HostEnv;
 
 /// Claude Code lifecycle events sessionmunch hooks. Each pair is
 /// `(event-name-in-Claude-Code-settings, POSIX hook-script-filename)`.
@@ -294,6 +295,7 @@ function capturePolicy(payload: Record<string, unknown>, cwd: string | undefined
 /// `Authorization: Bearer …` to the server.
 #[must_use]
 pub(crate) fn build_claude_code_payload(
+    host: &HostEnv,
     emit_root: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -305,7 +307,7 @@ pub(crate) fn build_claude_code_payload(
         auth_token,
         HookShape::Nested,
         HookCommandContext::new(
-            HookCommandPlatform::for_bash_script_runner(),
+            HookCommandPlatform::for_bash_script_runner(host),
             "claude-code",
             None,
             None,
@@ -314,6 +316,7 @@ pub(crate) fn build_claude_code_payload(
 }
 
 pub(crate) fn build_claude_code_payload_with_data_dir(
+    host: &HostEnv,
     emit_root: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -328,7 +331,7 @@ pub(crate) fn build_claude_code_payload_with_data_dir(
         data_dir,
         project_strategy,
         capture_assistant,
-        HookCommandPlatform::for_bash_runner(),
+        HookCommandPlatform::for_bash_runner(host),
     )
 }
 
@@ -379,6 +382,7 @@ fn build_claude_code_payload_with_data_dir_for_platform(
 /// destructively fetches handoffs on SessionStart.
 #[must_use]
 pub(crate) fn build_grok_payload(
+    host: &HostEnv,
     emit_root: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -390,7 +394,7 @@ pub(crate) fn build_grok_payload(
         auth_token,
         HookShape::Nested,
         HookCommandContext::new(
-            HookCommandPlatform::for_bash_script_runner(),
+            HookCommandPlatform::for_bash_script_runner(host),
             "grok",
             None,
             None,
@@ -577,6 +581,7 @@ pub(crate) const ZCODE_HOOK_MAX_OUTPUT_BYTES: usize = 64 * 1024;
 /// DEVIN_EVENTS (PostCompaction instead of PreCompact, no subagent events).
 #[must_use]
 pub(crate) fn build_devin_payload(
+    host: &HostEnv,
     emit_root: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -588,7 +593,7 @@ pub(crate) fn build_devin_payload(
         auth_token,
         HookShape::Nested,
         HookCommandContext::new(
-            HookCommandPlatform::for_bash_script_runner(),
+            HookCommandPlatform::for_bash_script_runner(host),
             "devin",
             None,
             None,
@@ -599,6 +604,7 @@ pub(crate) fn build_devin_payload(
 /// Grok Build CLI hook payload for apply/render paths. Native commands are the
 /// default; explicit script fallback still points at the Grok script bundle.
 pub(crate) fn build_grok_payload_with_data_dir(
+    host: &HostEnv,
     emit_root: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -612,7 +618,7 @@ pub(crate) fn build_grok_payload_with_data_dir(
         auth_token,
         HookShape::Nested,
         HookCommandContext::new(
-            HookCommandPlatform::for_bash_runner(),
+            HookCommandPlatform::for_bash_runner(host),
             "grok",
             data_dir,
             project_strategy,
@@ -626,6 +632,7 @@ pub(crate) fn build_grok_payload_with_data_dir(
 /// DEVIN_EVENTS (PostCompaction instead of PreCompact, no subagent events).
 #[must_use]
 pub(crate) fn build_devin_payload_with_data_dir(
+    host: &HostEnv,
     emit_root: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -639,7 +646,7 @@ pub(crate) fn build_devin_payload_with_data_dir(
         auth_token,
         HookShape::Nested,
         HookCommandContext::new(
-            HookCommandPlatform::for_bash_runner(),
+            HookCommandPlatform::for_bash_runner(host),
             "devin",
             data_dir,
             project_strategy,
@@ -658,6 +665,7 @@ pub(crate) fn build_devin_payload_with_data_dir(
 /// escaping (`'` → `''`) keeps the embedded shell quoting intact.
 #[must_use]
 pub(crate) fn build_pool_settings_yaml_with_data_dir(
+    host: &HostEnv,
     emit_root: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -669,7 +677,7 @@ pub(crate) fn build_pool_settings_yaml_with_data_dir(
         server_url,
         auth_token,
         HookCommandContext::new(
-            HookCommandPlatform::for_bash_runner(),
+            HookCommandPlatform::for_bash_runner(host),
             "pool",
             data_dir,
             project_strategy,
@@ -682,6 +690,7 @@ pub(crate) fn build_pool_settings_yaml_with_data_dir(
 /// rather than a host-local native binary.
 #[must_use]
 pub(crate) fn build_pool_settings_yaml(
+    host: &HostEnv,
     emit_root: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -691,7 +700,7 @@ pub(crate) fn build_pool_settings_yaml(
         server_url,
         auth_token,
         HookCommandContext::new(
-            HookCommandPlatform::for_bash_script_runner(),
+            HookCommandPlatform::for_bash_script_runner(host),
             "pool",
             None,
             None,
@@ -865,6 +874,7 @@ pub(crate) const ANTIGRAVITY_LIFECYCLE_EVENTS: [(&str, &str); 2] =
 ///
 /// The output is `{ "sessionmunch": { <events> } }`.
 pub(crate) fn build_antigravity_payload_with_data_dir(
+    host: &HostEnv,
     emit_root: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -875,7 +885,7 @@ pub(crate) fn build_antigravity_payload_with_data_dir(
         emit_root,
         server_url,
         auth_token,
-        HookCommandPlatform::current(),
+        HookCommandPlatform::current(host),
         "antigravity-cli",
         data_dir,
         project_strategy,
@@ -942,6 +952,7 @@ pub(crate) fn build_profile_payload(
     auth_token: Option<&str>,
 ) -> serde_json::Value {
     build_profile_payload_for_agent(
+        &HostEnv::default(),
         profile,
         emit_root,
         server_url,
@@ -952,7 +963,9 @@ pub(crate) fn build_profile_payload(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_profile_payload_for_agent(
+    host: &HostEnv,
     profile: &HookProfile,
     emit_root: &Path,
     server_url: &str,
@@ -968,7 +981,7 @@ pub(crate) fn build_profile_payload_for_agent(
         auth_token,
         profile.shape,
         HookCommandContext::new(
-            HookCommandPlatform::current(),
+            HookCommandPlatform::current(host),
             agent,
             data_dir,
             project_strategy,
@@ -1022,6 +1035,7 @@ fn build_hook_payload(
 /// invocations by default, or the staged script bundle (`.sh` on
 /// POSIX, `.ps1` on Windows) on the compatibility platforms.
 pub(crate) fn kimi_code_hook_commands(
+    host: &HostEnv,
     emit_root: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -1032,7 +1046,7 @@ pub(crate) fn kimi_code_hook_commands(
         emit_root,
         server_url,
         auth_token,
-        HookCommandPlatform::current(),
+        HookCommandPlatform::current(host),
         data_dir,
         project_strategy,
     )
@@ -1077,6 +1091,7 @@ fn kimi_code_hook_commands_for_platform(
 /// fetched handoff + compiled project brief is not truncated mid-JSON
 /// before Kiro adds it to the agent context.
 pub(crate) fn build_kiro_cli_v2_hooks_value(
+    host: &HostEnv,
     emit_root: &Path,
     server_url: &str,
     auth_token: Option<&str>,
@@ -1087,7 +1102,7 @@ pub(crate) fn build_kiro_cli_v2_hooks_value(
         emit_root,
         server_url,
         auth_token,
-        HookCommandPlatform::current(),
+        HookCommandPlatform::current(host),
         data_dir,
         project_strategy,
     )
@@ -1133,13 +1148,14 @@ fn build_kiro_cli_v2_hooks_value_for_platform(
 /// registration document. Each entry is deliberately named so apply and
 /// uninstall can prove ownership using both the name and command signature.
 pub(crate) fn build_kiro_cli_v3_hooks_value(
+    host: &HostEnv,
     emit_root: &Path,
     server_url: &str,
     auth_token: Option<&str>,
     data_dir: Option<&Path>,
     project_strategy: Option<&str>,
 ) -> Value {
-    let platform = HookCommandPlatform::current();
+    let platform = HookCommandPlatform::current(host);
     let hooks = KIRO_CLI_V3_EVENTS
         .iter()
         .map(|(trigger, script)| {
@@ -1259,8 +1275,8 @@ impl HookCommandPlatform {
     /// var is unset or names no known platform — callers then apply their own
     /// per-render-path default. One parser so a new platform value can't be
     /// recognised by one render path and silently ignored by another.
-    fn from_env_override() -> Option<Self> {
-        let v = std::env::var("SESSIONMUNCH_HOOK_PLATFORM").ok()?;
+    fn from_env_override(host: &HostEnv) -> Option<Self> {
+        let v = host.var("SESSIONMUNCH_HOOK_PLATFORM")?;
         match v {
             v if v.eq_ignore_ascii_case("windows") => Some(Self::Windows),
             v if v.eq_ignore_ascii_case("posix") || v.eq_ignore_ascii_case("unix") => {
@@ -1273,8 +1289,8 @@ impl HookCommandPlatform {
         }
     }
 
-    fn current() -> Self {
-        Self::from_env_override().unwrap_or(if cfg!(windows) {
+    fn current(host: &HostEnv) -> Self {
+        Self::from_env_override(host).unwrap_or(if cfg!(windows) {
             Self::WindowsNative
         } else {
             // Local installs use the native hook command for policy-v1.
@@ -1286,11 +1302,11 @@ impl HookCommandPlatform {
     /// Platform for agents known to use bash as their hook runner on
     /// Windows (currently Claude Code). Returns `WindowsNative` on
     /// Windows unless overridden by `SESSIONMUNCH_HOOK_PLATFORM`.
-    fn for_bash_runner() -> Self {
+    fn for_bash_runner(host: &HostEnv) -> Self {
         // Native macOS / Linux defaults to the binary hook command (spool +
         // OIDC), same as Windows. The Linux/macOS Docker wrapper forces
         // `posix` so its host-rendered config keeps using the `.sh` scripts.
-        Self::from_env_override().unwrap_or(if cfg!(windows) {
+        Self::from_env_override(host).unwrap_or(if cfg!(windows) {
             Self::WindowsNative
         } else {
             Self::PosixNative
@@ -1300,8 +1316,8 @@ impl HookCommandPlatform {
     /// Script fallback for setup-agent / docker-host snippets. Respects an
     /// explicit override, but defaults to the shell command because setup-agent
     /// copies scripts, not a host-local native binary.
-    fn for_bash_script_runner() -> Self {
-        Self::from_env_override().unwrap_or(if cfg!(windows) {
+    fn for_bash_script_runner(host: &HostEnv) -> Self {
+        Self::from_env_override(host).unwrap_or(if cfg!(windows) {
             Self::WindowsBash
         } else {
             Self::Posix
@@ -1425,18 +1441,21 @@ fn script_for_platform(script: &str, platform: HookCommandPlatform) -> Cow<'_, s
     }
 }
 
-pub(crate) fn hook_script_for_current_platform(script: &str) -> Cow<'_, str> {
-    script_for_platform(script, HookCommandPlatform::current())
+pub(crate) fn hook_script_for_current_platform<'a>(
+    host: &HostEnv,
+    script: &'a str,
+) -> Cow<'a, str> {
+    script_for_platform(script, HookCommandPlatform::current(host))
 }
 
-pub(crate) fn hook_script_for_claude_code(script: &str) -> Cow<'_, str> {
-    script_for_platform(script, HookCommandPlatform::for_bash_runner())
+pub(crate) fn hook_script_for_claude_code<'a>(host: &HostEnv, script: &'a str) -> Cow<'a, str> {
+    script_for_platform(script, HookCommandPlatform::for_bash_runner(host))
 }
 
 #[must_use]
-pub(crate) fn local_hook_policy_v1_supported() -> bool {
+pub(crate) fn local_hook_policy_v1_supported(host: &HostEnv) -> bool {
     matches!(
-        HookCommandPlatform::current(),
+        HookCommandPlatform::current(host),
         HookCommandPlatform::PosixNative | HookCommandPlatform::WindowsNative
     )
 }
@@ -2245,7 +2264,8 @@ check(markedButEmpty.disposition === "keep", "allowlist-marker-present-empty-cap
     #[test]
     fn claude_code_payload_has_all_events() {
         let root = PathBuf::from("/host/hooks/claude-code");
-        let v = build_claude_code_payload(&root, "http://localhost:49374", None);
+        let v =
+            build_claude_code_payload(&HostEnv::default(), &root, "http://localhost:49374", None);
         let hooks = v.get("hooks").and_then(|h| h.as_object()).unwrap();
         assert_eq!(hooks.len(), CLAUDE_CODE_EVENTS.len());
         for (event, _) in CLAUDE_CODE_EVENTS {
@@ -2298,7 +2318,7 @@ check(markedButEmpty.disposition === "keep", "allowlist-marker-present-empty-cap
     #[test]
     fn devin_payload_has_all_events() {
         let root = PathBuf::from("/host/hooks/devin");
-        let v = build_devin_payload(&root, "http://localhost:49374", None);
+        let v = build_devin_payload(&HostEnv::default(), &root, "http://localhost:49374", None);
         let hooks = v.get("hooks").and_then(|h| h.as_object()).unwrap();
         assert_eq!(hooks.len(), DEVIN_EVENTS.len());
         for (event, _) in DEVIN_EVENTS {
@@ -2495,7 +2515,8 @@ check(markedButEmpty.disposition === "keep", "allowlist-marker-present-empty-cap
     #[test]
     fn claude_code_payload_uses_matcher_plus_inner_hooks_shape() {
         let root = PathBuf::from("/host/hooks/claude-code");
-        let v = build_claude_code_payload(&root, "http://localhost:49374", None);
+        let v =
+            build_claude_code_payload(&HostEnv::default(), &root, "http://localhost:49374", None);
         for (event, _) in CLAUDE_CODE_EVENTS {
             let outer = v
                 .pointer(&format!("/hooks/{event}/0"))
@@ -2523,7 +2544,8 @@ check(markedButEmpty.disposition === "keep", "allowlist-marker-present-empty-cap
     #[test]
     fn claude_code_payload_omits_auth_token_when_absent() {
         let root = PathBuf::from("/host/hooks/claude-code");
-        let v = build_claude_code_payload(&root, "http://localhost:49374", None);
+        let v =
+            build_claude_code_payload(&HostEnv::default(), &root, "http://localhost:49374", None);
         let command = v
             .pointer("/hooks/SessionStart/0/hooks/0/command")
             .and_then(|s| s.as_str())

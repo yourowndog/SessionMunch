@@ -12,7 +12,6 @@ description = "Markdown wiki read/write, file watcher and git versioning."
 sessionmunch-core.workspace = true
 sessionmunch-llm.workspace = true
 sessionmunch-store.workspace = true
-anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true

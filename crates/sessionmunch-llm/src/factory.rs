@@ -146,7 +146,7 @@ pub enum EmbedderChoice {
     /// OpenAI-compatible embeddings endpoint (Ollama / LM Studio /
     /// vLLM). Keyless-capable; base URL, model, and dim are required.
     OpenAiCompat,
-    /// In-process pure-Rust embeddings (all-MiniLM-L6-v2, 384-dim) —
+    /// In-process pure-Rust embeddings (nomic-embed-text-v1.5, 768-dim) —
     /// no API key, no server. Requires the model files under
     /// `<data_dir>/models/` (fetched at serve startup or dropped in
     /// manually; docs/local-embeddings.md).

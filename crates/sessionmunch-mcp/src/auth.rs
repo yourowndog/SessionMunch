@@ -450,12 +450,6 @@ pub fn extract_bearer_from_headers(headers: &HeaderMap) -> Option<String> {
     bearer
 }
 
-/// True when `Authorization` uses the Bearer scheme, even with no token.
-#[must_use]
-pub fn has_bearer_scheme(headers: &HeaderMap) -> bool {
-    extract_bearer_from_headers(headers).is_some()
-}
-
 /// True when any trusted-proxy identity header is present.
 #[must_use]
 pub fn any_actor_header(headers: &HeaderMap) -> bool {

@@ -3,7 +3,7 @@
 ## Dev setup
 
 ```bash
-git clone https://github.com/akitaonrails/ai-memory
+git clone https://github.com/yourowndog/SessionMunch
 cd sessionmunch
 cargo build --workspace
 cargo test --workspace --all-targets

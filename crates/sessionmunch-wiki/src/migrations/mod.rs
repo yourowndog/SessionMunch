@@ -42,7 +42,7 @@
 mod m2026_09_okf_conformance;
 mod runner;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use sessionmunch_store::WriterHandle;
 
@@ -95,9 +95,17 @@ pub trait WikiMigration: Send + Sync {
 /// v1 ships with no pending migrations: the per-project UUID-namespaced
 /// layout is the native format from day one and requires no transformation
 /// of pre-existing data.
+///
+/// `backup_dest_override` and `in_container` configure the OKF migration's
+/// pre-migration backup (see [`m2026_09_okf_conformance::OkfConformance`]);
+/// the caller resolves both, since this crate does not read the environment.
 #[must_use]
-pub fn registry() -> Vec<Box<dyn WikiMigration>> {
-    vec![Box::new(
-        m2026_09_okf_conformance::OkfConformance::from_env(),
-    )]
+pub fn registry(
+    backup_dest_override: Option<PathBuf>,
+    in_container: bool,
+) -> Vec<Box<dyn WikiMigration>> {
+    vec![Box::new(m2026_09_okf_conformance::OkfConformance {
+        dest_override: backup_dest_override,
+        in_container,
+    })]
 }

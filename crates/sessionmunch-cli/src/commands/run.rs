@@ -25,8 +25,9 @@ use sessionmunch_workstream::{
 use tokio::process::Command;
 
 use crate::cli::{RunArgs, RunHarnessChoice};
-use crate::commands::{path_util, resolve_scope};
+use crate::commands::resolve_scope;
 use crate::config::Config;
+use crate::host_env::HostEnv;
 use crate::http_client::{
     ServerEndpoint, ServerResponseError, get_json, post_empty, post_json, post_json_no_content,
 };
@@ -76,16 +77,21 @@ impl HeartbeatHealth {
 }
 
 /// Run one native harness and return its exact process exit code.
-pub async fn run(config: &Config, args: RunArgs) -> Result<i32> {
+pub async fn run(config: &Config, host: &HostEnv, args: RunArgs) -> Result<i32> {
     let cwd = std::env::current_dir().context("getting managed run working directory")?;
-    run_from(config, args, &cwd).await
+    run_from(config, host, args, &cwd).await
 }
 
 /// Run one native harness from an explicit checkout without changing the
 /// parent process's working directory.
-pub(super) async fn run_from(config: &Config, args: RunArgs, cwd: &Path) -> Result<i32> {
+pub(super) async fn run_from(
+    config: &Config,
+    host: &HostEnv,
+    args: RunArgs,
+    cwd: &Path,
+) -> Result<i32> {
     let repository = inspect_repository(cwd)?;
-    let home = native_home(config).context("locating native harness session storage")?;
+    let home = native_home(config, host).context("locating native harness session storage")?;
     let automatic_harness = args.harness.is_none();
     let mut native_args = args.native_args;
     let trailing_yolo = remove_wrapper_yolo(&mut native_args);
@@ -104,7 +110,7 @@ pub(super) async fn run_from(config: &Config, args: RunArgs, cwd: &Path) -> Resu
     let auto_candidates = if automatic_harness {
         filter_usable_auto_sessions(
             list_auto_sessions(&home, &repository.cwd).await?,
-            |harness| executable_available(OsStr::new(harness.executable())),
+            |harness| executable_available(host, OsStr::new(harness.executable())),
         )?
     } else {
         Vec::new()
@@ -117,7 +123,7 @@ pub(super) async fn run_from(config: &Config, args: RunArgs, cwd: &Path) -> Resu
             .ok_or_else(no_auto_session_error)?,
     };
     let executable = args.executable.map(PathBuf::into_os_string);
-    ensure_executable_available(provisional_harness, executable.as_deref())?;
+    ensure_executable_available(host, provisional_harness, executable.as_deref())?;
     // Resolve BOTH halves here. `--workspace` used to default to a literal
     // `default`, so a checkout whose marker declared another workspace put its
     // managed workstream in one scope while its hook-captured sessions went to
@@ -137,7 +143,7 @@ pub(super) async fn run_from(config: &Config, args: RunArgs, cwd: &Path) -> Resu
         available_agents: unique_auto_agents(&auto_candidates),
         workstream: args.workstream,
         new_workstream: args.new_workstream,
-        lease_owner: lease_owner(),
+        lease_owner: lease_owner(host),
     };
     let interrupted_before_spawn = Arc::new(AtomicBool::new(false));
     let interrupt_task = tokio::spawn(capture_interrupts(Arc::clone(&interrupted_before_spawn)));
@@ -203,6 +209,7 @@ pub(super) async fn run_from(config: &Config, args: RunArgs, cwd: &Path) -> Resu
     };
     let harness = if resolved_harness.agent_kind() == AgentKind::KiroCli {
         acquired_try!(resolve_kiro_harness(
+            host,
             &native_args,
             prepared.native_session_id.as_deref(),
             prepared.source_cursor.as_deref(),
@@ -213,9 +220,14 @@ pub(super) async fn run_from(config: &Config, args: RunArgs, cwd: &Path) -> Resu
     } else {
         resolved_harness
     };
-    acquired_try!(ensure_executable_available(harness, executable.as_deref()));
+    acquired_try!(ensure_executable_available(
+        host,
+        harness,
+        executable.as_deref()
+    ));
     let native_grok_rules = user_supplied_grok_rules(&native_args);
     let (mut plan, orphaned_session) = acquired_try!(build_preflighted_launch_plan(
+        host,
         harness,
         executable.clone(),
         native_args.clone(),
@@ -254,6 +266,7 @@ pub(super) async fn run_from(config: &Config, args: RunArgs, cwd: &Path) -> Resu
             executable.clone(),
             native_args.clone(),
             Some(&candidate.session.native_session_id),
+            |name| host.var_os(name),
         ));
         eprintln!(
             "sessionmunch: continuing newest checkout-local {} session {}",
@@ -266,7 +279,7 @@ pub(super) async fn run_from(config: &Config, args: RunArgs, cwd: &Path) -> Resu
         && allows_native_session_adoption(harness, &native_args)
         && io::stdin().is_terminal()
         && io::stderr().is_terminal()
-        && let Some(home) = native_home(config)
+        && let Some(home) = native_home(config, host)
     {
         match list_native_sessions(
             harness,
@@ -295,6 +308,7 @@ pub(super) async fn run_from(config: &Config, args: RunArgs, cwd: &Path) -> Resu
                             executable,
                             native_args,
                             Some(&native_session_id),
+                            |name| host.var_os(name),
                         ));
                     }
                     Ok(None) => {}
@@ -360,7 +374,7 @@ pub(super) async fn run_from(config: &Config, args: RunArgs, cwd: &Path) -> Resu
     }
 
     let crush_context = if harness == ManagedHarness::Crush && plan.mode == LaunchMode::Session {
-        acquired_try!(prepare_crush_context(&endpoint, &run_path, &home).await)
+        acquired_try!(prepare_crush_context(host, &endpoint, &run_path, &home).await)
     } else {
         None
     };
@@ -394,7 +408,8 @@ pub(super) async fn run_from(config: &Config, args: RunArgs, cwd: &Path) -> Resu
     // alone can match an unlaunchable extension-less shim (see
     // `resolve_program`). Falling back to the plan's own value keeps an
     // unresolvable program reaching the spawn error below, which explains it.
-    let program = resolve_program(&plan.program).unwrap_or_else(|| plan.program.clone().into());
+    let program =
+        resolve_program(host, &plan.program).unwrap_or_else(|| plan.program.clone().into());
     let mut command = Command::new(&program);
     command
         .args(&plan.args)
@@ -713,6 +728,7 @@ fn no_auto_session_error() -> anyhow::Error {
 }
 
 fn resolve_kiro_harness(
+    host: &HostEnv,
     native_args: &[OsString],
     linked_session_id: Option<&str>,
     source_cursor: Option<&str>,
@@ -734,7 +750,8 @@ fn resolve_kiro_harness(
     if let Some(session_id) = explicit_session_id.as_deref().or(linked_session_id) {
         let mut found = Vec::new();
         for harness in [ManagedHarness::Kiro, ManagedHarness::KiroV3] {
-            let probe = build_launch_plan(harness, None, Vec::new(), None)?;
+            let probe =
+                build_launch_plan(harness, None, Vec::new(), None, |name| host.var_os(name))?;
             if native_session_exists(harness, home, cwd, probe.session_dir.as_deref(), session_id)?
             {
                 found.push(harness);
@@ -777,7 +794,9 @@ fn remove_wrapper_fresh(args: &mut Vec<OsString>) -> bool {
     args.len() != before
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_preflighted_launch_plan(
+    host: &HostEnv,
     harness: ManagedHarness,
     executable: Option<OsString>,
     native_args: Vec<OsString>,
@@ -798,6 +817,7 @@ fn build_preflighted_launch_plan(
         executable.clone(),
         native_args.clone(),
         linked_session_id,
+        |name| host.var_os(name),
     )?;
     let Some(linked_session_id) = linked_session_id else {
         return Ok((plan, None));
@@ -814,7 +834,9 @@ fn build_preflighted_launch_plan(
     ) {
         Ok(true) => Ok((plan, None)),
         Ok(false) => Ok((
-            build_launch_plan(harness, executable, native_args, None)?,
+            build_launch_plan(harness, executable, native_args, None, |name| {
+                host.var_os(name)
+            })?,
             Some(linked_session_id.to_string()),
         )),
         Err(error) => {
@@ -828,9 +850,13 @@ fn build_preflighted_launch_plan(
     }
 }
 
-fn ensure_executable_available(harness: ManagedHarness, executable: Option<&OsStr>) -> Result<()> {
+fn ensure_executable_available(
+    host: &HostEnv,
+    harness: ManagedHarness,
+    executable: Option<&OsStr>,
+) -> Result<()> {
     let program = executable.unwrap_or_else(|| OsStr::new(harness.executable()));
-    if executable_available(program) {
+    if executable_available(host, program) {
         return Ok(());
     }
     Err(anyhow!(
@@ -846,12 +872,12 @@ fn ensure_executable_available(harness: ManagedHarness, executable: Option<&OsSt
 /// [`ensure_executable_available`] would accept a moment later. Harnesses
 /// reached only through `--executable` are not covered: the picker has no way
 /// to ask for that path.
-pub(super) fn harness_available(choice: RunHarnessChoice) -> bool {
-    executable_available(OsStr::new(managed_harness(choice).executable()))
+pub(super) fn harness_available(host: &HostEnv, choice: RunHarnessChoice) -> bool {
+    executable_available(host, OsStr::new(managed_harness(choice).executable()))
 }
 
-fn executable_available(program: &OsStr) -> bool {
-    resolve_program(program).is_some()
+fn executable_available(host: &HostEnv, program: &OsStr) -> bool {
+    resolve_program(host, program).is_some()
 }
 
 /// Resolve `program` to a concrete path the OS can actually start, or `None`
@@ -865,18 +891,18 @@ fn executable_available(program: &OsStr) -> bool {
 /// to spawn with "program not found". Resolving to the concrete file keeps the
 /// availability check and the launch agreeing on one answer, and lets the
 /// launch use a path that works.
-pub(super) fn resolve_program(program: &OsStr) -> Option<std::path::PathBuf> {
+pub(super) fn resolve_program(host: &HostEnv, program: &OsStr) -> Option<std::path::PathBuf> {
     let path = Path::new(program);
     if path.components().count() > 1 {
-        return resolve_candidate(path);
+        return resolve_candidate(host, path);
     }
-    std::env::var_os("PATH").and_then(|path_value| {
-        std::env::split_paths(&path_value).find_map(|dir| resolve_candidate(&dir.join(path)))
+    host.var_os("PATH").and_then(|path_value| {
+        std::env::split_paths(&path_value).find_map(|dir| resolve_candidate(host, &dir.join(path)))
     })
 }
 
 /// Concrete launchable file for one candidate location.
-fn resolve_candidate(path: &Path) -> Option<std::path::PathBuf> {
+fn resolve_candidate(host: &HostEnv, path: &Path) -> Option<std::path::PathBuf> {
     #[cfg(windows)]
     {
         // An explicit extension is taken at face value; otherwise only a
@@ -884,8 +910,9 @@ fn resolve_candidate(path: &Path) -> Option<std::path::PathBuf> {
         if path.extension().is_some() && executable_file(path) {
             return Some(path.to_path_buf());
         }
-        let extensions =
-            std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+        let extensions = host
+            .var("PATHEXT")
+            .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_string());
         extensions
             .split(';')
             .filter(|extension| !extension.is_empty())
@@ -894,6 +921,8 @@ fn resolve_candidate(path: &Path) -> Option<std::path::PathBuf> {
     }
     #[cfg(not(windows))]
     {
+        // PATHEXT is a Windows-only concept.
+        let _ = host;
         executable_file(path).then(|| path.to_path_buf())
     }
 }
@@ -941,6 +970,7 @@ async fn fetch_grok_context(endpoint: &ServerEndpoint, run_path: &str) -> Result
 }
 
 async fn prepare_crush_context(
+    host: &HostEnv,
     endpoint: &ServerEndpoint,
     run_path: &str,
     home: &Path,
@@ -956,7 +986,7 @@ async fn prepare_crush_context(
         return Ok(None);
     };
 
-    write_crush_context_config(&crush_global_config_path(home), &context).map(Some)
+    write_crush_context_config(&crush_global_config_path(host, home), &context).map(Some)
 }
 
 fn write_crush_context_config(source: &Path, context: &str) -> Result<tempfile::TempDir> {
@@ -1000,11 +1030,17 @@ fn write_crush_context_config(source: &Path, context: &str) -> Result<tempfile::
     Ok(temp)
 }
 
-fn crush_global_config_path(home: &Path) -> PathBuf {
-    if let Some(dir) = std::env::var_os("CRUSH_GLOBAL_CONFIG").filter(|value| !value.is_empty()) {
+fn crush_global_config_path(host: &HostEnv, home: &Path) -> PathBuf {
+    if let Some(dir) = host
+        .var_os("CRUSH_GLOBAL_CONFIG")
+        .filter(|value| !value.is_empty())
+    {
         return PathBuf::from(dir).join("crush.json");
     }
-    if let Some(dir) = std::env::var_os("XDG_CONFIG_HOME").filter(|value| !value.is_empty()) {
+    if let Some(dir) = host
+        .var_os("XDG_CONFIG_HOME")
+        .filter(|value| !value.is_empty())
+    {
         return PathBuf::from(dir).join("crush/crush.json");
     }
     home.join(".config/crush/crush.json")
@@ -1027,12 +1063,12 @@ fn write_private(path: &Path, content: &[u8]) -> Result<()> {
         .with_context(|| format!("writing {}", path.display()))
 }
 
-fn native_home(config: &Config) -> Option<PathBuf> {
+fn native_home(config: &Config, host: &HostEnv) -> Option<PathBuf> {
     config
         .home_dir
         .as_deref()
         .map(PathBuf::from)
-        .or_else(path_util::home_dir)
+        .or_else(|| host.home_dir())
 }
 
 async fn choose_native_session_interactive(
@@ -1326,11 +1362,11 @@ fn nonempty_session(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
-fn lease_owner() -> String {
-    let host = sysinfo::System::host_name()
-        .or_else(|| std::env::var("HOSTNAME").ok())
+fn lease_owner(host: &HostEnv) -> String {
+    let host_name = sysinfo::System::host_name()
+        .or_else(|| host.var("HOSTNAME"))
         .filter(|value| !value.trim().is_empty());
-    lease_owner_label(host.as_deref(), std::process::id())
+    lease_owner_label(host_name.as_deref(), std::process::id())
 }
 
 fn lease_owner_label(host: Option<&str>, process_id: u32) -> String {
@@ -1399,9 +1435,10 @@ mod tests {
     /// offer an agent that cannot start.
     #[test]
     fn executable_available_rejects_a_program_that_is_not_installed() {
-        assert!(!executable_available(OsStr::new(
-            "sessionmunch-no-such-harness-binary"
-        )));
+        assert!(!executable_available(
+            &HostEnv::default(),
+            OsStr::new("sessionmunch-no-such-harness-binary")
+        ));
     }
 
     /// An absolute path that exists resolves without consulting `PATH`, which
@@ -1409,9 +1446,12 @@ mod tests {
     #[test]
     fn executable_available_accepts_an_existing_absolute_path() {
         let current = std::env::current_exe().unwrap();
-        assert!(executable_available(current.as_os_str()));
+        assert!(executable_available(
+            &HostEnv::default(),
+            current.as_os_str()
+        ));
         assert_eq!(
-            resolve_program(current.as_os_str()).as_deref(),
+            resolve_program(&HostEnv::default(), current.as_os_str()).as_deref(),
             Some(current.as_path())
         );
     }
@@ -1423,11 +1463,12 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_resolution_skips_the_extension_less_shim() {
+        let host = HostEnv::from_vars([("PATHEXT", ".COM;.EXE;.BAT;.CMD")]);
         let tmp = tempfile::TempDir::new().unwrap();
         std::fs::write(tmp.path().join("faux-harness"), "#!/bin/sh\n").unwrap();
 
         assert_eq!(
-            resolve_candidate(&tmp.path().join("faux-harness")),
+            resolve_candidate(&host, &tmp.path().join("faux-harness")),
             None,
             "an extension-less script is not launchable by CreateProcess"
         );
@@ -1437,8 +1478,8 @@ mod tests {
             "@echo off\r\nexit /b 0\r\n",
         )
         .unwrap();
-        let resolved =
-            resolve_candidate(&tmp.path().join("faux-harness")).expect("the wrapper resolves");
+        let resolved = resolve_candidate(&host, &tmp.path().join("faux-harness"))
+            .expect("the wrapper resolves");
         // PATHEXT is upper-case, and Windows paths are case-insensitive, so the
         // resolved name carries whichever casing the probe used.
         assert_eq!(
@@ -1462,7 +1503,10 @@ mod tests {
     #[test]
     fn unix_resolution_returns_the_file_itself() {
         let current = std::env::current_exe().unwrap();
-        assert_eq!(resolve_candidate(&current), Some(current));
+        assert_eq!(
+            resolve_candidate(&HostEnv::default(), &current),
+            Some(current)
+        );
     }
 
     fn candidates() -> Vec<NativeSessionCandidate> {
@@ -1869,6 +1913,7 @@ mod tests {
         );
         assert_eq!(
             resolve_kiro_harness(
+                &HostEnv::default(),
                 &[],
                 Some("missing-session"),
                 Some(&v3_cursor),
@@ -1881,6 +1926,7 @@ mod tests {
         );
         assert_eq!(
             resolve_kiro_harness(
+                &HostEnv::default(),
                 &[OsString::from("--agent-engine=v2")],
                 Some("sess_c3774f9d-269e-40d1-aa02-2bb0c0817b4e"),
                 Some(&v3_cursor),
@@ -1893,6 +1939,7 @@ mod tests {
         );
         assert_eq!(
             resolve_kiro_harness(
+                &HostEnv::default(),
                 &[
                     OsString::from("--resume-id"),
                     OsString::from("missing-explicit-session"),
@@ -1945,6 +1992,7 @@ mod tests {
         std::fs::create_dir_all(&cwd).unwrap();
 
         let (fresh, orphaned) = build_preflighted_launch_plan(
+            &HostEnv::default(),
             ManagedHarness::KiroV3,
             None,
             vec![OsString::from("--v3")],
@@ -2019,6 +2067,7 @@ mod tests {
         .to_vec();
 
         let (resumed, orphaned) = build_preflighted_launch_plan(
+            &HostEnv::default(),
             ManagedHarness::Pi,
             None,
             native_args.clone(),
@@ -2034,6 +2083,7 @@ mod tests {
 
         std::fs::remove_file(transcript).unwrap();
         let (fresh, orphaned) = build_preflighted_launch_plan(
+            &HostEnv::default(),
             ManagedHarness::Pi,
             None,
             native_args.clone(),
@@ -2048,6 +2098,7 @@ mod tests {
         assert!(!fresh.args.iter().any(|arg| arg == "linked"));
 
         let (explicit, orphaned) = build_preflighted_launch_plan(
+            &HostEnv::default(),
             ManagedHarness::Pi,
             None,
             [
@@ -2071,6 +2122,7 @@ mod tests {
         let cwd = temp.path().join("repo");
         std::fs::create_dir_all(&cwd).unwrap();
         let (fresh, orphaned) = build_preflighted_launch_plan(
+            &HostEnv::default(),
             ManagedHarness::Claude,
             None,
             Vec::new(),
@@ -2085,6 +2137,7 @@ mod tests {
         assert!(!fresh.args.iter().any(|arg| arg == "--resume"));
 
         let error = build_preflighted_launch_plan(
+            &HostEnv::default(),
             ManagedHarness::Claude,
             None,
             [OsString::from("--resume"), OsString::from("chosen")].to_vec(),
@@ -2122,6 +2175,7 @@ mod tests {
             None,
             vec![OsString::from("--version")],
             None,
+            |_| None,
         )
         .unwrap();
         assert_eq!(utility.mode, LaunchMode::Passthrough);
@@ -2139,7 +2193,8 @@ mod tests {
             .is_none()
         );
 
-        let session = build_launch_plan(ManagedHarness::Codex, None, Vec::new(), None).unwrap();
+        let session =
+            build_launch_plan(ManagedHarness::Codex, None, Vec::new(), None, |_| None).unwrap();
         assert_eq!(
             resolve_native_session_after_run(
                 &session,

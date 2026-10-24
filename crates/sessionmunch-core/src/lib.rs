@@ -7,6 +7,8 @@
 
 pub mod active_project;
 pub mod actor;
+pub mod cluster;
+pub use cluster::{ClusterRole, NodeId};
 pub mod error;
 pub mod handoff;
 pub mod ingest_metrics;
@@ -21,10 +23,8 @@ pub use scaffolding::looks_like_scaffolding;
 pub mod routing_snippet;
 pub mod sanitize;
 pub mod sections;
-pub use sections::{
-    CrossEncoder, CrossEncoderScore, EnrichmentHook, Passage, PassageEnrichment, Section,
-    count_tokens, parse_sections, split_passages,
-};
+pub mod session_events;
+pub use sections::{Passage, Section, count_tokens, parse_sections, split_passages};
 pub mod slots;
 pub mod user;
 mod workstream;
@@ -77,6 +77,10 @@ pub use routing_snippet::{
 pub use sanitize::{
     OBSERVATION_BODY_MAX_BYTES, SanitizeConfig, Sanitized, Sanitizer, truncate_utf8_bytes,
     truncate_utf8_bytes_head_tail,
+};
+pub use session_events::{
+    NewSessionEvent, SessionEvent, SessionEventHit, SessionEventSearch, SessionProvenance,
+    SessionSource, parse_time_window,
 };
 pub use slots::{
     SLOT_PREFIX, SlotPlacement, SlotVisibility, is_slot_named, is_slot_path, slot_owner,

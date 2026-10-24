@@ -13,8 +13,9 @@ use std::thread::{self, JoinHandle};
 use rusqlite::Connection;
 use sessionmunch_core::{
     AgentKind, ApiCredentialId, HandoffAcceptance, HandoffId, IdentityKey, ManagedRunId,
-    NewHandoff, NewObservation, NewPage, NewSession, NewUser, ObservationId, OwnerFilter, PageId,
-    PagePath, ProjectId, Sanitized, SessionId, UserId, UserRole, WorkspaceId,
+    NewHandoff, NewObservation, NewPage, NewSession, NewSessionEvent, NewUser, ObservationId,
+    OwnerFilter, PageId, PagePath, ProjectId, Sanitized, SessionId, SessionProvenance, UserId,
+    UserRole, WorkspaceId,
 };
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
@@ -130,6 +131,21 @@ pub(crate) enum WriteCmd {
         session: NewSession,
         reply: oneshot::Sender<StoreResult<()>>,
     },
+    BeginSessionWithProvenance {
+        session: NewSession,
+        provenance: SessionProvenance,
+        reply: oneshot::Sender<StoreResult<()>>,
+    },
+    AppendSessionEvents {
+        session_id: SessionId,
+        events: Vec<NewSessionEvent>,
+        reply: oneshot::Sender<StoreResult<usize>>,
+    },
+    UpdateSessionProvenance {
+        session_id: SessionId,
+        provenance: SessionProvenance,
+        reply: oneshot::Sender<StoreResult<bool>>,
+    },
     EndSession {
         session_id: SessionId,
         summary_page_id: Option<PageId>,
@@ -163,6 +179,7 @@ pub(crate) enum WriteCmd {
         obs: NewObservation,
         owner_filter: OwnerFilter,
         ingest_key: Option<String>,
+        machine_id: Option<String>,
         reply: oneshot::Sender<StoreResult<HookSessionAdmission>>,
     },
     EndAdmittedSession {
@@ -885,6 +902,68 @@ impl WriterHandle {
         rx.await.map_err(|_| StoreError::WriterClosed)?
     }
 
+    /// Begin a session with promoted provenance written best-effort.
+    ///
+    /// Idempotent on the supplied id; a second call with the same id keeps the
+    /// row as-is while writing any provenance the caller supplies.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WriterClosed`] or propagates SQL errors.
+    pub async fn begin_session_with_provenance(
+        &self,
+        session: NewSession,
+        provenance: SessionProvenance,
+    ) -> StoreResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.send(WriteCmd::BeginSessionWithProvenance {
+            session,
+            provenance,
+            reply: tx,
+        })
+        .await?;
+        rx.await.map_err(|_| StoreError::WriterClosed)?
+    }
+
+    /// Append promoted session-owned events idempotently (by stable
+    /// `event_id`), returning how many rows were newly inserted.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WriterClosed`] or propagates SQL errors.
+    pub async fn append_session_events(
+        &self,
+        session_id: SessionId,
+        events: Vec<NewSessionEvent>,
+    ) -> StoreResult<usize> {
+        let (tx, rx) = oneshot::channel();
+        self.send(WriteCmd::AppendSessionEvents {
+            session_id,
+            events,
+            reply: tx,
+        })
+        .await?;
+        rx.await.map_err(|_| StoreError::WriterClosed)?
+    }
+
+    /// Best-effort fill of a session's provenance columns, returning whether
+    /// the row existed and was updated.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WriterClosed`] or propagates SQL errors.
+    pub async fn update_session_provenance(
+        &self,
+        session_id: SessionId,
+        provenance: SessionProvenance,
+    ) -> StoreResult<bool> {
+        let (tx, rx) = oneshot::channel();
+        self.send(WriteCmd::UpdateSessionProvenance {
+            session_id,
+            provenance,
+            reply: tx,
+        })
+        .await?;
+        rx.await.map_err(|_| StoreError::WriterClosed)?
+    }
+
     /// Mark a session ended, optionally linking its summary page, and persist
     /// the observation generation covered by this end.
     ///
@@ -1013,6 +1092,7 @@ impl WriterHandle {
         obs: Sanitized<NewObservation>,
         owner_filter: OwnerFilter,
         ingest_key: Option<String>,
+        machine_id: Option<String>,
     ) -> StoreResult<HookSessionAdmission> {
         let (tx, rx) = oneshot::channel();
         self.send(WriteCmd::AdmitHookSessionEvent {
@@ -1020,6 +1100,7 @@ impl WriterHandle {
             obs: obs.into_inner(),
             owner_filter,
             ingest_key,
+            machine_id,
             reply: tx,
         })
         .await?;
@@ -2747,6 +2828,39 @@ fn worker_loop(mut conn: Connection, mut rx: mpsc::Receiver<WriteCmd>) {
                 let result = ops::begin_session(&mut conn, &session);
                 send_or_warn(reply, result, "begin_session");
             }
+            WriteCmd::BeginSessionWithProvenance {
+                session,
+                provenance,
+                reply,
+            } => {
+                let result = crate::session_events::begin_session_with_provenance(
+                    &mut conn,
+                    &session,
+                    &provenance,
+                );
+                send_or_warn(reply, result, "begin_session_with_provenance");
+            }
+            WriteCmd::AppendSessionEvents {
+                session_id,
+                events,
+                reply,
+            } => {
+                let result =
+                    crate::session_events::append_session_events(&mut conn, &session_id, &events);
+                send_or_warn(reply, result, "append_session_events");
+            }
+            WriteCmd::UpdateSessionProvenance {
+                session_id,
+                provenance,
+                reply,
+            } => {
+                let result = crate::session_events::update_session_provenance(
+                    &mut conn,
+                    &session_id,
+                    &provenance,
+                );
+                send_or_warn(reply, result, "update_session_provenance");
+            }
             WriteCmd::EndSession {
                 session_id,
                 summary_page_id,
@@ -2797,6 +2911,7 @@ fn worker_loop(mut conn: Connection, mut rx: mpsc::Receiver<WriteCmd>) {
                 obs,
                 owner_filter,
                 ingest_key,
+                machine_id,
                 reply,
             } => {
                 let result = ops::admit_hook_session_event(
@@ -2805,6 +2920,7 @@ fn worker_loop(mut conn: Connection, mut rx: mpsc::Receiver<WriteCmd>) {
                     &obs,
                     &owner_filter,
                     ingest_key.as_deref(),
+                    machine_id.as_deref(),
                 );
                 send_or_warn(reply, result, "admit_hook_session_event");
             }

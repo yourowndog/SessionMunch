@@ -70,6 +70,10 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 const HTTP_READY: &str = "MCP HTTP server ready";
 const STDIO_READY: &str = "MCP server ready on stdio";
+/// Logged once `serve` resolves. The initialize response reaches stdout
+/// before that, so a signal sent on the response alone can still land in
+/// the pre-handshake select.
+const STDIO_HANDSHAKE_DONE: &str = "MCP client completed the stdio handshake";
 /// The stdio arm's post-handshake shutdown log — the branch only
 /// [`stdio_server_exits_on_sigterm_after_initialize`] reaches.
 const STDIO_STOP_AFTER_HANDSHAKE: &str = "stopping the stdio transport";
@@ -372,6 +376,11 @@ fn stdio_server_exits_on_sigterm_after_initialize() {
         response.contains(r#""result""#) && response.contains("serverInfo"),
         "the initialize response must carry a result, or the handshake did not \
          complete: {response}.\nstderr:\n{}",
+        server.stderr()
+    );
+    assert!(
+        server.wait_for(STDIO_HANDSHAKE_DONE, HANDSHAKE_TIMEOUT),
+        "the server never logged {STDIO_HANDSHAKE_DONE:?} after answering initialize.\nstderr:\n{}",
         server.stderr()
     );
 

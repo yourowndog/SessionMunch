@@ -221,9 +221,8 @@ Use this when developing sessionmunch itself on Windows or when you do not
 want the Docker wrapper for CLI commands.
 
 ```powershell
-# Source checkout: the fork carries the SessionMunch line until the v0.1
-# release fixes the canonical repo URL (t_d85c39f4).
-git clone https://github.com/yourowndog/ai-memory .\sessionmunch
+# Source checkout for hacking on sessionmunch itself.
+git clone https://github.com/yourowndog/SessionMunch .\sessionmunch
 Set-Location .\sessionmunch
 cargo build --workspace
 cargo test --workspace

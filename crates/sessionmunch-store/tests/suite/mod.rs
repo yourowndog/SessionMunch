@@ -15,6 +15,7 @@ mod multi_session;
 mod passage_index;
 mod passage_index_eval;
 mod retrieval_tuning_streams;
+mod session_event_ledger;
 mod session_ids_touching_scope;
 mod session_observations;
 mod session_scope_from_observations;

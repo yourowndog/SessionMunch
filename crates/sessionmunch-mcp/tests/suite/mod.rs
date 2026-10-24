@@ -21,5 +21,8 @@ mod handoff_admission;
 mod handoff_identity;
 mod jev_benchmark;
 mod mcp_stateless_http;
+mod session_event_ingest;
 mod slot_identity;
+// Test setup may read the real environment; invariant #1 governs runtime code.
+#[allow(clippy::disallowed_methods)]
 mod stress_autoscope;

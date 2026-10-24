@@ -11,9 +11,10 @@ use crate::cli::UninstallArgs;
 use crate::commands::apply_shared::apply_atomic;
 use crate::commands::apply_shared::mutate_json;
 use crate::commands::apply_shared::mutate_toml;
-use crate::commands::path_util::{claude_config_dir, claude_config_paths, home_dir};
+use crate::commands::path_util::{claude_config_dir, claude_config_paths};
 use crate::commands::{data_purge, install_hooks, install_mcp, openclaw_plugin};
 use crate::config::Config;
+use crate::host_env::HostEnv;
 use anyhow::{Context, Result};
 use sessionmunch_core::find_managed_block;
 use sessionmunch_core::routing_skills::{
@@ -140,13 +141,13 @@ fn push_generated_delete(plan: &mut Vec<PlannedChange>, path: PathBuf, kind: Del
 /// Build the full removal plan by reading each existing config file and
 /// running the matching pure stripper. Missing files / no-matches
 /// produce no entry. `name`/`url` identify the MCP server.
-fn build_plan(args: &UninstallArgs) -> anyhow::Result<Vec<PlannedChange>> {
+fn build_plan(host: &HostEnv, args: &UninstallArgs) -> anyhow::Result<Vec<PlannedChange>> {
     let mut plan = Vec::new();
     let want = |k: crate::cli::UninstallOnly| args.only.is_none() || args.only == Some(k);
     let name = args.mcp_name.as_deref();
     let url = args.mcp_url.as_str();
-    let home = home_dir();
-    let claude_config_dir = claude_config_dir(std::env::var_os("CLAUDE_CONFIG_DIR"));
+    let home = host.home_dir();
+    let claude_config_dir = claude_config_dir(host.var_os("CLAUDE_CONFIG_DIR"));
 
     // ---- Hooks (JSON configs) ----
     if want(crate::cli::UninstallOnly::Hooks) {
@@ -161,36 +162,36 @@ fn build_plan(args: &UninstallArgs) -> anyhow::Result<Vec<PlannedChange>> {
         .collect();
         hook_files.extend([
             (
-                install_hooks::codex_hooks_path()?,
+                install_hooks::codex_hooks_path(host)?,
                 HookConfigShape::NestedHooksKey,
             ),
             (
-                install_hooks::cursor_hooks_path()?,
+                install_hooks::cursor_hooks_path(host)?,
                 HookConfigShape::NestedHooksKey,
             ),
             (
-                install_hooks::gemini_settings_path()?,
+                install_hooks::gemini_settings_path(host)?,
                 HookConfigShape::NestedHooksKey,
             ),
             (
-                install_hooks::command_code_settings_path()?,
+                install_hooks::command_code_settings_path(host)?,
                 HookConfigShape::NestedHooksKey,
             ),
             // Grok's ~/.grok/hooks/sessionmunch.json shares Claude Code's
             // JSON shape, so the same strip pass removes our entries.
             (
-                install_hooks::grok_hooks_path()?,
+                install_hooks::grok_hooks_path(host)?,
                 HookConfigShape::NestedHooksKey,
             ),
             // Devin's default hooks.v1.json is flat: the file itself is the
             // event map. Its config.json alternative stores the same entries
             // under the usual hooks key.
             (
-                install_hooks::devin_hooks_path()?,
+                install_hooks::devin_hooks_path(host)?,
                 HookConfigShape::FlatHookFile,
             ),
             (
-                install_hooks::devin_config_path()?,
+                install_hooks::devin_config_path(host)?,
                 HookConfigShape::NestedHooksKey,
             ),
         ]);
@@ -213,7 +214,7 @@ fn build_plan(args: &UninstallArgs) -> anyhow::Result<Vec<PlannedChange>> {
         }
 
         let mut kiro_configs =
-            install_hooks::list_kiro_cli_agent_configs(&install_hooks::kiro_cli_agents_dir()?)?;
+            install_hooks::list_kiro_cli_agent_configs(&install_hooks::kiro_cli_agents_dir(host)?)?;
         let cwd = std::env::current_dir().context("getting CWD for Kiro hook removal")?;
         kiro_configs.extend(install_hooks::list_kiro_cli_agent_configs(
             &cwd.join(".kiro/agents"),
@@ -232,7 +233,7 @@ fn build_plan(args: &UninstallArgs) -> anyhow::Result<Vec<PlannedChange>> {
             );
         }
 
-        let mut kiro_v3_paths = vec![install_hooks::kiro_cli_v3_hooks_path()?];
+        let mut kiro_v3_paths = vec![install_hooks::kiro_cli_v3_hooks_path(host)?];
         kiro_v3_paths.push(cwd.join(".kiro/hooks/sessionmunch.json"));
         kiro_v3_paths.sort();
         kiro_v3_paths.dedup();
@@ -255,7 +256,7 @@ fn build_plan(args: &UninstallArgs) -> anyhow::Result<Vec<PlannedChange>> {
             );
         }
 
-        let antigravity = install_hooks::antigravity_hooks_path()?;
+        let antigravity = install_hooks::antigravity_hooks_path(host)?;
         if antigravity.exists() {
             let content = std::fs::read_to_string(&antigravity)
                 .with_context(|| format!("reading {}", antigravity.display()))?;
@@ -268,7 +269,7 @@ fn build_plan(args: &UninstallArgs) -> anyhow::Result<Vec<PlannedChange>> {
             );
         }
 
-        let zero = install_hooks::zero_hooks_path()?;
+        let zero = install_hooks::zero_hooks_path(host)?;
         if zero.exists() {
             let content = std::fs::read_to_string(&zero)
                 .with_context(|| format!("reading {}", zero.display()))?;
@@ -281,7 +282,7 @@ fn build_plan(args: &UninstallArgs) -> anyhow::Result<Vec<PlannedChange>> {
             );
         }
 
-        let kimi_code = install_hooks::kimi_code_config_path()?;
+        let kimi_code = install_hooks::kimi_code_config_path(host)?;
         if kimi_code.exists() {
             let content = std::fs::read_to_string(&kimi_code)
                 .with_context(|| format!("reading {}", kimi_code.display()))?;
@@ -294,14 +295,14 @@ fn build_plan(args: &UninstallArgs) -> anyhow::Result<Vec<PlannedChange>> {
             );
         }
 
-        let plugin = install_hooks::opencode_plugin_path()?;
+        let plugin = install_hooks::opencode_plugin_path(host)?;
         push_generated_delete(&mut plan, plugin, DeleteKind::OpenCodePlugin);
 
-        let plugin2 = install_hooks::opencode2_plugin_path()?;
+        let plugin2 = install_hooks::opencode2_plugin_path(host)?;
         push_generated_delete(&mut plan, plugin2, DeleteKind::OpenCode2Plugin);
 
         let omp_profile = args.profile.as_deref();
-        let omp = install_hooks::omp_extension_path(omp_profile)?;
+        let omp = install_hooks::omp_extension_path(host, omp_profile)?;
         push_generated_delete(&mut plan, omp.clone(), DeleteKind::OmpExtension);
 
         let legacy_omp = omp.with_file_name("sessionmunch.ts");
@@ -309,7 +310,7 @@ fn build_plan(args: &UninstallArgs) -> anyhow::Result<Vec<PlannedChange>> {
             push_generated_delete(&mut plan, legacy_omp, DeleteKind::OmpExtension);
         }
 
-        let pi = install_hooks::pi_extension_path()?;
+        let pi = install_hooks::pi_extension_path(host)?;
         push_generated_delete(&mut plan, pi.clone(), DeleteKind::PiExtension);
 
         let legacy_pi = pi.with_file_name("sessionmunch.ts");
@@ -369,7 +370,7 @@ fn build_plan(args: &UninstallArgs) -> anyhow::Result<Vec<PlannedChange>> {
                     Path::new(".claude.json"),
                 )
             } else {
-                let Ok(path) = install_mcp::mcp_config_path(client) else {
+                let Ok(path) = install_mcp::mcp_config_path(host, client) else {
                     continue;
                 };
                 vec![path]
@@ -420,8 +421,8 @@ fn build_plan(args: &UninstallArgs) -> anyhow::Result<Vec<PlannedChange>> {
     // ---- Managed Agent Skills (project + global roots) ----
     if want(crate::cli::UninstallOnly::Skills) {
         let cwd = std::env::current_dir().context("getting CWD for skill removal")?;
-        let appdata = std::env::var_os("APPDATA").map(PathBuf::from);
-        let grok_home = install_mcp::grok_home().ok();
+        let appdata = host.var_os("APPDATA").map(PathBuf::from);
+        let grok_home = install_mcp::grok_home(host).ok();
         for root in skill_roots(
             &cwd,
             home.as_deref(),
@@ -596,11 +597,11 @@ fn remove_dir_if_empty(path: &Path) -> Result<()> {
 /// # Errors
 /// Returns an error if a config file is malformed or a removal write
 /// fails. Absent files / nothing-to-remove are not errors.
-pub fn run(config: &Config, args: UninstallArgs) -> anyhow::Result<()> {
+pub fn run(config: &Config, host: &HostEnv, args: UninstallArgs) -> anyhow::Result<()> {
     let name = args.mcp_name.clone();
     let url = args.mcp_url.clone();
 
-    let plan = build_plan(&args)?;
+    let plan = build_plan(host, &args)?;
     print_plan(&plan);
     if args.purge_data {
         for path in data_purge::purge_preview(&config.data_dir) {

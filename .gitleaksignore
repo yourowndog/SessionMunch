@@ -7,3 +7,15 @@ d8361d3c3a86f870f74841b53c568c64fe42ab1f:crates/sessionmunch-core/src/sanitize.r
 d8361d3c3a86f870f74841b53c568c64fe42ab1f:crates/sessionmunch-core/src/sanitize.rs:generic-api-key:257
 47c9cf2e71712153e3162942a8cb28667a6be27a:crates/sessionmunch-core/src/sanitize.rs:generic-api-key:631
 47c9cf2e71712153e3162942a8cb28667a6be27a:crates/sessionmunch-core/src/sanitize.rs:generic-api-key:633
+4e1eb29cc9c6def9b5ae1e281edbcd82dcacb35b:crates/sessionmunch-workstream/src/history_import.rs:generic-api-key:376
+
+# Same sanitizer/CLI test fixtures as above, at their pre-rename
+# crates/ai-memory-* paths and one CLI test in history (fake keys only).
+c9df5ce5317ae39e6433853726cc2fdbd261ddab:crates/sessionmunch-cli/tests/suite/zero_telemetry.rs:generic-api-key:118
+47c9cf2e71712153e3162942a8cb28667a6be27a:crates/ai-memory-core/src/sanitize.rs:generic-api-key:631
+47c9cf2e71712153e3162942a8cb28667a6be27a:crates/ai-memory-core/src/sanitize.rs:generic-api-key:633
+16e87742aeb51ac34a44f71392b05579865e9b9e:crates/ai-memory-wiki/src/wiki.rs:github-pat:1719
+d8361d3c3a86f870f74841b53c568c64fe42ab1f:crates/ai-memory-core/src/sanitize.rs:gcp-api-key:226
+d8361d3c3a86f870f74841b53c568c64fe42ab1f:crates/ai-memory-core/src/sanitize.rs:generic-api-key:257
+747c32d50f824cae665f2e35bbd62c8502438903:crates/ai-memory-hooks/src/sanitize.rs:generic-api-key:125
+747c32d50f824cae665f2e35bbd62c8502438903:crates/ai-memory-hooks/src/sanitize.rs:jwt:107

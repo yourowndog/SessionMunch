@@ -8,8 +8,8 @@
 //! every probe through the dense stream, so it measures what the audit said
 //! the original gate did not: dense passage retrieval fused with lexical via
 //! RRF. The dense side uses a deterministic in-process test embedder
-//! word-hash bag-of-words, 1024-dim) — NOT the production all-MiniLM-L6-v2
-//! local model, which is 87MB and not bundled (see sessionmunch-llm/src/local.rs).
+//! word-hash bag-of-words, 1024-dim) — NOT the production nomic-embed-text-v1.5
+//! local model, which is 522MB and not bundled (see sessionmunch-llm/src/local.rs).
 //! The test embedder has real cosine semantics (shared vocabulary moves
 //! vectors closer), which is enough to exercise the actual dense write path
 //! (`page_passage_embeddings` upsert via `store_passage_embeddings`), the

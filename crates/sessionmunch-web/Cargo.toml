@@ -13,7 +13,6 @@ sessionmunch-core.workspace = true
 sessionmunch-store.workspace = true
 sessionmunch-wiki.workspace = true
 anyhow.workspace = true
-thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
@@ -25,7 +24,7 @@ tower.workspace = true
 tower-http.workspace = true
 
 # Templating + markdown.
-askama = "0.12"
+askama = { version = "0.16", default-features = false, features = ["derive", "std", "urlencode"] }
 pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
 
 [build-dependencies]

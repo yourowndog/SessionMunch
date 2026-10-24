@@ -19,7 +19,6 @@ uuid.workspace = true
 sessionmunch-store.workspace = true
 sessionmunch-wiki.workspace = true
 anyhow.workspace = true
-thiserror.workspace = true
 flate2.workspace = true
 tar.workspace = true
 tempfile.workspace = true

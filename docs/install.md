@@ -1,7 +1,21 @@
 # Installation cookbook
 
 The [README quick-start](../README.md#quick-start) covers the happy
-path (docker + Claude Code). This page covers everything else:
+path (a source build + Claude Code). This page covers everything else.
+
+> **Before the first tagged release.** Docker Hub images, AUR packages and
+> prebuilt archives are produced by the release workflow, so they do not exist
+> until `v0.1.0` is tagged. Until then, every command on this page still works
+> if you build the pieces locally first:
+>
+> ```bash
+> # Docker image, under the same name the snippets below use
+> docker build -f docker/Dockerfile -t yourowndog/sessionmunch:latest .
+>
+> # Native binary instead of the AUR package
+> cargo build --release --bin sessionmunch
+> install -Dm755 target/release/sessionmunch ~/.local/bin/sessionmunch
+> ```
 
 - [Server on a different machine](#server-on-a-different-machine)
   (homelab, LAN box, remote server)
@@ -31,7 +45,7 @@ path (docker + Claude Code). This page covers everything else:
 > and replace `homelab` with `localhost` if the server runs on the
 > same machine as the agent CLI.
 
-The Docker image is published for `linux/amd64` and `linux/arm64`; Apple
+Once published, the Docker image covers `linux/amd64` and `linux/arm64`; Apple
 Silicon Macs and ARM64 Linux hosts should not need `--platform linux/amd64`.
 
 > **Podman.** The `bin/sessionmunch` wrapper automatically uses rootless Podman
@@ -196,6 +210,10 @@ take precedence — see
 ---
 
 ## Arch Linux native packages (AUR)
+
+> Not on the AUR yet. The packages are published with the first tagged
+> release; until then, use the source build above or run `makepkg -si` in
+> `packaging/aur/` against a tagged release.
 
 Use the native packages when you want `/usr/bin/sessionmunch` plus systemd units
 instead of the Docker wrapper. The package installs the binary and hook sources
@@ -1946,6 +1964,8 @@ docker run --rm yourowndog/sessionmunch:latest --help     # full subcommand tree
 | `workstreams [--workspace NAME] [--project NAME] [--limit N] [--json]` | host wrapper or native binary | List recent workstreams selectable from the current checkout, including current selection and linked harnesses, without exposing paths or native session ids |
 | `rename-workstream (--from NAME \| --workstream-id ID) --to NAME [--workspace NAME] [--project NAME] [--json]` | host wrapper or native binary | Retitle one workstream selectable from the current checkout; metadata only, so the stable id, the ledger, the listing order, and the current selection are unaffected |
 | `workstream-search [query]` | managed child or thin HTTP client | Search the complete visible managed-workstream ledger; the managed child receives its workstream id automatically |
+| `import sessions [--since 7d] [--harness NAME] [--dry-run] [--json]` | native binary on each machine | Import every native session the local harness stores changed within the window, independent of the current directory; events are sanitized, queued in `<data_dir>/history-import/spool`, and delivered idempotently to the hub (the `[cluster] central_url` of a satellite, else the configured server). Oversized outputs keep a head/tail inline and upload whole as artifacts. Unsupported or unreadable stores are reported by name |
+| `search-events "<query>" [--machine HOST] [--harness NAME] [--since 7d] [--newest] [--json]` | thin HTTP client | Search preserved session events (hook capture and imported transcripts) across every project, machine, and harness; MCP clients use `memory_search_events` |
 | `status` | `docker exec` | Counts, paths, derived-index diagnostics, and passive LLM/embedding provider health |
 | `search "<query>"` | `docker exec` | Wiki FTS5 search + bounded source authority; use MCP `memory_query` for entity/graph/vector RRF |
 | `write-page` | `docker exec` | Manual page write (atomic + indexed) |

@@ -39,9 +39,6 @@ pub const CODEX_RESPONSES_URL: &str = "https://chatgpt.com/backend-api/codex/res
 /// Public Codex/OpenCode OAuth client id.
 pub const CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 
-/// Scopes used by Codex/OpenCode for ChatGPT sign-in.
-pub const OAUTH_SCOPES: &str = "openid profile email offline_access";
-
 /// Status code used when the Codex SSE stream carries a terminal error
 /// event (`response.failed`/`response.incomplete`/`response.cancelled`
 /// or a top-level `error` payload). 502 ("Bad Gateway") models the

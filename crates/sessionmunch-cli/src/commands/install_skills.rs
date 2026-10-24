@@ -12,8 +12,9 @@ use sessionmunch_core::routing_skills::{
 use crate::cli::{InstallSkillsAgent, InstallSkillsArgs, InstallSkillsScope};
 use crate::commands::apply_shared::{ApplyOutcome, apply_atomic};
 use crate::commands::install_mcp;
-use crate::commands::path_util::{claude_config_dir, home_dir};
+use crate::commands::path_util::claude_config_dir;
 use crate::config::Config;
+use crate::host_env::HostEnv;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct TargetRoot {
@@ -43,22 +44,22 @@ pub(super) struct PreparedInstall {
 /// Returns an error when target roots cannot be resolved, an unmanaged
 /// same-name skill would be overwritten without `--force`, or a skill
 /// file cannot be written.
-pub fn run(_config: &Config, args: InstallSkillsArgs) -> Result<()> {
-    let roots = resolve_target_roots_from_env(&args)?;
+pub fn run(_config: &Config, host: &HostEnv, args: InstallSkillsArgs) -> Result<()> {
+    let roots = resolve_target_roots_from_env(host, &args)?;
 
     if args.print {
         print_install_plan(&roots);
         return Ok(());
     }
 
-    let prepared = prepare_install(&args)?;
+    let prepared = prepare_install(host, &args)?;
     print_reports(apply_prepared_install(prepared)?);
 
     Ok(())
 }
 
-pub(super) fn prepare_install(args: &InstallSkillsArgs) -> Result<PreparedInstall> {
-    let roots = resolve_target_roots_from_env(args)?;
+pub(super) fn prepare_install(host: &HostEnv, args: &InstallSkillsArgs) -> Result<PreparedInstall> {
+    let roots = resolve_target_roots_from_env(host, args)?;
     let plans = skill_file_plans(&roots);
     validate_overwrite_safety(&plans, args.force)?;
     Ok(PreparedInstall { plans })
@@ -85,15 +86,18 @@ fn print_reports(reports: Vec<InstallReport>) {
     }
 }
 
-fn resolve_target_roots_from_env(args: &InstallSkillsArgs) -> Result<Vec<TargetRoot>> {
+fn resolve_target_roots_from_env(
+    host: &HostEnv,
+    args: &InstallSkillsArgs,
+) -> Result<Vec<TargetRoot>> {
     let cwd = std::env::current_dir().context("getting CWD for install-skills target")?;
-    let home = home_dir();
-    let appdata = std::env::var_os("APPDATA").map(PathBuf::from);
+    let home = host.home_dir();
+    let appdata = host.var_os("APPDATA").map(PathBuf::from);
     let grok_home = (args.scope == InstallSkillsScope::Global
         && args.agent == InstallSkillsAgent::Grok)
-        .then(install_mcp::grok_home)
+        .then(|| install_mcp::grok_home(host))
         .transpose()?;
-    let claude_config_dir = claude_config_dir(std::env::var_os("CLAUDE_CONFIG_DIR"));
+    let claude_config_dir = claude_config_dir(host.var_os("CLAUDE_CONFIG_DIR"));
     resolve_target_roots_for_platform(
         args,
         &cwd,
