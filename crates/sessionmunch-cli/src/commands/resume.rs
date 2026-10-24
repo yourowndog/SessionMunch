@@ -19,6 +19,7 @@ use crate::commands::show::{
 };
 use crate::commands::{continue_session, workstreams};
 use crate::config::Config;
+use crate::host_env::HostEnv;
 use crate::http_client::ServerEndpoint;
 
 struct Candidate {
@@ -28,7 +29,7 @@ struct Candidate {
 }
 
 /// Interactively select a workstream from every valid locally linked checkout.
-pub async fn run(config: &Config, args: ResumeArgs) -> Result<i32> {
+pub async fn run(config: &Config, host: &HostEnv, args: ResumeArgs) -> Result<i32> {
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         bail!(
             "`sessionmunch resume` needs a terminal; use `sessionmunch workstreams` to list a checkout in scripts"
@@ -122,7 +123,7 @@ pub async fn run(config: &Config, args: ResumeArgs) -> Result<i32> {
         );
     }
 
-    let harnesses = available_harnesses();
+    let harnesses = available_harnesses(host);
     let mut harness_indices = vec![0usize; candidates.len()];
     let mut choices = candidates
         .iter()
@@ -154,6 +155,7 @@ pub async fn run(config: &Config, args: ResumeArgs) -> Result<i32> {
     );
     crate::commands::run::run_from(
         config,
+        host,
         RunArgs {
             workspace: Some(selected.link.workspace.clone()),
             project: Some(selected.link.project.clone()),

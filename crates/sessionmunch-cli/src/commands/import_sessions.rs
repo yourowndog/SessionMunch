@@ -26,8 +26,8 @@ use sessionmunch_workstream::{
 };
 
 use crate::cli::ImportSessionsArgs;
-use crate::commands::path_util;
 use crate::config::Config;
+use crate::host_env::HostEnv;
 use crate::http_client::ServerEndpoint;
 
 /// Events per spooled batch; well under the hub's 4096-event cap so one
@@ -74,7 +74,7 @@ struct CursorFile {
     cursors: BTreeMap<String, BTreeMap<String, String>>,
 }
 
-pub async fn run(config: &Config, args: ImportSessionsArgs) -> Result<()> {
+pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> Result<()> {
     let since_window = parse_since(&args.since)?;
     let since = SystemTime::now()
         .checked_sub(since_window)
@@ -83,7 +83,7 @@ pub async fn run(config: &Config, args: ImportSessionsArgs) -> Result<()> {
         .home
         .clone()
         .or_else(|| config.home_dir.as_deref().map(PathBuf::from))
-        .or_else(path_util::home_dir)
+        .or_else(|| host.home_dir())
         .ok_or_else(|| anyhow!("cannot resolve the home directory; pass --home"))?;
     let machine = machine_identity();
     let sanitizer = Sanitizer::new(&config.sanitize).context("building canonical sanitizer")?;

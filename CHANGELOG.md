@@ -133,6 +133,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Patched new certificate-validation advisories RUSTSEC-2026-0382 (rustls-webpki 0.103.16) and RUSTSEC-2026-0383 (webpki-root-certs 1.0.10). The web UI now uses askama 0.16 without its config feature, which drops the unmaintained basic-toml (RUSTSEC-2026-0374). (#11)
+- Patched RUSTSEC-2026-0386 (tokio `AsyncFd` I/O safety) by moving to tokio 1.54.1 in the workspace and the companion importer. (#16)
 - Renamed the legacy Architecture & Data Ownership guide so it no longer
   differs from the canonical `docs/ARCHITECTURE.md` only by letter case,
   preventing case-insensitive macOS and Windows checkouts from compiling the

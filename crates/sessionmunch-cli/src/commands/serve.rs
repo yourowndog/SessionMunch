@@ -46,6 +46,7 @@ use tracing::info;
 
 use crate::cli::{ServeArgs, TransportKind};
 use crate::config::{AuthSettings, AutoImproveSettings, Config, MaintenanceSettings};
+use crate::host_env::HostEnv;
 use sessionmunch_mcp::auth::{AuthState, require_bearer};
 
 /// 10 MB cap on inbound HTTP bodies. The /hook ingress accepts the
@@ -788,7 +789,7 @@ async fn run_session_consolidation_worker(
 /// # Errors
 /// Returns an error if the store cannot be opened, the watcher cannot
 /// install, or the transport setup fails.
-pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
+pub async fn run(config: &Config, host: &HostEnv, args: ServeArgs) -> Result<()> {
     // Before anything slow: boot takes the pre-migration archive and runs the
     // wiki migrations, and a signal arriving in that window has to be caught
     // rather than fall through to the default disposition (#699).
@@ -814,11 +815,19 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
     // rollback to 1.x would be impossible. A no-op for a fresh install or an
     // already-migrated store; the OKF wiki migration reuses this archive instead
     // of taking a second, post-DB-migration one.
-    let backup_dest_override = std::env::var("SESSIONMUNCH_BACKUP_DIR")
-        .ok()
+    let in_container = sessionmunch_wiki::backup::running_in_container(
+        host.var("SESSIONMUNCH_IN_CONTAINER").as_deref(),
+    );
+    let backup_dest_override = config
+        .runtime_env
+        .backup_dir()
         .map(std::path::PathBuf::from);
-    migrations::snapshot_before_db_migration(&config.data_dir, backup_dest_override.as_deref())
-        .with_context(|| "taking the pre-migration safety backup")?;
+    migrations::snapshot_before_db_migration(
+        &config.data_dir,
+        backup_dest_override.as_deref(),
+        in_container,
+    )
+    .with_context(|| "taking the pre-migration safety backup")?;
 
     let mut store = Store::open(&config.data_dir)
         .with_context(|| format!("opening store at {}", config.data_dir.display()))?;
@@ -874,7 +883,16 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
         &store.writer,
         &store.reader,
         &wiki_root,
-        &migrations::registry(),
+        // Unlike the pre-open snapshot above, the OKF migration has always
+        // treated a blank SESSIONMUNCH_BACKUP_DIR as unset.
+        &migrations::registry(
+            config
+                .runtime_env
+                .backup_dir()
+                .filter(|dir| !dir.trim().is_empty())
+                .map(std::path::PathBuf::from),
+            in_container,
+        ),
     )
     .await
     .with_context(|| "applying wiki-structure migrations")?;
@@ -1396,7 +1414,7 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
                 human_mode,
                 config.auth.secure_cookie,
                 args.allow_insecure_no_auth,
-                sessionmunch_wiki::backup::running_in_container(),
+                in_container,
             )?;
             // P1.3: surface the resolved cluster topology once at startup so
             // an operator can see at a glance whether this node participates

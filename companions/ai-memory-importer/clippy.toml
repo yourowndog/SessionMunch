@@ -1,0 +1,4 @@
+# Stops clippy's upward search at this standalone companion so the root
+# workspace's `disallowed-methods` (AGENTS.md invariant #1, which covers the
+# sessionmunch binary's `Config`/`HostEnv` readers) does not apply here: the
+# importer is a separate program that reads its own environment.

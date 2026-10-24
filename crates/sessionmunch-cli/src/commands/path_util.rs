@@ -3,17 +3,6 @@
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
-/// Resolve the user home used for agent configuration paths.
-///
-/// Tests and scripted wrappers can set `SESSIONMUNCH_HOME` to exercise the
-/// platform-specific config layout without touching the real user profile.
-pub(crate) fn home_dir() -> Option<PathBuf> {
-    if let Some(home) = std::env::var_os("SESSIONMUNCH_HOME").filter(|value| !value.is_empty()) {
-        return Some(PathBuf::from(home));
-    }
-    dirs::home_dir()
-}
-
 /// An agent's relocated config root from its own home variable, when that
 /// variable is set to a non-empty, non-whitespace value; else `None`, and the
 /// caller falls back to the agent's `~/...` default.

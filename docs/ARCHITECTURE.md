@@ -498,7 +498,10 @@ a documented prior-art bug; cite the source when reviewing changes
 that touch the relevant area.
 
 1. **One config-read path.** `Config::load()` called once at startup.
-   No `std::env::var` outside it.  (agentmemory #456 / #469.)
+   No `std::env::var` outside it.  (agentmemory #456 / #469.) Host facts
+   (harness config homes, `$HOME`, `PATH`) come from the CLI's `HostEnv`
+   snapshot, taken once at the entry point and passed down; `clippy.toml`
+   `disallowed-methods` rejects any other read.
 2. **Single-writer SQLite actor.** All writes go through one `mpsc`
    channel to one dedicated OS thread. (cognee #2717.)
 3. **Indexes commit in the same transaction as the data.** No

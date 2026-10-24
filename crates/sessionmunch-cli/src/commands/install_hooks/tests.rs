@@ -130,14 +130,14 @@ fn capture_assistant_allowed_only_for_claude_native() {
         Zcode,
     ] {
         assert!(
-            !capture_assistant_allowed(agent),
+            !capture_assistant_allowed(&HostEnv::default(), agent),
             "{agent:?} must not allow --capture-assistant"
         );
     }
     // Claude Code tracks the native-platform gate exactly.
     assert_eq!(
-        capture_assistant_allowed(ClaudeCode),
-        local_hook_policy_v1_supported()
+        capture_assistant_allowed(&HostEnv::default(), ClaudeCode),
+        local_hook_policy_v1_supported(&HostEnv::default())
     );
 }
 
@@ -206,6 +206,8 @@ fn bash_program_for_installer_test() -> Option<std::path::PathBuf> {
 }
 
 #[cfg(windows)]
+// Test-only: locates Git Bash on the CI runner, not a sessionmunch setting.
+#[allow(clippy::disallowed_methods)]
 fn bash_program_for_installer_test() -> Option<std::path::PathBuf> {
     let mut candidates = Vec::new();
     if let Some(root) = std::env::var_os("EXEPATH") {
@@ -482,8 +484,12 @@ fn apply_staged_json_hooks_in(
     payload: impl FnOnce(&Path) -> Result<JsonHookPayload>,
 ) -> Result<()> {
     let staged = stage_hook_scripts_in(hooks_dir, target.label, staging_data_local)?;
-    let payload = payload(&staged_command_dir(&staged, target.label))?;
-    write_json_hooks(target, &payload, None, args)
+    let payload = payload(&staged_command_dir(
+        &HostEnv::default(),
+        &staged,
+        target.label,
+    ))?;
+    write_json_hooks(&HostEnv::default(), target, &payload, None, args)
 }
 
 /// Claude Code's apply path with the script-form payload, so assertions on
@@ -502,7 +508,7 @@ fn apply_to_claude_code_settings_in(
         staging_data_local,
         args,
         |command_dir| {
-            let capture_prompts = install_claude_prompt_capture(args);
+            let capture_prompts = install_claude_prompt_capture(&HostEnv::default(), args);
             let payload = configure_claude_prompt_capture(
                 crate::commands::render_shared::build_claude_code_script_payload_for_test(
                     command_dir,
@@ -542,6 +548,7 @@ fn apply_to_devin_settings_in(
         args,
         |command_dir| {
             json_hook_payload(
+                &HostEnv::default(),
                 &DEVIN_HOOKS,
                 command_dir,
                 server_url,
@@ -646,6 +653,7 @@ fn merge_json_target(
     config_path: &Path,
 ) -> Result<ApplyOutcome> {
     let payload = json_hook_payload(
+        &HostEnv::default(),
         target,
         command_dir,
         server_url,
@@ -824,7 +832,7 @@ fn install_project_strategy_preserves_baked_when_flag_absent() {
     };
     // A bare re-apply (e.g. `sessionmunch upgrade`) must keep repo-root.
     assert_eq!(
-        install_project_strategy(&args),
+        install_project_strategy(&HostEnv::default(), &args),
         Some(ProjectStrategyArg::RepoRoot)
     );
 }
@@ -851,7 +859,7 @@ fn install_project_strategy_explicit_basename_overrides_existing() {
     };
     // Explicit basename is honored, not overridden by the baked repo-root.
     assert_eq!(
-        install_project_strategy(&args),
+        install_project_strategy(&HostEnv::default(), &args),
         Some(ProjectStrategyArg::Basename)
     );
 }
@@ -865,7 +873,7 @@ fn install_project_strategy_none_when_target_absent() {
         project_strategy: None,
         ..default_hook_args()
     };
-    assert_eq!(install_project_strategy(&args), None);
+    assert_eq!(install_project_strategy(&HostEnv::default(), &args), None);
 }
 
 #[test]
@@ -885,7 +893,7 @@ fn install_project_strategy_reads_openclaw_entrypoint_below_config_dir() {
         ..default_hook_args()
     };
     assert_eq!(
-        install_project_strategy(&args),
+        install_project_strategy(&HostEnv::default(), &args),
         Some(ProjectStrategyArg::RepoRoot)
     );
 }
@@ -937,6 +945,7 @@ fn manual_agent_render_mentions_repo_root_project_strategy() {
     stub_scripts(temp.path(), &["session-start.sh"]);
     for agent in ["codex", "cursor", "gemini-cli", "antigravity-cli"] {
         let output = render_agent_output(
+            &HostEnv::default(),
             agent,
             temp.path(),
             "http://127.0.0.1:49374",
@@ -956,6 +965,7 @@ fn manual_agent_render_omits_project_strategy_by_default() {
     let temp = TempDir::new().unwrap();
     stub_scripts(temp.path(), &["session-start.sh"]);
     let output = render_agent_output(
+        &HostEnv::default(),
         "codex",
         temp.path(),
         "http://127.0.0.1:49374",
@@ -971,6 +981,7 @@ fn antigravity_manual_render_explains_explicit_finalization() {
     let temp = TempDir::new().unwrap();
     stub_scripts(temp.path(), &["session-start.sh", "stop.sh"]);
     let output = render_agent_output(
+        &HostEnv::default(),
         "antigravity-cli",
         temp.path(),
         "http://127.0.0.1:49374",
@@ -1002,6 +1013,7 @@ fn manual_agent_render_uses_agent_profile_not_physical_bundle_listing() {
     );
 
     let gemini = render_agent_output(
+        &HostEnv::default(),
         "gemini-cli",
         temp.path(),
         "http://127.0.0.1:49374",
@@ -1019,6 +1031,7 @@ fn manual_agent_render_uses_agent_profile_not_physical_bundle_listing() {
     );
 
     let codex = render_agent_output(
+        &HostEnv::default(),
         "codex",
         temp.path(),
         "http://127.0.0.1:49374",
@@ -1170,6 +1183,7 @@ fn resolve_hooks_dir_uses_pool_bundle_for_pool() {
 #[test]
 fn pool_settings_yaml_covers_all_events_with_bounded_entries() {
     let snippet = super::super::render_shared::build_pool_settings_yaml_with_data_dir(
+        &HostEnv::default(),
         Path::new("/staging/pool"),
         "http://127.0.0.1:49374",
         Some("tok-test"),
@@ -1211,6 +1225,7 @@ fn pool_settings_yaml_covers_all_events_with_bounded_entries() {
 #[test]
 fn render_pool_output_states_manual_paste_and_finalize_path() {
     let out = render_pool_output(
+        &HostEnv::default(),
         Path::new("/staging/pool"),
         "http://127.0.0.1:49374",
         None,
@@ -1294,7 +1309,14 @@ fn zero_apply_merges_around_third_party_hooks_and_preserves_disabled_flag() {
         ..default_hook_args()
     };
 
-    apply_to_zero_hooks("http://127.0.0.1:49374", None, Path::new("/data"), &args).unwrap();
+    apply_to_zero_hooks(
+        &HostEnv::default(),
+        "http://127.0.0.1:49374",
+        None,
+        Path::new("/data"),
+        &args,
+    )
+    .unwrap();
 
     let root: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
@@ -1434,6 +1456,7 @@ fn zcode_apply_preserves_siblings_and_is_idempotent() {
     };
 
     apply_to_zcode_hooks(
+        &HostEnv::default(),
         "http://127.0.0.1:49374",
         Some("tok-test"),
         Path::new("/data"),
@@ -1442,6 +1465,7 @@ fn zcode_apply_preserves_siblings_and_is_idempotent() {
     .unwrap();
     let first = fs::read_to_string(&path).unwrap();
     apply_to_zcode_hooks(
+        &HostEnv::default(),
         "http://127.0.0.1:49374",
         Some("tok-test"),
         Path::new("/data"),
@@ -1537,6 +1561,7 @@ fn zcode_apply_withdraws_our_hooks_from_foreign_keys_and_keeps_the_rest() {
     };
 
     apply_to_zcode_hooks(
+        &HostEnv::default(),
         "http://127.0.0.1:49374",
         Some("tok-test"),
         Path::new("/data"),
@@ -1574,6 +1599,7 @@ fn zcode_apply_withdraws_our_hooks_from_foreign_keys_and_keeps_the_rest() {
 
     // Re-apply is still a no-op once the withdrawal has happened.
     apply_to_zcode_hooks(
+        &HostEnv::default(),
         "http://127.0.0.1:49374",
         Some("tok-test"),
         Path::new("/data"),
@@ -1621,7 +1647,14 @@ fn zcode_apply_flags_a_user_disabled_hooks_block() {
         ..default_hook_args()
     };
 
-    apply_to_zcode_hooks("http://127.0.0.1:49374", None, Path::new("/data"), &args).unwrap();
+    apply_to_zcode_hooks(
+        &HostEnv::default(),
+        "http://127.0.0.1:49374",
+        None,
+        Path::new("/data"),
+        &args,
+    )
+    .unwrap();
 
     let root: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
@@ -1654,7 +1687,14 @@ fn zcode_apply_respects_a_user_chosen_output_ceiling() {
         ..default_hook_args()
     };
 
-    apply_to_zcode_hooks("http://127.0.0.1:49374", None, Path::new("/data"), &args).unwrap();
+    apply_to_zcode_hooks(
+        &HostEnv::default(),
+        "http://127.0.0.1:49374",
+        None,
+        Path::new("/data"),
+        &args,
+    )
+    .unwrap();
 
     let root: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
@@ -2271,7 +2311,7 @@ fn apply_persists_the_bearer_and_keeps_it_out_of_the_agent_config() {
         ..default_hook_args()
     };
 
-    run(&config, args).expect("apply should succeed");
+    run(&config, &HostEnv::default(), args).expect("apply should succeed");
 
     let rendered = std::fs::read_to_string(&settings).unwrap();
     assert!(
@@ -2984,8 +3024,8 @@ fn extension_hints_follow_pi_coding_agent_dir() {
     let env = || Some(std::ffi::OsString::from(custom));
 
     for hint in [
-        omp_extension_hint_in(env(), None),
-        pi_extension_hint_in(env()),
+        omp_extension_hint_in(&HostEnv::default(), env(), None),
+        pi_extension_hint_in(&HostEnv::default(), env()),
     ] {
         assert!(
             hint.contains("custom")
@@ -3006,9 +3046,13 @@ fn extension_hints_follow_pi_coding_agent_dir() {
         (
             ".omp",
             "sessionmunch-omp.ts",
-            omp_extension_hint_in(None, None),
+            omp_extension_hint_in(&HostEnv::default(), None, None),
         ),
-        (".pi", "sessionmunch-pi.ts", pi_extension_hint_in(None)),
+        (
+            ".pi",
+            "sessionmunch-pi.ts",
+            pi_extension_hint_in(&HostEnv::default(), None),
+        ),
     ] {
         let tail: PathBuf = [agent_home, "agent", "extensions", filename]
             .iter()
@@ -3027,11 +3071,13 @@ fn extension_hints_follow_pi_coding_agent_dir() {
 #[test]
 fn omp_profile_precedence_is_independent_of_the_override_dir_name() {
     let a = omp_extension_path_in(
+        &HostEnv::default(),
         Some(std::ffi::OsString::from("/custom/agent")),
         Some("work"),
     )
     .unwrap();
     let b = omp_extension_path_in(
+        &HostEnv::default(),
         Some(std::ffi::OsString::from("/custom/pi-agent")),
         Some("work"),
     )
@@ -3059,13 +3105,13 @@ fn omp_profile_precedence_is_independent_of_the_override_dir_name() {
 /// `~/.omp/profiles/<name>/agent/extensions`.
 #[test]
 fn omp_profile_relocates_when_no_override_is_set() {
-    let path = omp_extension_path_in(None, Some("work")).unwrap();
+    let path = omp_extension_path_in(&HostEnv::default(), None, Some("work")).unwrap();
     assert!(
         path.ends_with(".omp/profiles/work/agent/extensions/sessionmunch-omp.ts"),
         "got {path:?}"
     );
 
-    let plain = omp_extension_path_in(None, None).unwrap();
+    let plain = omp_extension_path_in(&HostEnv::default(), None, None).unwrap();
     assert!(
         plain.ends_with(".omp/agent/extensions/sessionmunch-omp.ts"),
         "got {plain:?}"
@@ -3138,7 +3184,8 @@ fn pi_extension_path_honours_pi_coding_agent_dir() {
     } else {
         "/custom/pi-agent"
     };
-    let path = pi_extension_path_in(Some(std::ffi::OsString::from(custom))).unwrap();
+    let path =
+        pi_extension_path_in(&HostEnv::default(), Some(std::ffi::OsString::from(custom))).unwrap();
     assert_eq!(
         path,
         Path::new(custom)
@@ -3151,7 +3198,7 @@ fn pi_extension_path_honours_pi_coding_agent_dir() {
     // always a failed shell expansion, not a request to install into the
     // filesystem root.
     for env in [None, Some(std::ffi::OsString::new())] {
-        let path = pi_extension_path_in(env).unwrap();
+        let path = pi_extension_path_in(&HostEnv::default(), env).unwrap();
         assert!(
             path.ends_with(
                 Path::new(".pi")
@@ -3175,7 +3222,12 @@ fn omp_extension_path_honours_pi_coding_agent_dir() {
     } else {
         "/custom/omp-agent"
     };
-    let path = omp_extension_path_in(Some(std::ffi::OsString::from(custom)), None).unwrap();
+    let path = omp_extension_path_in(
+        &HostEnv::default(),
+        Some(std::ffi::OsString::from(custom)),
+        None,
+    )
+    .unwrap();
     assert_eq!(
         path,
         Path::new(custom)
@@ -3184,7 +3236,7 @@ fn omp_extension_path_honours_pi_coding_agent_dir() {
     );
 
     for env in [None, Some(std::ffi::OsString::new())] {
-        let path = omp_extension_path_in(env, None).unwrap();
+        let path = omp_extension_path_in(&HostEnv::default(), env, None).unwrap();
         assert!(
             path.ends_with(
                 Path::new(".omp")
@@ -3200,7 +3252,7 @@ fn omp_extension_path_honours_pi_coding_agent_dir() {
 
 #[test]
 fn omp_extension_path_honours_profile() {
-    let path = omp_extension_path_in(None, Some("my-profile")).unwrap();
+    let path = omp_extension_path_in(&HostEnv::default(), None, Some("my-profile")).unwrap();
     assert!(
         path.ends_with(
             Path::new(".omp")
@@ -3234,7 +3286,7 @@ fn omp_extension_is_directly_discoverable_by_omp() {
         profile: None,
     };
 
-    let path = resolve_omp_extension_path(&args).unwrap();
+    let path = resolve_omp_extension_path(&HostEnv::default(), &args).unwrap();
     assert_eq!(
         path.file_name().and_then(|s| s.to_str()),
         Some("sessionmunch-omp.ts")
@@ -3267,7 +3319,7 @@ fn pi_extension_is_directly_discoverable_by_pi() {
         profile: None,
     };
 
-    let resolved = resolve_pi_extension_path(&args).unwrap();
+    let resolved = resolve_pi_extension_path(&HostEnv::default(), &args).unwrap();
 
     assert_eq!(resolved, path);
     assert_eq!(
@@ -3919,6 +3971,7 @@ fn kimi_code_apply_writes_all_events_into_fresh_config() {
     let config_path = config_tmp.path().join("config.toml");
 
     let outcome = merge_kimi_code_hooks(
+        &HostEnv::default(),
         hooks_tmp.path(),
         "http://127.0.0.1:49374",
         None,
@@ -3985,6 +4038,7 @@ command = "SESSIONMUNCH_HOOK_URL=http://old:1 /old/sessionmunch/hooks/kimi-code/
     .unwrap();
 
     merge_kimi_code_hooks(
+        &HostEnv::default(),
         hooks_tmp.path(),
         "http://127.0.0.1:49374",
         None,
@@ -4055,6 +4109,7 @@ fn kimi_code_apply_is_idempotent() {
     let config_path = config_tmp.path().join("config.toml");
 
     let first = merge_kimi_code_hooks(
+        &HostEnv::default(),
         hooks_tmp.path(),
         "http://127.0.0.1:49374",
         None,
@@ -4070,6 +4125,7 @@ fn kimi_code_apply_is_idempotent() {
     );
 
     let second = merge_kimi_code_hooks(
+        &HostEnv::default(),
         hooks_tmp.path(),
         "http://127.0.0.1:49374",
         None,
@@ -4088,12 +4144,13 @@ fn claude_settings_path_honours_claude_config_dir() {
     } else {
         "/custom/claude"
     };
-    let path = claude_settings_path_in(Some(std::ffi::OsString::from(custom))).unwrap();
+    let path = claude_settings_path_in(&HostEnv::default(), Some(std::ffi::OsString::from(custom)))
+        .unwrap();
     assert_eq!(path, Path::new(custom).join("settings.json"));
 
     // Empty override and unset var both fall back to ~/.claude/settings.json.
     for env in [None, Some(std::ffi::OsString::new())] {
-        let path = claude_settings_path_in(env).unwrap();
+        let path = claude_settings_path_in(&HostEnv::default(), env).unwrap();
         assert!(
             path.ends_with(Path::new(".claude").join("settings.json")),
             "default must be ~/.claude/settings.json, got {}",
@@ -4114,14 +4171,15 @@ fn codex_hooks_path_honours_codex_home() {
     } else {
         "/custom/codex"
     };
-    let path = codex_hooks_path_in(Some(std::ffi::OsString::from(custom))).unwrap();
+    let path =
+        codex_hooks_path_in(&HostEnv::default(), Some(std::ffi::OsString::from(custom))).unwrap();
     assert_eq!(path, Path::new(custom).join("hooks.json"));
 
     // Unset and blank both fall back to ~/.codex/hooks.json. Blank counts as
     // unset because an exported-but-empty variable is nearly always a failed
     // shell expansion, not a request to install into the filesystem root.
     for env in [None, Some(std::ffi::OsString::new())] {
-        let path = codex_hooks_path_in(env).unwrap();
+        let path = codex_hooks_path_in(&HostEnv::default(), env).unwrap();
         assert!(
             path.ends_with(Path::new(".codex").join("hooks.json")),
             "default must be ~/.codex/hooks.json, got {}",
@@ -4318,12 +4376,14 @@ fn kimi_code_config_path_honours_kimi_code_home() {
     } else {
         "/custom/kimi"
     };
-    let path = kimi_code_config_path_in(Some(std::ffi::OsString::from(custom))).unwrap();
+    let path =
+        kimi_code_config_path_in(&HostEnv::default(), Some(std::ffi::OsString::from(custom)))
+            .unwrap();
     assert_eq!(path, Path::new(custom).join("config.toml"));
 
     // Empty override and unset var both fall back to ~/.kimi-code.
     for env in [None, Some(std::ffi::OsString::new())] {
-        let path = kimi_code_config_path_in(env).unwrap();
+        let path = kimi_code_config_path_in(&HostEnv::default(), env).unwrap();
         assert!(
             path.ends_with(Path::new(".kimi-code").join("config.toml")),
             "default must be ~/.kimi-code/config.toml, got {}",
@@ -4358,6 +4418,7 @@ fn kiro_cli_apply_writes_all_v2_events_into_agent_config() {
     .unwrap();
 
     let outcome = merge_kiro_cli_agent_hooks(
+        &HostEnv::default(),
         hooks_tmp.path(),
         "http://127.0.0.1:49374",
         None,
@@ -4429,6 +4490,7 @@ fn kiro_cli_apply_preserves_third_party_hooks_and_is_idempotent() {
 
     let apply = || {
         merge_kiro_cli_agent_hooks(
+            &HostEnv::default(),
             hooks_tmp.path(),
             "http://127.0.0.1:49374",
             None,
@@ -4470,16 +4532,25 @@ fn kiro_cli_paths_honour_kiro_home() {
     } else {
         "/custom/kiro"
     };
-    let agents = kiro_cli_home_join(Some(std::ffi::OsString::from(custom)), "agents").unwrap();
+    let agents = kiro_cli_home_join(
+        &HostEnv::default(),
+        Some(std::ffi::OsString::from(custom)),
+        "agents",
+    )
+    .unwrap();
     assert_eq!(agents, Path::new(custom).join("agents"));
-    let hooks = kiro_cli_home_join(Some(std::ffi::OsString::from(custom)), "hooks")
-        .unwrap()
-        .join("sessionmunch.json");
+    let hooks = kiro_cli_home_join(
+        &HostEnv::default(),
+        Some(std::ffi::OsString::from(custom)),
+        "hooks",
+    )
+    .unwrap()
+    .join("sessionmunch.json");
     assert_eq!(hooks, Path::new(custom).join("hooks/sessionmunch.json"));
 
     // Empty override and unset var both fall back to ~/.kiro.
     for env in [None, Some(std::ffi::OsString::new())] {
-        let agents = kiro_cli_home_join(env.clone(), "agents").unwrap();
+        let agents = kiro_cli_home_join(&HostEnv::default(), env.clone(), "agents").unwrap();
         assert!(
             agents.ends_with(Path::new(".kiro").join("agents")),
             "default must be ~/.kiro/agents, got {}",
@@ -4509,6 +4580,7 @@ fn kiro_cli_v3_apply_writes_documented_schema_and_is_idempotent() {
 
     let apply = || {
         merge_kiro_cli_v3_hooks(
+            &HostEnv::default(),
             hooks_tmp.path(),
             "https://memory.example",
             Some("test-token"),
@@ -4564,6 +4636,7 @@ fn kiro_cli_v3_apply_preserves_third_party_hooks_and_replaces_only_ours() {
 
     assert_eq!(
         merge_kiro_cli_v3_hooks(
+            &HostEnv::default(),
             tmp.path(),
             "https://memory.example",
             None,
@@ -4589,6 +4662,7 @@ fn kiro_cli_v3_apply_rejects_incompatible_schema_and_reserved_collision() {
     let config_path = tmp.path().join("sessionmunch.json");
     fs::write(&config_path, r#"{"version":"v2","hooks":[]}"#).unwrap();
     let error = merge_kiro_cli_v3_hooks(
+        &HostEnv::default(),
         tmp.path(),
         "https://memory.example",
         None,
@@ -4605,6 +4679,7 @@ fn kiro_cli_v3_apply_rejects_incompatible_schema_and_reserved_collision() {
         )
         .unwrap();
     let error = merge_kiro_cli_v3_hooks(
+        &HostEnv::default(),
         tmp.path(),
         "https://memory.example",
         None,
@@ -4661,6 +4736,7 @@ fn kiro_cli_v2_preflight_is_all_or_nothing_and_preserves_per_agent_strategy() {
     fs::write(&basename, r#"{"name":"b"}"#).unwrap();
 
     let prepared = preflight_kiro_cli_agent_configs(
+        &HostEnv::default(),
         vec![repo_root.clone(), basename.clone()],
         tmp.path(),
         "http://127.0.0.1:49374",
@@ -4675,6 +4751,7 @@ fn kiro_cli_v2_preflight_is_all_or_nothing_and_preserves_per_agent_strategy() {
     let before = fs::read_to_string(&repo_root).unwrap();
     fs::write(&basename, "{not-json").unwrap();
     let error = preflight_kiro_cli_agent_configs(
+        &HostEnv::default(),
         vec![repo_root.clone(), basename],
         tmp.path(),
         "http://127.0.0.1:49374",
@@ -5150,4 +5227,20 @@ fn bundled_plugin_templates_fill_every_placeholder() {
             );
         }
     }
+}
+
+#[test]
+fn staged_command_dir_uses_a_non_blank_host_root_from_the_env_snapshot() {
+    let staged = Path::new("/container/hooks/claude-code");
+    let host = HostEnv::from_vars([("SESSIONMUNCH_HOOKS_HOST_ROOT", "/host/hooks")]);
+    assert_eq!(
+        staged_command_dir(&host, staged, "claude-code"),
+        PathBuf::from("/host/hooks").join("claude-code")
+    );
+    let blank = HostEnv::from_vars([("SESSIONMUNCH_HOOKS_HOST_ROOT", "  ")]);
+    assert_eq!(staged_command_dir(&blank, staged, "claude-code"), staged);
+    assert_eq!(
+        staged_command_dir(&HostEnv::default(), staged, "claude-code"),
+        staged
+    );
 }
