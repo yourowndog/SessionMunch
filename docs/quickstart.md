@@ -97,6 +97,6 @@ Now experience cross-session continuity:
 
 ## Next Steps
 
-- Read the full [Architecture & Data Ownership Guide](architecture.md).
+- Read the full [Architecture & Data Ownership Guide](architecture-and-data-ownership.md).
 - Configure embeddings and LLM providers in the [Model Guide](models.md) and [Configuration Guide](configuration.md).
 - Set up the [Hermes MemoryProvider Integration](hermes.md).

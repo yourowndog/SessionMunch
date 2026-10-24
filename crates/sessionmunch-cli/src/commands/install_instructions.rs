@@ -23,6 +23,7 @@ use crate::cli::{
 use crate::commands::apply_shared::{ApplyOutcome, apply_atomic};
 use crate::commands::install_skills;
 use crate::config::Config;
+use crate::host_env::HostEnv;
 
 // Markers + the snippet body live in `sessionmunch_core::routing_snippet`
 // so the `memory_install_self_routing` MCP tool can return the same
@@ -41,15 +42,15 @@ const LEGACY_ORPHAN_TAIL_CRLF: &str =
 /// # Errors
 /// Returns an error if the target path can't be written or if the
 /// existing file isn't valid UTF-8.
-pub fn run(_config: &Config, args: InstallInstructionsArgs) -> Result<()> {
-    run_inner(args, true)
+pub fn run(_config: &Config, host: &HostEnv, args: InstallInstructionsArgs) -> Result<()> {
+    run_inner(host, args, true)
 }
 
-pub(super) fn run_quiet(args: InstallInstructionsArgs) -> Result<()> {
-    run_inner(args, false)
+pub(super) fn run_quiet(host: &HostEnv, args: InstallInstructionsArgs) -> Result<()> {
+    run_inner(host, args, false)
 }
 
-fn run_inner(args: InstallInstructionsArgs, report: bool) -> Result<()> {
+fn run_inner(host: &HostEnv, args: InstallInstructionsArgs, report: bool) -> Result<()> {
     let block = if args.compact {
         compact_block()
     } else {
@@ -64,7 +65,7 @@ fn run_inner(args: InstallInstructionsArgs, report: bool) -> Result<()> {
     let prepared_skills = if !args.print {
         skill_args
             .as_ref()
-            .map(install_skills::prepare_install)
+            .map(|skill_args| install_skills::prepare_install(host, skill_args))
             .transpose()?
     } else {
         None

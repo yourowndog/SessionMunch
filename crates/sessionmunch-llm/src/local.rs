@@ -280,6 +280,8 @@ impl Embedder for LocalEmbedder {
     }
 }
 
+// Test setup may read the real environment; invariant #1 governs runtime code.
+#[allow(clippy::disallowed_methods)]
 #[cfg(test)]
 mod tests {
     use super::*;

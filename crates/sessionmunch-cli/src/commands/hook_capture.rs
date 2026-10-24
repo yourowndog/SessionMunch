@@ -10,36 +10,31 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::commands::path_util::home_dir;
 use crate::marker::{
-    find_marker, find_settings_marker, is_truthy, parse_toml_flag, parse_toml_key,
-    repo_root_project,
+    find_marker_with_home, find_settings_marker_with_home, is_truthy, parse_toml_flag,
+    parse_toml_key, repo_root_project,
 };
 use sessionmunch_hooks::capture_policy::MAX_MARKER_BYTES;
 use sessionmunch_hooks::{CaptureConfig, CapturePolicy, CaptureSource};
 
 /// Resolve the nearest marker's capture policy without changing routing parsing.
 /// Root-level marker keys are intentionally ignored here; only `[capture]` is strict.
-pub fn capture_policy(cwd: &str) -> CapturePolicy {
-    let home = home_dir();
-    let Some(marker) = find_marker(cwd) else {
-        return CapturePolicy::resolve(
-            CaptureSource::Absent,
-            cwd,
-            home.as_deref().and_then(Path::to_str),
-        );
+/// `home` is the caller's [`crate::host_env::HostEnv::home_dir`].
+pub fn capture_policy(cwd: &str, home: Option<&Path>) -> CapturePolicy {
+    let Some(marker) = find_marker_with_home(cwd, home) else {
+        return CapturePolicy::resolve(CaptureSource::Absent, cwd, home.and_then(Path::to_str));
     };
     let marker_dir = marker.parent().and_then(Path::to_str).unwrap_or(cwd);
     match read_capture_config(&marker) {
         Ok(config) => CapturePolicy::resolve(
             CaptureSource::Parsed(&config),
             marker_dir,
-            home.as_deref().and_then(Path::to_str),
+            home.and_then(Path::to_str),
         ),
         Err(()) => CapturePolicy::resolve(
             CaptureSource::Invalid,
             marker_dir,
-            home.as_deref().and_then(Path::to_str),
+            home.and_then(Path::to_str),
         ),
     }
 }
@@ -221,8 +216,12 @@ pub fn url_encode(s: &str) -> String {
 /// pinned one — a marker's explicit `project` / `project_strategy` always win
 /// (§3.3). repo-root is resolved here, host-side, because a containerized
 /// server cannot see this checkout.
-pub fn marker_query_suffix(cwd: &str, default_strategy: Option<&str>) -> String {
-    marker_query_suffix_impl(cwd, default_strategy, true)
+pub fn marker_query_suffix(
+    cwd: &str,
+    default_strategy: Option<&str>,
+    home: Option<&Path>,
+) -> String {
+    marker_query_suffix_impl(cwd, default_strategy, home, true)
 }
 
 /// [`marker_query_suffix`] without the `[briefing]` pair
@@ -234,19 +233,23 @@ pub fn marker_query_suffix(cwd: &str, default_strategy: Option<&str>) -> String 
 /// later prompts re-fetch the handoff — kept on every prompt because it is
 /// cheap and self-limiting (empty body when nothing is pending) — without the
 /// briefing params, so the server does not recompose the brief per prompt.
-pub fn marker_query_suffix_without_briefing(cwd: &str, default_strategy: Option<&str>) -> String {
-    marker_query_suffix_impl(cwd, default_strategy, false)
+pub fn marker_query_suffix_without_briefing(
+    cwd: &str,
+    default_strategy: Option<&str>,
+    home: Option<&Path>,
+) -> String {
+    marker_query_suffix_impl(cwd, default_strategy, home, false)
 }
 
 /// Whether the nearest settings-declaring marker explicitly enables the
-/// compiled project brief (see [`find_settings_marker`]: a nested
+/// compiled project brief (see [`find_settings_marker_with_home`]: a nested
 /// capture-only marker does not shadow an outer marker's `[briefing]`
 /// opt-in, #668).
 ///
 /// Kimi Code uses this before creating its local once-per-session marker so
 /// repositories that did not opt in do not accumulate marker files.
-pub fn marker_requests_briefing(cwd: &str) -> bool {
-    find_settings_marker(cwd)
+pub fn marker_requests_briefing(cwd: &str, home: Option<&Path>) -> bool {
+    find_settings_marker_with_home(cwd, home)
         .and_then(|marker| parse_toml_flag(&marker, "inject_on_session_start"))
         .is_some_and(|value| is_truthy(&value))
 }
@@ -254,6 +257,7 @@ pub fn marker_requests_briefing(cwd: &str) -> bool {
 fn marker_query_suffix_impl(
     cwd: &str,
     default_strategy: Option<&str>,
+    home: Option<&Path>,
     include_briefing: bool,
 ) -> String {
     let mut qs = format!("&cwd={}", url_encode(cwd));
@@ -263,7 +267,7 @@ fn marker_query_suffix_impl(
     // The nearest marker that declares more than `[capture]` (#668): a
     // nested capture-only marker (e.g. one that only sets `ignore_paths`)
     // must not shadow an outer marker's workspace/project/briefing/etc.
-    if let Some(marker) = find_settings_marker(cwd) {
+    if let Some(marker) = find_settings_marker_with_home(cwd, home) {
         workspace = parse_toml_key(&marker, "workspace");
         project = parse_toml_key(&marker, "project");
         strategy = parse_toml_key(&marker, "project_strategy");
@@ -567,6 +571,11 @@ mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    /// The real home, as production resolves it with no `SESSIONMUNCH_HOME`.
+    fn home() -> Option<PathBuf> {
+        crate::host_env::HostEnv::default().home_dir()
+    }
+
     async fn serve_once(status: &'static str, body: &'static str) -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -634,7 +643,7 @@ mod tests {
 
     #[test]
     fn query_suffix_without_marker_has_only_cwd() {
-        let qs = marker_query_suffix("/nonexistent/path/xyz", None);
+        let qs = marker_query_suffix("/nonexistent/path/xyz", None, home().as_deref());
         assert_eq!(qs, "&cwd=%2Fnonexistent%2Fpath%2Fxyz");
     }
 
@@ -782,7 +791,7 @@ mod tests {
     /// URL query — the end-to-end guarantee behind the #188 fix.
     #[test]
     fn marker_query_suffix_windows_cwd_yields_parseable_url() {
-        let qs = marker_query_suffix(r"C:\dev\myproject", None);
+        let qs = marker_query_suffix(r"C:\dev\myproject", None, home().as_deref());
         assert!(qs.contains("cwd=C%3A%5Cdev%5Cmyproject"), "{qs}");
         let url = format!("http://127.0.0.1:49374/handoff?agent=claude-code{qs}");
         let parsed = reqwest::Url::parse(&url).expect("must be a valid URL");
@@ -812,7 +821,7 @@ drop_subagent_captures = "true"
         )
         .unwrap();
         let cwd = tmp.path().to_str().unwrap();
-        let qs = marker_query_suffix(cwd, None);
+        let qs = marker_query_suffix(cwd, None, home().as_deref());
         // cwd is encoded first; marker fields follow in the iteration order
         // of the loop in `marker_query_suffix`.
         assert!(qs.contains("&workspace=acme%20corp"), "{qs}");
@@ -831,7 +840,7 @@ drop_subagent_captures = "true"
             "workspace = \"acme\"\nproject = \"infra\"\n",
         )
         .unwrap();
-        let qs = marker_query_suffix(tmp.path().to_str().unwrap(), None);
+        let qs = marker_query_suffix(tmp.path().to_str().unwrap(), None, home().as_deref());
         assert!(!qs.contains("drop_subagent"), "{qs}");
     }
 
@@ -845,7 +854,7 @@ drop_subagent_captures = "true"
             "workspace = \"acme\"\n[recall]\ndefault_global = true\n",
         )
         .unwrap();
-        let qs = marker_query_suffix(tmp.path().to_str().unwrap(), None);
+        let qs = marker_query_suffix(tmp.path().to_str().unwrap(), None, home().as_deref());
         assert!(qs.contains("&default_global=true"), "{qs}");
     }
 
@@ -857,7 +866,7 @@ drop_subagent_captures = "true"
             "workspace = \"acme\"\nproject = \"infra\"\n",
         )
         .unwrap();
-        let qs = marker_query_suffix(tmp.path().to_str().unwrap(), None);
+        let qs = marker_query_suffix(tmp.path().to_str().unwrap(), None, home().as_deref());
         assert!(!qs.contains("default_global"), "{qs}");
     }
 
@@ -872,7 +881,7 @@ drop_subagent_captures = "true"
             "workspace = \"acme\"\n[briefing]\ninject_on_session_start = true\nmax_chars = 6000\n",
         )
         .unwrap();
-        let qs = marker_query_suffix(tmp.path().to_str().unwrap(), None);
+        let qs = marker_query_suffix(tmp.path().to_str().unwrap(), None, home().as_deref());
         assert!(qs.contains("&briefing=true"), "{qs}");
         assert!(qs.contains("&briefing_budget=6000"), "{qs}");
     }
@@ -885,7 +894,7 @@ drop_subagent_captures = "true"
             "workspace = \"acme\"\nproject = \"infra\"\n",
         )
         .unwrap();
-        let qs = marker_query_suffix(tmp.path().to_str().unwrap(), None);
+        let qs = marker_query_suffix(tmp.path().to_str().unwrap(), None, home().as_deref());
         assert!(!qs.contains("briefing"), "{qs}");
     }
 
@@ -895,19 +904,19 @@ drop_subagent_captures = "true"
         let marker = tmp.path().join(".sessionmunch.toml");
         let cwd = tmp.path().to_str().unwrap();
 
-        assert!(!marker_requests_briefing(cwd));
+        assert!(!marker_requests_briefing(cwd, home().as_deref()));
         std::fs::write(
             &marker,
             "[briefing]\ninject_on_session_start = false\nmax_chars = 6000\n",
         )
         .unwrap();
-        assert!(!marker_requests_briefing(cwd));
+        assert!(!marker_requests_briefing(cwd, home().as_deref()));
         std::fs::write(
             &marker,
             "[briefing]\ninject_on_session_start = YeS\nmax_chars = 6000\n",
         )
         .unwrap();
-        assert!(marker_requests_briefing(cwd));
+        assert!(marker_requests_briefing(cwd, home().as_deref()));
     }
 
     #[test]
@@ -920,7 +929,7 @@ drop_subagent_captures = "true"
             "workspace = \"oss\"\nproject_strategy = \"repo-root\"\n",
         )
         .unwrap();
-        let qs = marker_query_suffix(child.to_str().unwrap(), None);
+        let qs = marker_query_suffix(child.to_str().unwrap(), None, home().as_deref());
         assert!(qs.contains("&workspace=oss"), "{qs}");
         assert!(!qs.contains("&project="), "{qs}");
         assert!(qs.contains("&project_strategy=repo-root"), "{qs}");
@@ -991,7 +1000,7 @@ drop_subagent_captures = "true"
         )
         .unwrap();
 
-        let qs = marker_query_suffix(wt.to_str().unwrap(), None);
+        let qs = marker_query_suffix(wt.to_str().unwrap(), None, home().as_deref());
         assert!(qs.contains("&workspace=oss"), "{qs}");
         assert!(qs.contains("&project=acme-api"), "{qs}");
         assert!(qs.contains("&project_strategy=repo-root"), "{qs}");
@@ -1006,7 +1015,11 @@ drop_subagent_captures = "true"
         let tmp = tempfile::TempDir::new().unwrap();
         let child = tmp.path().join("plain-dir");
         std::fs::create_dir_all(&child).unwrap();
-        let qs = marker_query_suffix(child.to_str().unwrap(), Some("repo-root"));
+        let qs = marker_query_suffix(
+            child.to_str().unwrap(),
+            Some("repo-root"),
+            home().as_deref(),
+        );
         assert!(!qs.contains("&project="), "{qs}");
         assert!(qs.contains("&project_strategy=repo-root"), "{qs}");
     }
@@ -1035,7 +1048,7 @@ drop_subagent_captures = "true"
         );
         let sub = repo.join("transcripts");
         std::fs::create_dir_all(&sub).unwrap();
-        let qs = marker_query_suffix(sub.to_str().unwrap(), Some("repo-root"));
+        let qs = marker_query_suffix(sub.to_str().unwrap(), Some("repo-root"), home().as_deref());
         assert!(qs.contains("&project=contentcreator"), "{qs}");
         assert!(qs.contains("&project_strategy=repo-root"), "{qs}");
         // Host-derived, so the server may let a session overrule it (#394).
@@ -1074,13 +1087,13 @@ drop_subagent_captures = "true"
         .unwrap();
         let inner_str = inner.to_str().unwrap();
 
-        let qs = marker_query_suffix(inner_str, None);
+        let qs = marker_query_suffix(inner_str, None, home().as_deref());
         assert!(qs.contains("&workspace=acme"), "{qs}");
         assert!(qs.contains("&project=infra"), "{qs}");
 
         // Same cwd: capture policy still comes from the INNER (nearest)
         // marker, so its `ignore_paths` still applies.
-        let policy = capture_policy(inner_str);
+        let policy = capture_policy(inner_str, home().as_deref());
         let raw = serde_json::json!({
             "hook_event_name": "PostToolUse",
             "tool_name": "Edit",
@@ -1111,7 +1124,7 @@ drop_subagent_captures = "true"
         )
         .unwrap();
 
-        let qs = marker_query_suffix(inner.to_str().unwrap(), None);
+        let qs = marker_query_suffix(inner.to_str().unwrap(), None, home().as_deref());
         assert!(qs.contains("&project=x"), "{qs}");
         assert!(!qs.contains("&workspace=acme"), "{qs}");
     }
@@ -1123,20 +1136,20 @@ drop_subagent_captures = "true"
         std::fs::create_dir_all(&dir).unwrap();
 
         // No override at all: nothing to describe.
-        let qs = marker_query_suffix(dir.to_str().unwrap(), None);
+        let qs = marker_query_suffix(dir.to_str().unwrap(), None, home().as_deref());
         assert!(!qs.contains("&project="), "{qs}");
         assert!(!qs.contains("&project_src="), "{qs}");
 
         // Marker-declared project: a deliberate rescope.
         std::fs::write(dir.join(".sessionmunch.toml"), "project = \"pinned\"\n").unwrap();
-        let qs = marker_query_suffix(dir.to_str().unwrap(), None);
+        let qs = marker_query_suffix(dir.to_str().unwrap(), None, home().as_deref());
         assert!(qs.contains("&project=pinned"), "{qs}");
         assert!(qs.contains("&project_src=marker"), "{qs}");
 
         // A marker project wins over the baked repo-root default, and keeps
         // reporting `marker` — the provenance must follow the value that
         // actually shipped, not the strategy that was configured.
-        let qs = marker_query_suffix(dir.to_str().unwrap(), Some("repo-root"));
+        let qs = marker_query_suffix(dir.to_str().unwrap(), Some("repo-root"), home().as_deref());
         assert!(qs.contains("&project=pinned"), "{qs}");
         assert!(qs.contains("&project_src=marker"), "{qs}");
         assert!(!qs.contains("project_src=repo-root"), "{qs}");
@@ -1152,7 +1165,11 @@ drop_subagent_captures = "true"
             "project_strategy = \"basename\"\n",
         )
         .unwrap();
-        let qs = marker_query_suffix(tmp.path().to_str().unwrap(), Some("repo-root"));
+        let qs = marker_query_suffix(
+            tmp.path().to_str().unwrap(),
+            Some("repo-root"),
+            home().as_deref(),
+        );
         assert!(qs.contains("&project_strategy=basename"), "{qs}");
         assert!(!qs.contains("repo-root"), "{qs}");
         assert!(!qs.contains("&project="), "{qs}");
@@ -1168,7 +1185,11 @@ drop_subagent_captures = "true"
             "project = \"pinned\"\n",
         )
         .unwrap();
-        let qs = marker_query_suffix(tmp.path().to_str().unwrap(), Some("repo-root"));
+        let qs = marker_query_suffix(
+            tmp.path().to_str().unwrap(),
+            Some("repo-root"),
+            home().as_deref(),
+        );
         assert!(qs.contains("&project=pinned"), "{qs}");
         assert!(qs.contains("&project_strategy=repo-root"), "{qs}");
     }

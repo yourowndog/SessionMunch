@@ -20,10 +20,11 @@ use crate::cli::{ContinueArgs, RunArgs};
 use crate::commands::project_registry::{self, ProjectLink};
 use crate::commands::show::{terminal_text, validate_registered_path};
 use crate::config::Config;
+use crate::host_env::HostEnv;
 use crate::http_client::ServerEndpoint;
 
 /// Resolve the newest still-valid checkout and continue it.
-pub async fn run(config: &Config, args: ContinueArgs) -> Result<i32> {
+pub async fn run(config: &Config, host: &HostEnv, args: ContinueArgs) -> Result<i32> {
     let endpoint = ServerEndpoint::from_config_resolving_auth(config).await;
     let links = project_registry::links_for_server(config, &endpoint)?;
     let candidates = filter_workspace(links, args.workspace.as_deref());
@@ -65,6 +66,7 @@ pub async fn run(config: &Config, args: ContinueArgs) -> Result<i32> {
         );
         return crate::commands::run::run_from(
             config,
+            host,
             RunArgs {
                 workspace: Some(link.workspace),
                 project: Some(link.project),

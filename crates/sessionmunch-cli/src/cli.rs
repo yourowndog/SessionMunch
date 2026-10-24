@@ -229,6 +229,78 @@ pub enum Command {
     /// new blobs. Mirrors the transcript files the existing readers use.
     #[command(name = "snapshot-harness-history")]
     SnapshotHarnessHistory(SnapshotHarnessHistoryArgs),
+    /// Import native harness history into the session event ledger.
+    #[command(subcommand)]
+    Import(ImportCommand),
+    /// Search preserved session events (commands, prompts, tool output)
+    /// across every project, machine, and harness.
+    #[command(name = "search-events")]
+    SearchEvents(SearchEventsArgs),
+}
+
+/// `import` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum ImportCommand {
+    /// Import every native session this machine's harness stores changed
+    /// within `--since`, independent of the current directory. Events are
+    /// sanitized, queued in a crash-safe local spool, and delivered to the hub
+    /// idempotently; unsupported or unreadable stores are reported by name.
+    Sessions(ImportSessionsArgs),
+}
+
+/// Arguments for `import sessions`.
+#[derive(Debug, Args)]
+pub struct ImportSessionsArgs {
+    /// How far back to look: `30m`, `12h`, `7d`, `2w`, or `all`.
+    #[arg(long, default_value = "7d")]
+    pub since: String,
+    /// Only import this harness's store: `hermes`, or any `run` harness name
+    /// (`claude`, `codex`, `opencode`, …). Defaults to every known store.
+    #[arg(long)]
+    pub harness: Option<String>,
+    /// Override the home directory that holds the native harness stores.
+    #[arg(long)]
+    pub home: Option<PathBuf>,
+    /// Override the Hermes home (defaults to `<home>/.hermes`).
+    #[arg(long)]
+    pub hermes_home: Option<PathBuf>,
+    /// Count what would be imported without queueing or sending anything.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Emit the report as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for `search-events`.
+#[derive(Debug, Args)]
+pub struct SearchEventsArgs {
+    /// FTS5 query (e.g. `"cargo nextest"` or `deploy AND weakling`).
+    pub query: String,
+    /// Only sessions recorded on this machine (e.g. `sleeper`).
+    #[arg(long)]
+    pub machine: Option<String>,
+    /// Only this harness (e.g. `claude-code`, `codex`, `hermes`).
+    #[arg(long)]
+    pub harness: Option<String>,
+    /// Only events from the last `30m`, `12h`, `7d`, `2w`.
+    #[arg(long)]
+    pub since: Option<String>,
+    /// Restrict to one project (requires the workspace to resolve too).
+    #[arg(long)]
+    pub project: Option<String>,
+    /// Workspace for `--project`. Defaults to `default`.
+    #[arg(long)]
+    pub workspace: Option<String>,
+    /// Order newest first instead of by relevance.
+    #[arg(long)]
+    pub newest: bool,
+    /// Maximum number of hits.
+    #[arg(short = 'n', long, default_value_t = 20)]
+    pub limit: usize,
+    /// Emit results as JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for `snapshot-harness-history`.

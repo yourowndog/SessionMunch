@@ -146,7 +146,7 @@ Storage and baseline recall never depend on the optional judge.
 
 SessionMunch is agent-neutral by design.
 
-First-class or supported paths include Claude Code, OpenAI Codex, Hermes Agent, OpenCode, Cursor, Windsurf, Gemini CLI, Aider, Pi, Crush, Devin, and other MCP-capable clients.
+First-class paths are Claude Code, OpenAI Codex, OpenCode and Hermes Agent. Any other MCP-capable client can use the same memory through the MCP tools.
 
 The important compatibility claim is not the logo wall. It is this:
 

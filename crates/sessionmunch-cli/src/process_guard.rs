@@ -16,6 +16,10 @@ pub const BIN_NAME: &str = "sessionmunch";
 /// Return PIDs of *other* `sessionmunch` processes (excluding the current
 /// process and any threads of it).
 #[must_use]
+// Reads only the test opt-out below, which a spawning test sets in the child's
+// environment; threading it through every destructive command would add a
+// parameter that exists for tests alone.
+#[allow(clippy::disallowed_methods)]
 pub fn sibling_processes() -> Vec<sysinfo::Pid> {
     // Test opt-out. The destructive-command tests would otherwise flake
     // non-deterministically: a dev box (and a parallel test run) almost always

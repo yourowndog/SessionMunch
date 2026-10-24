@@ -40,7 +40,7 @@ edition = "2024"
 rust-version = "1.95"
 license = "MIT"
 repository = "https://github.com/yourowndog/SessionMunch"
-authors = ["Fabio Akita <boss@akitaonrails.com>"]
+authors = ["yourowndog <https://github.com/yourowndog>", "Fabio Akita <boss@akitaonrails.com>"]
 
 [workspace.dependencies]
 # Inter-crate dependencies.

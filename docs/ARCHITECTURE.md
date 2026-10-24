@@ -7,7 +7,7 @@
 ## Purpose
 
 sessionmunch is a single Rust binary that gives the coding agents in the
-[README Support Matrix](../README.md#support-matrix), plus other MCP-capable
+[Support Matrix](support-matrix.md), plus other MCP-capable
 clients, long-term memory shared across CLIs.
 Quit one mid-task; open another in the same directory; continue. No
 manual `write_note` ceremony, no copy-pasting summaries between
@@ -276,9 +276,10 @@ separately gated Claude Code assistant/Stop excerpt remains capped at 2 KB.
 | `workspaces`, `projects` | Top of the 3-tuple identity coordinate. |
 | `pages` | Versioned wiki pages with `is_latest` + `supersedes` chain. M8 columns: `last_accessed_at`, `access_count`, and decay-only tombstone marker `superseded_at`. M9 cols: `embedding_provider`, `embedding_model`, `embedding_dim`. V36: `expires_at` (frontmatter TTL). V37: `salience` (NULL = `salience_default`; derived from `page_feedback`). |
 | `pages_fts` | FTS5 virtual table over `(title, body)`, auto-synced by triggers. |
-| `sessions`, `observations` | Sanitized, bounded lifecycle-hook projections. `sessions.ended_observation_count` is the stable generation watermark for resumed-session re-end eligibility; wall clocks are not used for that decision. They are an operational audit trail, not a complete native transcript. |
+| `sessions`, `observations` | Sanitized, bounded lifecycle-hook projections. `sessions.ended_observation_count` is the stable generation watermark for resumed-session re-end eligibility; wall clocks are not used for that decision. Since V65 the `sessions.agent_kind` CHECK enum is gone (free-text harness) and `sessions` carries provenance (`native_session_id`, `machine_id`, `project_id` nullable for global rows, `git_root`/`git_branch`/`commit_at_start`, `source`, `import_cursor`). `observations` is retained as the compatibility capture path and operational audit trail, not the authoritative transcript. |
 | `session_consolidation_jobs` | Durable, observation-generation-idempotent queue for opt-in SessionEnd LLM consolidation. One bounded server worker leases jobs, retries provider failures with backoff, and recovers expired leases after restart. |
 | `observations_fts` | FTS5 virtual table over raw observation `(title, body)`, used only as bounded fallback. |
+| `session_events`, `session_events_fts` | Promoted session-owned event ledger (V65, North Star §4): the portable workstream-event concept generalized so hook, import, and managed events converge on one `sessions` row. Idempotent insert on `UNIQUE(session_id, event_id)`; per-event best-effort `model`/`provider` in `metadata_json`. Authoritative history going forward. |
 | `workstreams`, `managed_runs`, `workstream_native_sessions` | Optional lease state plus per-harness native source and delivery cursors for `sessionmunch run`. |
 | `workstream_events`, `workstream_events_fts` | Append-only normalized visible transcript events and full-text search; immutable sanitized source batches also live under `raw/workstreams/`. |
 | `links` | Wikilink / markdown cross-references. `to_page_id` (a global PageId) is nullable for unresolved forward links. `to_workspace` / `to_project` carry a cross-project scope (NULL = the source page's own project). |
@@ -364,7 +365,7 @@ Each crate has a single responsibility and exposes a typed API. No
 circular deps. Inter-crate boundaries enforce the cross-cutting
 invariants below.
 
-## MCP tool surface (19 tools)
+## MCP tool surface (20 tools)
 
 | Tool | Hint | Purpose |
 |---|---|---|
@@ -372,6 +373,7 @@ invariants below.
 | `memory_recent` | read-only | Most-recently-updated `is_latest=1` pages. |
 | `memory_read_page` | read-only | Fetch the FULL body of a single wiki page by `path` or by top FTS5 hit for a `query`; optional `workspace` + `project` targets a named sibling workspace/project. Use when an agent needs more than the 24-word snippets from `memory_query`. |
 | `memory_read_session_observations` | read-only | Page through ONE session's raw hook observations (`ObservationRecord` with full sanitized body, capped per row by `body_max_chars`), restricted to the rows that landed in the resolved scope and to sessions the caller may see; `total` and `elided_other_scope` report the in-scope count and the rows the session left in another project. `session_id` omitted reads the latest completed visible session. |
+| `memory_search_events` | read-only | Lexical search over the session event ledger (hook capture mirrored at ingest, imported transcripts, ingested batches) across every project, machine, and harness. Filters: `machine`, `harness`, `since`, `newest`, and `workspace`+`project` together; hits carry time, machine, harness, project, session id, kind, and a capped snippet. Owner-filtered like raw observation reads. |
 | `memory_status` | read-only | Counts, paths, version. |
 | `memory_briefing` | read-only | Structured counts/activity/rules/slots/recent snapshot. Opt-in `settled_first: true` leads with up to 8 of the project's highest-standing `rule`/`decision` pages, ordered by evidence count then recency; off by default. |
 | `memory_explore` | read-only | LLM prose digest over the briefing snapshot, degrading to JSON without a provider. |
@@ -481,6 +483,7 @@ move-project         move-session         uninstall
 auth                 user                 completions
 handoffs             purge-session        compact
 api-key              export-okf            snapshot-harness-history
+import               search-events
 ```
 
 Run `sessionmunch --help` for the full tree.
@@ -495,7 +498,10 @@ a documented prior-art bug; cite the source when reviewing changes
 that touch the relevant area.
 
 1. **One config-read path.** `Config::load()` called once at startup.
-   No `std::env::var` outside it.  (agentmemory #456 / #469.)
+   No `std::env::var` outside it.  (agentmemory #456 / #469.) Host facts
+   (harness config homes, `$HOME`, `PATH`) come from the CLI's `HostEnv`
+   snapshot, taken once at the entry point and passed down; `clippy.toml`
+   `disallowed-methods` rejects any other read.
 2. **Single-writer SQLite actor.** All writes go through one `mpsc`
    channel to one dedicated OS thread. (cognee #2717.)
 3. **Indexes commit in the same transaction as the data.** No

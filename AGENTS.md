@@ -353,7 +353,10 @@ These are carved into the architecture; each traces to a documented
 prior-art bug (see `docs/ARCHITECTURE.md` and `docs/issues-*.md`):
 
 1. **One config-read path.** `Config::load()` runs once at startup; never
-   call `std::env::var` outside it.
+   call `std::env::var` outside it. Host facts the CLI needs (harness config
+   homes, `$HOME`, `PATH`, ...) come from the `HostEnv` snapshot taken once in
+   `sessionmunch_cli::run` and passed down; library crates take values from
+   their callers. `clippy.toml` `disallowed-methods` enforces this.
 2. **Single-writer SQLite actor.** All writes go through one `mpsc`
    channel to one dedicated thread (`WriterHandle`). Batch hot-path work
    into one command/transaction; avoid N+1 reads.
@@ -520,7 +523,7 @@ Additional boundary rules:
 - **MCP tool surface changes** require updating `MEMORY_INSTRUCTIONS`,
   `sessionmunch_core::SNIPPET_BODY`, README/docs tool references, and the
   regression tests asserting every tool appears in both prompt surfaces.
-  The tool count is currently 19 (see `docs/ARCHITECTURE.md`).
+  The tool count is currently 20 (see `docs/ARCHITECTURE.md`).
 - **Semantic versioning:** patch = fixes; minor = additive (new CLI
   subcommands, MCP tools, config keys, a new agent harness or LLM
   provider); major = breaking (on-disk format without migration, removed

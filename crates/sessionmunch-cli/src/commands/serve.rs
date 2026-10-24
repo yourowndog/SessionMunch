@@ -25,8 +25,8 @@ use sessionmunch_consolidate::{
 };
 use sessionmunch_core::{ActiveProject, ProjectId, Sanitizer, WorkspaceId};
 use sessionmunch_hooks::{
-    DEFAULT_HOOK_INGEST_MAX_IN_FLIGHT, HookState, ProjectCacheStore, WorkstreamState, hook_router,
-    workstream_router,
+    DEFAULT_HOOK_INGEST_MAX_IN_FLIGHT, HookState, ProjectCacheStore, WorkstreamState,
+    artifacts_router, hook_router, session_events_router, workstream_router,
 };
 use sessionmunch_llm::{Embedder, LlmProvider, ProviderHealth, build_embedder};
 use sessionmunch_mcp::human_auth::{Cidr, HumanAuthRuntime, LoginLimiter};
@@ -40,11 +40,13 @@ use sessionmunch_store::{
 };
 use sessionmunch_web::{WebMountSpec, normalize_prefix, split_web_routers, web_base_href};
 use sessionmunch_wiki::{WatcherHandle, Wiki, migrations, run_wiki_migrations};
+use sessionmunch_workstream::ArtifactStore;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::cli::{ServeArgs, TransportKind};
 use crate::config::{AuthSettings, AutoImproveSettings, Config, MaintenanceSettings};
+use crate::host_env::HostEnv;
 use sessionmunch_mcp::auth::{AuthState, require_bearer};
 
 /// 10 MB cap on inbound HTTP bodies. The /hook ingress accepts the
@@ -495,18 +497,6 @@ enum HttpExposure {
     UndeterminedInContainer,
 }
 
-/// Detect that this process is running inside a container.
-///
-/// `/.dockerenv` is created by Docker, `/run/.containerenv` by Podman. The
-/// official image also sets `SESSIONMUNCH_IN_CONTAINER`, so the signal survives
-/// runtimes that create neither file.
-fn running_in_container() -> bool {
-    if std::env::var("SESSIONMUNCH_IN_CONTAINER").is_ok_and(|v| !v.trim().is_empty()) {
-        return true;
-    }
-    Path::new("/.dockerenv").exists() || Path::new("/run/.containerenv").exists()
-}
-
 /// Refuse accidental unauthenticated network exposure after the listener has
 /// selected its actual local address (which may differ from the bind input).
 ///
@@ -799,7 +789,7 @@ async fn run_session_consolidation_worker(
 /// # Errors
 /// Returns an error if the store cannot be opened, the watcher cannot
 /// install, or the transport setup fails.
-pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
+pub async fn run(config: &Config, host: &HostEnv, args: ServeArgs) -> Result<()> {
     // Before anything slow: boot takes the pre-migration archive and runs the
     // wiki migrations, and a signal arriving in that window has to be caught
     // rather than fall through to the default disposition (#699).
@@ -825,11 +815,19 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
     // rollback to 1.x would be impossible. A no-op for a fresh install or an
     // already-migrated store; the OKF wiki migration reuses this archive instead
     // of taking a second, post-DB-migration one.
-    let backup_dest_override = std::env::var("SESSIONMUNCH_BACKUP_DIR")
-        .ok()
+    let in_container = sessionmunch_wiki::backup::running_in_container(
+        host.var("SESSIONMUNCH_IN_CONTAINER").as_deref(),
+    );
+    let backup_dest_override = config
+        .runtime_env
+        .backup_dir()
         .map(std::path::PathBuf::from);
-    migrations::snapshot_before_db_migration(&config.data_dir, backup_dest_override.as_deref())
-        .with_context(|| "taking the pre-migration safety backup")?;
+    migrations::snapshot_before_db_migration(
+        &config.data_dir,
+        backup_dest_override.as_deref(),
+        in_container,
+    )
+    .with_context(|| "taking the pre-migration safety backup")?;
 
     let mut store = Store::open(&config.data_dir)
         .with_context(|| format!("opening store at {}", config.data_dir.display()))?;
@@ -885,7 +883,16 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
         &store.writer,
         &store.reader,
         &wiki_root,
-        &migrations::registry(),
+        // Unlike the pre-open snapshot above, the OKF migration has always
+        // treated a blank SESSIONMUNCH_BACKUP_DIR as unset.
+        &migrations::registry(
+            config
+                .runtime_env
+                .backup_dir()
+                .filter(|dir| !dir.trim().is_empty())
+                .map(std::path::PathBuf::from),
+            in_container,
+        ),
     )
     .await
     .with_context(|| "applying wiki-structure migrations")?;
@@ -1020,6 +1027,7 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
                 }
             };
             if let Some(service) = service {
+                info!("MCP client completed the stdio handshake");
                 // Take the token before `waiting` consumes the service:
                 // stopping the transport is the only way out of that await.
                 let stop = service.cancellation_token();
@@ -1179,6 +1187,21 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
                 sanitizer: sanitizer.clone(),
                 data_dir: config.data_dir.clone(),
             });
+            let session_events = session_events_router(sessionmunch_hooks::SessionEventState {
+                writer: store.writer.clone(),
+                reader: store.reader.clone(),
+                sanitizer: sanitizer.clone(),
+            });
+            // P1.3 startup topology wiring: the canonical Hub owns the
+            // authoritative content-addressed artifact store under its data
+            // dir, and exposes `POST /artifacts` beside `/session-events` so
+            // remote satellites can ship large sanitized evidence. The store
+            // root is derived from the configured data dir (never from a
+            // caller-supplied path).
+            let artifact_root = config.data_dir.join("artifacts");
+            let artifacts = artifacts_router(sessionmunch_hooks::ArtifactState {
+                store: std::sync::Arc::new(ArtifactStore::open(&artifact_root)?),
+            });
             let admin = admin_router_with_sweep_tuning(
                 AdminState {
                     ingest_metrics: ingest_metrics.clone(),
@@ -1300,6 +1323,8 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
                 .nest_service("/mcp", mcp_service)
                 .merge(hooks)
                 .merge(workstreams)
+                .merge(session_events)
+                .merge(artifacts)
                 .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
                 .layer(axum::middleware::from_fn_with_state(
                     auth_state.clone(),
@@ -1389,8 +1414,22 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
                 human_mode,
                 config.auth.secure_cookie,
                 args.allow_insecure_no_auth,
-                running_in_container(),
+                in_container,
             )?;
+            // P1.3: surface the resolved cluster topology once at startup so
+            // an operator can see at a glance whether this node participates
+            // in a Brokentooth/Sleeper deployment and where the canonical Hub
+            // sits (no-op for the default standalone posture).
+            if config.cluster.is_clustered() {
+                info!(
+                    role = config.cluster.role.as_str(),
+                    central = config.cluster.central_url().unwrap_or("<none>"),
+                    "cluster topology: node {:?} is a {:?} reporting to hub {:?}",
+                    config.cluster.node_id.as_deref().unwrap_or("<unset>"),
+                    config.cluster.role.as_str(),
+                    config.cluster.central_url().unwrap_or("<none>"),
+                );
+            }
             info!(
                 %local_addr,
                 auth = auth_enabled,

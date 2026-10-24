@@ -36,6 +36,7 @@ If jCodeMunch makes **code** searchable and jDocMunch makes **documentation** se
 
 | Piece | In plain English | What it gets you |
 | :--- | :--- | :--- |
+| **Evidence ledger** | Every captured or imported event is kept as sanitized evidence, with machine, harness and session attached. | "When did we run that on the build box?" gets answered from what actually happened, not from a summary that may have left it out. |
 | **Shared project memory** | One SessionMunch service holds the durable state for all connected agents. | Claude Code can learn something and Codex, Hermes, OpenCode, or another MCP client can find it later. |
 | **Markdown source of truth** | The important knowledge is ordinary human-readable files, not a mystery blob. | You can inspect it, grep it, edit it, version it, back it up, and leave whenever you want. |
 | **Derived SQLite index** | SQLite is the fast card catalog over those files, not the owner of them. | Fast search without sacrificing recoverability; `sessionmunch reindex` can rebuild it. |
@@ -55,11 +56,11 @@ The durable knowledge is yours. The database is an acceleration layer, not a hos
 
 ## Status
 
-SessionMunch is currently a **v0.1.0 release candidate**.
+SessionMunch is a **v0.1.0 release candidate**, and the dashboard is finally the right colour.
 
-The release candidate passed its independent clean-machine ship audit. Promoting it to a public repo then did exactly what public CI is supposed to do and exposed a few final release-gate issues: a dependency security update, one isolation test that needs root-cause verification, and some CI/lint housekeeping. Linux release builds, Docker smoke tests, Nix, packaging checks, and fresh source installation are passing.
+The candidate branch passes the full CI matrix on a single commit: Linux, macOS and Windows tests, release builds for three targets, clippy, rustfmt, `cargo deny`, `cargo audit`, secret scanning, Nix, a Docker smoke test and a fresh `cargo install`. That is 3,372 passing tests. The only ones not run by default are the handful that download models or benchmark throughput, and no check was switched off to manufacture the green.
 
-So the source is here and usable; the `v0.1.0` tag waits until those last gates are green. We are resisting the ancient software tradition of declaring victory while the dashboard is visibly red.
+It already runs for real across a small cluster of machines, holding a few hundred thousand events from three of them. What it does not have yet is a tag. Prebuilt binaries, Docker images and AUR packages come from the release workflow, so they appear when `v0.1.0` does. Until then you build from source, which in Rust terms means "go make a coffee".
 
 ---
 
@@ -102,7 +103,7 @@ capture hooks ──▶ sanitize ──▶ session evidence
 
 There is no telepathy involved, disappointingly.
 
-**Lifecycle hooks** tell SessionMunch which project/session is active and feed it the bounded events worth remembering. **MCP tools** let an agent explicitly search, read, write, explore, and hand off memory. **Startup hooks** can inject a small relevant brief automatically. **HTTP** exposes the same service to clients that prefer an API. **Hermes** can use the native MemoryProvider integration instead of pretending the memory layer is just another random tool.
+**Lifecycle hooks** tell SessionMunch which project/session is active and feed it the bounded events worth remembering. **MCP tools** let an agent explicitly search, read, write, explore, and hand off memory. **Startup hooks** can inject a small relevant brief automatically. **HTTP** exposes the same service to clients that prefer an API. **Hermes** plugs in as a native MemoryProvider instead of pretending the memory layer is just another random tool.
 
 The important part is that these are all doors into the **same memory service**. You do not need a Claude memory, a Codex memory, a Hermes memory, and a mysterious folder named `final-final-memory-2`.
 
@@ -169,8 +170,11 @@ For Hermes Agent, configure the native MemoryProvider plugin in your profile (se
 
 1. Work in any project repository as normal.
 2. Exit your session — SessionMunch automatically processes and indexes the session.
-3. Start another agent in the same project directory — startup hooks immediately supply the active context brief.
-4. Query memory explicitly during work: *"What gotchas did we hit with auth cookies?"* (invokes `memory_query`).
+3. Start another agent in the same project directory. The startup hook hands it the last session's handoff, so nobody has to paste anything.
+4. Ask for curated knowledge while you work: *"What gotchas did we hit with auth cookies?"* (that's `memory_query`).
+5. Ask for raw history when the summary isn't enough: *"When did we last run the migration on the build box?"* (that's `memory_search_events`, which searches every preserved event across machines and harnesses).
+
+The full list of 20 MCP tools is in [`docs/mcp-reference.md`](docs/mcp-reference.md).
 
 ---
 
@@ -194,24 +198,19 @@ The detailed model/hardware guide is available in [`docs/models.md`](docs/models
 
 ## Supported Agent Harnesses
 
-The short version: if an agent speaks **MCP**, SessionMunch already has a door it can walk through. If the harness also exposes lifecycle hooks, SessionMunch can do the nicer automatic stuff — session capture, scope tracking, startup briefs, and handoffs — without you asking the model to remember to remember.
+If an agent speaks **MCP**, SessionMunch already has a door it can walk through. If the harness also has lifecycle hooks, SessionMunch does the nicer automatic stuff too: session capture, scope tracking, end-of-session summaries and a handoff waiting for the next session, without you asking the model to remember to remember.
 
 That is the whole point of a shared memory service: **change agents without changing brains.**
 
-SessionMunch currently supports:
+| Harness | How it connects | What you get |
+| :--- | :--- | :--- |
+| **Claude Code** | MCP + lifecycle hooks | Automatic capture, summaries, startup handoffs, search |
+| **OpenAI Codex** | MCP + lifecycle hooks | Automatic capture, summaries, startup handoffs, search |
+| **OpenCode** | MCP + generated plugin | Automatic capture, summaries, startup handoffs, search |
+| **Hermes Agent** | Native `MemoryProvider` plugin ([`companions/hermes-sessionmunch`](companions/hermes-sessionmunch)) | Hermes memory backed by SessionMunch, plus history import |
+| **Anything else that speaks MCP** | `sessionmunch install-mcp` or a hand-written MCP entry | Search, read, write and handoff tools. You bring the discipline; it brings the memory. |
 
-| Harness | MCP Tools | Session Hooks | Status |
-| :--- | :---: | :---: | :--- |
-| **Claude Code** | ✓ | ✓ | First-class supported |
-| **OpenAI Codex** | ✓ | ✓ | First-class supported |
-| **Hermes Agent** | ✓ | ✓ | First-class MemoryProvider plugin |
-| **OpenCode** | ✓ | ✓ | First-class supported |
-| **Cursor / Windsurf** | ✓ | Manual/MCP | Supported |
-| **Gemini CLI / Antigravity** | ✓ | ✓ | Supported (Gemini-safe schemas) |
-| **Aider** | ✓ | ✓ | Supported |
-| **Pi / Crush / Devin** | ✓ | Managed | Supported |
-
-For complete harness setup instructions, see [`docs/install.md`](docs/install.md) and [`docs/mcp-install.md`](docs/mcp-install.md).
+The first four are the ones we use every day and test on purpose. Hook bundles for other harnesses also ship in the repo and are listed in [`docs/support-matrix.md`](docs/support-matrix.md). Treat those as community-grade until someone with that harness tells us otherwise.
 
 ---
 
@@ -264,14 +263,15 @@ See [`docs/privacy-security.md`](docs/privacy-security.md).
 ## Documentation Suite
 
 - **[Landing Page Copy & Product Story](docs/landing-page.md):** Canonical public-facing website copy, claims, tone, and section structure.
-- **[Architecture & Data Ownership](docs/architecture.md):** Markdown storage layout, Git synchronization, single-writer pattern, and SQLite derivation.
+- **[Architecture & Data Ownership](docs/architecture-and-data-ownership.md):** Markdown storage layout, Git synchronization, single-writer pattern, and SQLite derivation.
 - **[Quickstart Guide](docs/quickstart.md):** Release-candidate setup, agent connection, and first useful retrieval.
 - **[Configuration Reference](docs/configuration.md):** TOML configuration reference, environment variables, and directory markers.
 - **[Opinionated Model & Hardware Guide](docs/models.md):** Copy-paste local/API profiles from CPU-only systems through 24 GB+ GPUs.
 - **[Model Guide Summary](docs/models-summary.md):** Short explanation of embeddings vs. summarization and provider choices.
 - **[MCP Interface Reference](docs/mcp-reference.md):** MCP tool descriptions, schemas, arguments, and Gemini/Bedrock compatibility.
 - **[HTTP & Frontend API](docs/http-api.md):** Read-only `/api/v1` REST endpoints, dual authentication, and web UI hosting.
-- **[Hermes Agent Integration](docs/hermes.md):** First-class MemoryProvider plugin configuration and lifecycle integration.
+- **[Hermes Agent Integration](docs/hermes.md):** The SessionMunch MemoryProvider plugin for Hermes: install, configuration and lifecycle.
+- **[Support Matrix](docs/support-matrix.md):** Every platform, harness and provider, including the community-grade hook bundles.
 - **[Service & Supervision](docs/service-supervision.md):** Running via systemd user/system services, launchd, or Docker.
 - **[Privacy, Security & Threat Model](docs/privacy-security.md):** Zero-telemetry guarantees, secret sanitization, and network boundaries.
 - **[Troubleshooting & Diagnostics](docs/troubleshooting.md):** Resolving locking issues, hook execution, and DNS rebinding errors.

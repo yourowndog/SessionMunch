@@ -28,6 +28,7 @@ mod reader;
 mod retrieval_tuning;
 mod scope;
 mod session_consolidation;
+mod session_events;
 pub mod users;
 pub mod web_sessions;
 mod workstream;
@@ -79,6 +80,7 @@ pub use scope::{
     lookup_global_scope, resolve_many_existing_scopes,
 };
 pub use session_consolidation::{SESSION_CONSOLIDATION_MAX_ATTEMPTS, SessionConsolidationJob};
+pub use sessionmunch_core::session_events::SessionEventHit;
 pub use users::{
     LoginUser, TOKEN_HASH_LEN, TOKEN_RAW_LEN, TokenPepper, generate_token, hash_token,
 };
@@ -4169,7 +4171,7 @@ mod tests {
                 ],
             )
             .unwrap();
-            super::ops::insert_observation(
+            super::ops::insert_observation_unmirrored(
                 &mut conn,
                 &NewObservation {
                     session_id,

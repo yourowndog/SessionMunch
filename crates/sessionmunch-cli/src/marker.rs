@@ -20,7 +20,6 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::commands::path_util::home_dir;
 use crate::config::RuntimeEnv;
 
 /// The scope fields a marker declares, plus where it was found.
@@ -106,29 +105,20 @@ pub(crate) fn repo_root_project(cwd: &str) -> Option<String> {
 /// Walk up from `cwd` toward `$HOME` looking for `.sessionmunch.toml`.
 /// Checkouts outside `$HOME` stop at their nearest `.git` root; a non-git
 /// directory outside `$HOME` checks only `cwd`. When home is unavailable the
-/// historical filesystem-root walk remains the fallback.
-pub(crate) fn find_marker(cwd: &str) -> Option<PathBuf> {
-    let home = home_dir();
-    find_marker_with_home(cwd, home.as_deref())
-}
-
-fn find_marker_with_home(cwd: &str, home: Option<&Path>) -> Option<PathBuf> {
+/// historical filesystem-root walk remains the fallback. `home` is the
+/// caller's [`HostEnv::home_dir`](crate::host_env::HostEnv::home_dir).
+pub(crate) fn find_marker_with_home(cwd: &str, home: Option<&Path>) -> Option<PathBuf> {
     find_marker_matching(cwd, home, |_| true)
 }
 
-/// Like [`find_marker`], but skips a marker that declares nothing beyond a
+/// Like [`find_marker_with_home`], but skips a marker that declares nothing beyond a
 /// `[capture]` section (scope/settings-*transparent*) and continues the walk
 /// to the next ancestor. Resolves `workspace`/`project`/`project_strategy`
 /// and the other root-level settings `hook_capture` forwards, so a nested
 /// capture-only marker no longer resets them to their fallback (#668).
-/// `[capture]`/`ignore_paths` itself keeps using [`find_marker`] — the
+/// `[capture]`/`ignore_paths` itself keeps using [`find_marker_with_home`] — the
 /// nearest marker, unchanged.
-pub(crate) fn find_settings_marker(cwd: &str) -> Option<PathBuf> {
-    let home = home_dir();
-    find_settings_marker_with_home(cwd, home.as_deref())
-}
-
-fn find_settings_marker_with_home(cwd: &str, home: Option<&Path>) -> Option<PathBuf> {
+pub(crate) fn find_settings_marker_with_home(cwd: &str, home: Option<&Path>) -> Option<PathBuf> {
     find_marker_matching(cwd, home, |path| {
         std::fs::read_to_string(path).is_ok_and(|text| declares_more_than_capture(&text))
     })
@@ -372,7 +362,10 @@ mod tests {
     #[test]
     fn find_marker_returns_none_without_one() {
         let tmp = TempDir::new().unwrap();
-        assert_eq!(find_marker(tmp.path().to_str().unwrap()), None);
+        assert_eq!(
+            find_marker_with_home(tmp.path().to_str().unwrap(), dirs::home_dir().as_deref()),
+            None
+        );
     }
 
     #[test]

@@ -6,8 +6,12 @@ mod abstract_backfill;
 mod access_breadth_sweep;
 mod embed_backfill;
 mod embeddings;
+// Test setup may read the real environment; invariant #1 governs runtime code.
+#[allow(clippy::disallowed_methods)]
 mod gate8_production_benchmark;
 mod lifecycle;
+// Test setup may read the real environment; invariant #1 governs runtime code.
+#[allow(clippy::disallowed_methods)]
 mod local_embeddings;
 mod multi_machine;
 mod observation_retention;

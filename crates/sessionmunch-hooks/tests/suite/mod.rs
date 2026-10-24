@@ -2,5 +2,7 @@
 //! test harness (see the `integration` module in `src/lib.rs`), so they cost
 //! no extra binary; a new file must be declared below.
 
+mod artifacts_transport;
 mod powershell_home;
 mod powershell_utf8;
+mod sleeper_spool_outage;

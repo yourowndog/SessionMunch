@@ -14,6 +14,7 @@ Use this skill for read-only sessionmunch lookups, catch-up, and evaluating reme
 - `memory_recent` lists the most recently updated pages when the user wants a light activity check.
 - `memory_read_page` fetches a full page body after a search hit or direct path lookup.
 - `memory_read_session_observations` reads one session's raw hook observations (prompts, tool calls, stops) in capture order, paged and body-capped, when the user asks what actually happened in a session or wants to check a compiled page against its evidence.
+- `memory_search_events` searches preserved session events (commands run, prompts, tool output, error text) across every project, machine, and harness; use it for evidence questions such as "when did we run X on sleeper" or "have we seen this exact error", filtering with `machine`, `harness`, `since`, `newest=true`, or `workspace` + `project` together.
 - `memory_status` reports whether sessionmunch is healthy and how large the knowledge base is.
 - `memory_briefing` returns a structured read-only snapshot for agent consumption.
 - `memory_explore` returns a prose digest when the user asks for an open-ended catch-up.
