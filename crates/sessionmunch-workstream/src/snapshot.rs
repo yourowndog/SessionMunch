@@ -646,15 +646,18 @@ fn hash_file(path: &Path) -> Result<String> {
 
 /// Path of a source relative to its store root.
 fn relative_to(path: &Path, root: &Path) -> String {
-    let text = path.to_string_lossy();
-    let base = root.to_string_lossy();
-    if let Some(rest) = text.strip_prefix(base.as_ref()) {
-        rest.trim_start_matches('/').to_string()
-    } else {
-        path.file_name()
-            .map(|name| name.to_string_lossy())
-            .unwrap_or(text)
-            .to_string()
+    // Joined with `/` on every OS, so an index written on Windows stages the
+    // same way everywhere.
+    match path.strip_prefix(root) {
+        Ok(rest) => rest
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/"),
+        Err(_) => path
+            .file_name()
+            .map_or_else(|| path.to_string_lossy(), |name| name.to_string_lossy())
+            .to_string(),
     }
 }
 
@@ -1357,6 +1360,20 @@ mod tests {
         assert_eq!(
             staged_path(ManagedHarness::OpenCode2, home, "opencode.db"),
             Some(opencode_db(home, None))
+        );
+    }
+
+    #[test]
+    fn relative_paths_use_forward_slashes_and_whole_components() {
+        let root = Path::new("store");
+        assert_eq!(
+            relative_to(&root.join("-work-repo").join("s1.jsonl"), root),
+            "-work-repo/s1.jsonl"
+        );
+        // A sibling that merely shares the root's text prefix is not inside it.
+        assert_eq!(
+            relative_to(&Path::new("store-old").join("s2.jsonl"), root),
+            "s2.jsonl"
         );
     }
 }
