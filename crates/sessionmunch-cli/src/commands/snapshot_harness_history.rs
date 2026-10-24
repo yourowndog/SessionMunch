@@ -65,10 +65,9 @@ pub async fn run(config: &Config, host: &HostEnv, args: SnapshotHarnessHistoryAr
             "{}",
             serde_json::to_string(&report_json(&report, &artifact_root))?
         );
-    } else {
-        print_report(&report, &artifact_root);
+        return Ok(());
     }
-
+    print_report(&report, &artifact_root);
     println!(
         "\n{} preserved ({}, {} already-known, {} unreadable) → {}",
         if report.harnesses.len() == 1 {

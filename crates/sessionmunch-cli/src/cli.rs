@@ -236,6 +236,29 @@ pub enum Command {
     /// across every project, machine, and harness.
     #[command(name = "search-events")]
     SearchEvents(SearchEventsArgs),
+    /// Read artifacts: the full payloads that imported events keep only a
+    /// head and tail of.
+    #[command(subcommand)]
+    Artifact(ArtifactCommand),
+}
+
+/// `artifact` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum ArtifactCommand {
+    /// Print (or save) the full payload behind an event's
+    /// `metadata.artifact_sha256`. Reads from the server `import sessions`
+    /// delivers to: `[cluster] central_url` when set, else the local server.
+    Get(ArtifactGetArgs),
+}
+
+/// Arguments for `artifact get`.
+#[derive(Debug, Args)]
+pub struct ArtifactGetArgs {
+    /// SHA-256 hex digest from the event's `metadata.artifact_sha256`.
+    pub sha256: String,
+    /// Write the bytes to this file instead of stdout.
+    #[arg(long, short = 'o')]
+    pub output: Option<PathBuf>,
 }
 
 /// `import` subcommands.
@@ -264,6 +287,11 @@ pub struct ImportSessionsArgs {
     /// Override the Hermes home (defaults to `<home>/.hermes`).
     #[arg(long)]
     pub hermes_home: Option<PathBuf>,
+    /// Import from the blobs `snapshot-harness-history` preserved instead of
+    /// the live stores (defaults to `<data_dir>/snapshots`). `--since` then
+    /// counts from when each blob was first preserved; Hermes is skipped.
+    #[arg(long, value_name = "DIR", conflicts_with_all = ["home", "hermes_home"])]
+    pub from_snapshots: Option<Option<PathBuf>>,
     /// Count what would be imported without queueing or sending anything.
     #[arg(long)]
     pub dry_run: bool,

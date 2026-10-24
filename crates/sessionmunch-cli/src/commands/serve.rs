@@ -1192,12 +1192,10 @@ pub async fn run(config: &Config, host: &HostEnv, args: ServeArgs) -> Result<()>
                 reader: store.reader.clone(),
                 sanitizer: sanitizer.clone(),
             });
-            // P1.3 startup topology wiring: the canonical Hub owns the
-            // authoritative content-addressed artifact store under its data
-            // dir, and exposes `POST /artifacts` beside `/session-events` so
-            // remote satellites can ship large sanitized evidence. The store
-            // root is derived from the configured data dir (never from a
-            // caller-supplied path).
+            // The server owns the content-addressed artifact store under its
+            // data dir and exposes it beside `/session-events`, so importers
+            // on other machines can ship large sanitized payloads. The root is
+            // derived from the data dir, never from a caller-supplied path.
             let artifact_root = config.data_dir.join("artifacts");
             let artifacts = artifacts_router(sessionmunch_hooks::ArtifactState {
                 store: std::sync::Arc::new(ArtifactStore::open(&artifact_root)?),
@@ -1416,20 +1414,6 @@ pub async fn run(config: &Config, host: &HostEnv, args: ServeArgs) -> Result<()>
                 args.allow_insecure_no_auth,
                 in_container,
             )?;
-            // P1.3: surface the resolved cluster topology once at startup so
-            // an operator can see at a glance whether this node participates
-            // in a Brokentooth/Sleeper deployment and where the canonical Hub
-            // sits (no-op for the default standalone posture).
-            if config.cluster.is_clustered() {
-                info!(
-                    role = config.cluster.role.as_str(),
-                    central = config.cluster.central_url().unwrap_or("<none>"),
-                    "cluster topology: node {:?} is a {:?} reporting to hub {:?}",
-                    config.cluster.node_id.as_deref().unwrap_or("<unset>"),
-                    config.cluster.role.as_str(),
-                    config.cluster.central_url().unwrap_or("<none>"),
-                );
-            }
             info!(
                 %local_addr,
                 auth = auth_enabled,

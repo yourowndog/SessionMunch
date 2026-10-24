@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   API-key prefixes are unchanged (credential contract, not branding).
 
 ### Added
+- `import sessions --from-snapshots [DIR]` imports the blobs that
+  `snapshot-harness-history` preserved (default `<data_dir>/snapshots`)
+  instead of the live harness stores, so history still reaches the ledger
+  after a harness deletes its own transcripts. (#18)
+- `GET /artifacts/<sha256>` and `sessionmunch artifact get <sha256>` read back
+  the full payload of an imported event that was cut to a head and tail, from
+  the same server `import sessions` uploads to. The `memory_search_events`
+  description now tells agents how. (#18)
 - New `sessionmunch import sessions --since <window>` (North Star §5, P1
   global historical import). It enumerates every session the local Claude
   Code, Codex, OpenCode (v1 and v2), Pi, OMP, Kimi Code, Command Code, Kiro
@@ -97,18 +105,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Antigravity's id-addressed per-conversation stores are reported unsupported.
   `--harness` limits to one harness; `--json` emits a structured report.
   (#t_0bbcdf6b, #t_d0a5e721)
-- New `[cluster]` node-topology configuration (North Star P1.3) that lets a
-  node declare its role in a Brokentooth/Sleeper deployment — `node_id`
-  (validated machine-readable id), `role` (`standalone` default, `hub`, or
-  `satellite`), `central_url`, and `auth_token`. The default posture is
-  unchanged: strictly local standalone, no remote URL, no credential. The
-  config is validated at load time and fails closed — a `node_id`,
-  `central_url`, or `auth_token` supplied while role stays `standalone`, or a
-  hub/satellite missing its `node_id`/`central_url`, is refused at startup.
-  `serve` surfaces the resolved topology once at startup for a clustered node.
-  Env overrides: `SESSIONMUNCH_CLUSTER__NODE_ID`, `SESSIONMUNCH_CLUSTER__ROLE`,
+- New `[cluster]` settings, `central_url` and `auth_token`, that point
+  `import sessions` at a central server instead of the local one. A token
+  without a `central_url` is refused at startup. The earlier hub/satellite
+  `role` and `node_id` keys were dropped because nothing acted on them; old
+  configs that still set them load unchanged. Env overrides:
   `SESSIONMUNCH_CLUSTER__CENTRAL_URL`, `SESSIONMUNCH_CLUSTER__AUTH_TOKEN`.
-  (#t_663c8f39)
+  (#t_663c8f39, #18)
 - New content-addressed, gzip-compressed artifact store and authoritative
   `POST /artifacts` ingest endpoint (North Star P1.4) for shipping large
   sanitized evidence (full tool outputs, imported transcripts) from a remote
@@ -132,6 +135,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#t_c51f1a51).
 
 ### Fixed
+- `snapshot-harness-history --json` printed a plain-text summary line after
+  the JSON report, so its output could not be parsed. (#18)
 - Patched new certificate-validation advisories RUSTSEC-2026-0382 (rustls-webpki 0.103.16) and RUSTSEC-2026-0383 (webpki-root-certs 1.0.10). The web UI now uses askama 0.16 without its config feature, which drops the unmaintained basic-toml (RUSTSEC-2026-0374). (#11)
 - Patched RUSTSEC-2026-0386 (tokio `AsyncFd` I/O safety) by moving to tokio 1.54.1 in the workspace and the companion importer. (#16)
 - Renamed the legacy Architecture & Data Ownership guide so it no longer

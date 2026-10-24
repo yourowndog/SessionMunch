@@ -41,8 +41,8 @@ pub use history_import::{
 };
 pub use repository::{RepositoryIdentity, inspect_repository};
 pub use snapshot::{
-    HarnessSnapshot, SnapshotOutcome, SnapshotReport, SnapshotSource, snapshot_all_harnesses,
-    snapshot_store,
+    HarnessSnapshot, SnapshotOutcome, SnapshotReport, SnapshotSource, StagedSnapshots,
+    snapshot_all_harnesses, snapshot_store, stage_snapshot_home,
 };
 pub use transcript::{
     ExportedTranscript, NativeSessionCandidate, discover_native_session, export_transcript,

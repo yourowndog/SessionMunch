@@ -6,6 +6,7 @@ use crate::config::Config;
 
 pub mod api_key;
 pub mod apply_shared;
+pub mod artifact;
 pub mod audit_contamination;
 pub mod auth;
 pub mod auto_improve;

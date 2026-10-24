@@ -336,12 +336,8 @@ pub struct Config {
     /// `SESSIONMUNCH_AUTH_TOKEN` env var or `[auth].bearer_token` in
     /// config.toml.
     pub auth: AuthSettings,
-    /// `[cluster]` — explicit node topology configuration and node identity
-    /// (North Star P1.3). Enables a Brokentooth/Sleeper deployment where one
-    /// canonical Hub hosts the authoritative database and satellites forward
-    /// their session-event ledger. The default is `standalone` (strictly
-    /// local, loopback-only) with no remote URL and no auth — see
-    /// [`ClusterSettings`] for the full contract.
+    /// `[cluster]` — optional central server that `import sessions` delivers
+    /// to. See [`ClusterSettings`].
     pub cluster: ClusterSettings,
     /// `[auto_scope]` — opt-in isolation of the hook-published "current
     /// project" pointer used by MCP tools that omit `workspace`/`project`.
@@ -664,93 +660,43 @@ impl std::fmt::Debug for AuthSettings {
     }
 }
 
-/// `[cluster]` — explicit node topology configuration and node identity
-/// (North Star P1.3).
+/// `[cluster]` — where this machine's imported history goes.
 ///
-/// The default posture is `standalone`: strictly local, loopback-only, no
-/// remote URL, no auth token. Configuring a `role` other than `standalone`
-/// opts that node into a cluster where the canonical Hub owns the authoritative
-/// database and satellites forward their session-event ledger via a local
-/// crash-safe spool (North Star invariants: Sleeper is authoritative; per-node
-/// databases are never merged).
-///
-/// Field contract:
-/// - `node_id` — validated machine-readable id (ASCII alphanumeric, `-`, `_`,
-///   `.`, 1–64 chars; parsed by [`sessionmunch_core::NodeId`]). Required for a
-///   non-`standalone` role.
-/// - `role` — `standalone` (default), `hub`, or `satellite`.
-/// - `central_url` — base URL of the Hub exposing `POST /session-events` and
-///   `POST /artifacts`. Required for `hub`/`satellite`.
-/// - `auth_token` — bearer token a satellite presents to the Hub. Stored as a
+/// - `central_url` — base URL of the server that keeps the shared history
+///   (`POST /session-events`, `POST /artifacts`). `import sessions` delivers
+///   there instead of to the local server when it is set.
+/// - `auth_token` — bearer token presented to that server. Stored as a
 ///   [`SecretString`] so it never serializes into logs or dumps.
 ///
-/// Env overrides: `SESSIONMUNCH_CLUSTER__NODE_ID`,
-/// `SESSIONMUNCH_CLUSTER__ROLE`, `SESSIONMUNCH_CLUSTER__CENTRAL_URL`,
-/// `SESSIONMUNCH_CLUSTER__AUTH_TOKEN`.
+/// Env overrides: `SESSIONMUNCH_CLUSTER__CENTRAL_URL`,
+/// `SESSIONMUNCH_CLUSTER__AUTH_TOKEN`. Keys from the earlier hub/satellite
+/// design (`role`, `node_id`) are ignored like any other unknown key.
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClusterSettings {
-    /// This node's validated identity. Optional only in `standalone` mode.
-    /// Stored as raw text; validated into a [`sessionmunch_core::NodeId`] by
-    /// [`validate_cluster`] at load time (fail closed).
-    #[serde(default)]
-    pub node_id: Option<String>,
-    /// This node's role: `standalone` (default), `hub`, or `satellite`.
-    #[serde(default)]
-    pub role: sessionmunch_core::ClusterRole,
-    /// Base URL of the Hub for a non-`standalone` node. Empty in standalone.
+    /// Base URL of the central server. Unset keeps imports local.
     #[serde(default)]
     pub central_url: Option<String>,
-    /// Bearer token a satellite presents to the Hub. Never serialized.
+    /// Bearer token presented to the central server. Never serialized.
     #[serde(skip_serializing)]
     pub auth_token: Option<SecretString>,
 }
 
 impl ClusterSettings {
-    /// The validated node identifier, when a non-`standalone` role is set.
-    /// Returns `Err` if a `node_id` was supplied but failed [`NodeId`]
-    /// validation.
-    pub fn node_id(&self) -> Result<Option<sessionmunch_core::NodeId>, anyhow::Error> {
-        match self.node_id.as_deref() {
-            None => Ok(None),
-            Some(raw) if raw.trim().is_empty() => Ok(None),
-            Some(raw) => node_id(raw).map(Some),
-        }
-    }
-
-    /// The central Hub base URL, trimmed of a trailing slash.
+    /// The central server base URL, trimmed of a trailing slash.
     #[must_use]
     pub fn central_url(&self) -> Option<&str> {
-        match self.central_url.as_deref() {
-            None => None,
-            Some(raw) => {
-                let trimmed = raw.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed.trim_end_matches('/'))
-                }
-            }
-        }
+        self.central_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+            .map(|url| url.trim_end_matches('/'))
     }
-
-    /// True when this node is configured to participate in a cluster (hub or
-    /// satellite) rather than the strictly-local standalone default.
-    #[must_use]
-    pub fn is_clustered(&self) -> bool {
-        self.role != sessionmunch_core::ClusterRole::Standalone
-    }
-}
-
-fn node_id(raw: &str) -> Result<sessionmunch_core::NodeId, anyhow::Error> {
-    sessionmunch_core::NodeId::new(raw).map_err(anyhow::Error::new)
 }
 
 impl std::fmt::Debug for ClusterSettings {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ClusterSettings")
-            .field("node_id", &self.node_id)
-            .field("role", &self.role)
             .field("central_url", &self.central_url)
             .field(
                 "auth_token",
@@ -760,58 +706,13 @@ impl std::fmt::Debug for ClusterSettings {
     }
 }
 
-fn validate_cluster(cluster: &ClusterSettings, data_dir: &Path) -> Result<(), anyhow::Error> {
-    match cluster.role {
-        sessionmunch_core::ClusterRole::Standalone => {
-            let has_node_id = cluster
-                .node_id
-                .as_deref()
-                .map(|s| !s.trim().is_empty())
-                .unwrap_or(false);
-            if has_node_id {
-                anyhow::bail!(
-                    "[cluster].node_id is set but role is 'standalone'; \
-                     node identity is only meaningful for a hub or satellite"
-                );
-            }
-            if cluster.central_url.as_deref().is_some() {
-                anyhow::bail!(
-                    "[cluster].central_url is set but role is 'standalone'; \
-                     a standalone node never dials out to a central Hub"
-                );
-            }
-            if cluster.auth_token.is_some() {
-                anyhow::bail!(
-                    "[cluster].auth_token is set but role is 'standalone'; \
-                     no Hub is contacted, so no credential is needed"
-                );
-            }
-        }
-        sessionmunch_core::ClusterRole::Hub | sessionmunch_core::ClusterRole::Satellite => {
-            if cluster.node_id.as_deref().is_none() {
-                anyhow::bail!(
-                    "[cluster].node_id is required for role {:?}",
-                    cluster.role.as_str()
-                );
-            }
-            if cluster.central_url.as_deref().is_none() {
-                anyhow::bail!(
-                    "[cluster].central_url is required for role {:?}",
-                    cluster.role.as_str()
-                );
-            }
-            // Validate the node_id string against the NodeId grammar, and
-            // fail closed when the raw value collapses to no identity
-            // (e.g. a whitespace-only string maps to Ok(None), not Err).
-            if cluster.node_id()?.is_none() {
-                anyhow::bail!(
-                    "cluster.node_id must be a non-empty identifier for role {:?}",
-                    cluster.role.as_str()
-                );
-            }
-        }
+fn validate_cluster(cluster: &ClusterSettings) -> Result<(), anyhow::Error> {
+    if cluster.auth_token.is_some() && cluster.central_url().is_none() {
+        anyhow::bail!(
+            "[cluster].auth_token is set without [cluster].central_url; \
+             the token is only ever sent to the central server"
+        );
     }
-    let _ = data_dir;
     Ok(())
 }
 
@@ -1336,7 +1237,7 @@ impl Config {
             .llm_extra_headers()
             .context("parsing SESSIONMUNCH_LLM_HEADERS / llm_headers")?;
         validate_auth_secrets(&config.auth)?;
-        validate_cluster(&config.cluster, &config.data_dir)?;
+        validate_cluster(&config.cluster)?;
 
         // Validated and resolved eagerly, unlike the primary provider (which
         // stays lazily checked at `serve` startup): a fallback can otherwise
@@ -3538,120 +3439,39 @@ fn llm_test_base_url_resolves_per_provider_like_serve_does() {
     );
 }
 
-// P1.3: `validate_cluster` must fail closed — the standalone default posture
-// is strictly local, so a `node_id`, `central_url`, or `auth_token` supplied
-// while role stays `standalone` is a config mistake, and a hub/satellite
-// without the identity fields it needs is refused at load time.
 #[test]
-fn validate_cluster_standalone_rejects_fields_that_imply_a_remote() {
-    let tmp = tempfile::tempdir().unwrap();
-
-    // node_id with no role intent.
+fn validate_cluster_needs_a_central_url_for_a_token() {
+    let token = || Some(SecretString::from("t0ken".to_owned()));
+    assert!(validate_cluster(&ClusterSettings::default()).is_ok());
     assert!(
-        validate_cluster(
-            &ClusterSettings {
-                node_id: Some("brokentooth-1".into()),
-                ..ClusterSettings::default()
-            },
-            tmp.path(),
-        )
-        .is_err()
-    );
-    // central_url without a role.
-    assert!(
-        validate_cluster(
-            &ClusterSettings {
-                central_url: Some("http://sleeper:49374".into()),
-                ..ClusterSettings::default()
-            },
-            tmp.path(),
-        )
-        .is_err()
-    );
-    // auth_token without a role.
-    assert!(
-        validate_cluster(
-            &ClusterSettings {
-                auth_token: Some(SecretString::new("s3cret".into())),
-                ..ClusterSettings::default()
-            },
-            tmp.path(),
-        )
-        .is_err()
-    );
-}
-
-#[test]
-fn validate_cluster_non_standalone_requires_identity_and_central_url() {
-    let tmp = tempfile::tempdir().unwrap();
-
-    // Hub with no node_id and no central_url.
-    assert!(
-        validate_cluster(
-            &ClusterSettings {
-                role: sessionmunch_core::ClusterRole::Hub,
-                ..ClusterSettings::default()
-            },
-            tmp.path(),
-        )
-        .is_err()
-    );
-    // Hub with node_id but no central_url.
-    assert!(
-        validate_cluster(
-            &ClusterSettings {
-                role: sessionmunch_core::ClusterRole::Hub,
-                node_id: Some("sleeper-1".into()),
-                ..ClusterSettings::default()
-            },
-            tmp.path(),
-        )
-        .is_err()
-    );
-    // Satellite with both plus a valid node id.
-    assert!(
-        validate_cluster(
-            &ClusterSettings {
-                role: sessionmunch_core::ClusterRole::Satellite,
-                node_id: Some("brokentooth-1".into()),
-                central_url: Some("http://sleeper:49374".into()),
-                ..ClusterSettings::default()
-            },
-            tmp.path(),
-        )
+        validate_cluster(&ClusterSettings {
+            central_url: Some("http://sleeper:49374/".into()),
+            auth_token: token(),
+        })
         .is_ok()
     );
-    // A malformed node_id is refused even when the other fields are present.
-    assert!(
-        validate_cluster(
-            &ClusterSettings {
-                role: sessionmunch_core::ClusterRole::Hub,
-                node_id: Some("bad node/name".into()),
-                central_url: Some("http://sleeper:49374".into()),
-                ..ClusterSettings::default()
-            },
-            tmp.path(),
-        )
-        .is_err()
-    );
+    for central_url in [None, Some("   ".to_owned())] {
+        assert!(
+            validate_cluster(&ClusterSettings {
+                central_url,
+                auth_token: token(),
+            })
+            .is_err(),
+            "a token with nowhere to go is a config mistake"
+        );
+    }
 }
 
 #[test]
-fn validate_cluster_hub_rejects_whitespace_only_node_id() {
-    let tmp = tempfile::tempdir().unwrap();
-
-    // A whitespace-only node_id collapses to no identity (Ok(None)) and must
-    // be rejected for a hub, not silently accepted as a validated identity.
-    assert!(
-        validate_cluster(
-            &ClusterSettings {
-                role: sessionmunch_core::ClusterRole::Hub,
-                node_id: Some("   ".into()),
-                central_url: Some("http://sleeper:49374".into()),
-                ..ClusterSettings::default()
-            },
-            tmp.path(),
-        )
-        .is_err()
+fn cluster_central_url_is_trimmed_and_blank_means_unset() {
+    let with = |url: &str| ClusterSettings {
+        central_url: Some(url.into()),
+        auth_token: None,
+    };
+    assert_eq!(
+        with(" http://sleeper:49374/ ").central_url(),
+        Some("http://sleeper:49374")
     );
+    assert_eq!(with("  ").central_url(), None);
+    assert_eq!(ClusterSettings::default().central_url(), None);
 }
