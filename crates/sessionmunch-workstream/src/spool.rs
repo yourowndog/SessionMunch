@@ -421,7 +421,7 @@ impl Spool {
 /// is on disk before the batch filename exists, which is what makes the spool
 /// crash-safe: a crash either leaves only the temp fragment (discarded on
 /// [recovery](Spool::open)) or the fully-committed batch file.
-fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| std::io::Error::other("batch path has no parent"))?;

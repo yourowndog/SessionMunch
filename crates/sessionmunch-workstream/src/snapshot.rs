@@ -51,6 +51,7 @@ use uuid::Uuid;
 
 use crate::ManagedHarness;
 use crate::repository::inspect_repository;
+use crate::spool::write_atomic;
 use crate::transcript::{collect_session_files, crush_db, opencode_db, session_roots};
 
 const SNAPSHOT_VERSION: &str = "harness-store-v1";
@@ -700,7 +701,9 @@ fn write_index(snap: &HarnessSnapshot, artifact_root: &Path) -> Result<()> {
         sources: entries,
     };
     let serialized = serde_json::to_string_pretty(&index)?;
-    atomic_write(&dir.join(INDEX_FILE), serialized.as_bytes())?;
+    let index = dir.join(INDEX_FILE);
+    write_atomic(&index, serialized.as_bytes())
+        .with_context(|| format!("writing {}", index.display()))?;
     Ok(())
 }
 
@@ -770,25 +773,6 @@ fn append_provenance(
         .with_context(|| format!("opening provenance ledger {}", ledger.display()))?;
     file.write_all(line.as_bytes())
         .with_context(|| format!("appending provenance for {}", snap.harness.as_str()))?;
-    Ok(())
-}
-
-/// Write bytes atomically (tmp + rename), like every other durable write in
-/// the codebase.
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
-    let Some(parent) = path.parent() else {
-        return Err(anyhow!("no parent directory for {}", path.display()));
-    };
-    fs::create_dir_all(parent)?;
-    let leaf = path
-        .file_name()
-        .map(|name| name.to_string_lossy())
-        .unwrap_or(INDEX_FILE.into());
-    let tmp = parent.join(format!(".{leaf}.tmp"));
-    fs::write(&tmp, bytes)
-        .with_context(|| format!("writing {} bytes to {}", bytes.len(), tmp.display()))?;
-    fs::rename(&tmp, path)
-        .with_context(|| format!("renaming {} over {}", tmp.display(), path.display()))?;
     Ok(())
 }
 

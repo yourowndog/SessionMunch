@@ -496,18 +496,6 @@ enum HttpExposure {
     UndeterminedInContainer,
 }
 
-/// Detect that this process is running inside a container.
-///
-/// `/.dockerenv` is created by Docker, `/run/.containerenv` by Podman. The
-/// official image also sets `SESSIONMUNCH_IN_CONTAINER`, so the signal survives
-/// runtimes that create neither file.
-fn running_in_container() -> bool {
-    if std::env::var("SESSIONMUNCH_IN_CONTAINER").is_ok_and(|v| !v.trim().is_empty()) {
-        return true;
-    }
-    Path::new("/.dockerenv").exists() || Path::new("/run/.containerenv").exists()
-}
-
 /// Refuse accidental unauthenticated network exposure after the listener has
 /// selected its actual local address (which may differ from the bind input).
 ///
@@ -1408,7 +1396,7 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
                 human_mode,
                 config.auth.secure_cookie,
                 args.allow_insecure_no_auth,
-                running_in_container(),
+                sessionmunch_wiki::backup::running_in_container(),
             )?;
             // P1.3: surface the resolved cluster topology once at startup so
             // an operator can see at a glance whether this node participates
