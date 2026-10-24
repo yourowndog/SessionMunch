@@ -258,3 +258,45 @@ async fn corrupt_existing_blob_is_repaired_on_reship_not_silently_accepted() {
         "repaired blob returns the exact repaired bytes"
     );
 }
+
+#[tokio::test]
+async fn download_returns_the_stored_bytes_and_names_what_is_missing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let hub = ArtifactHub::start(dir.path()).await;
+    let client = ArtifactClient::new(&hub.base_url, None);
+
+    let content = compressible_content(40 * 1024);
+    let digest = sha256_hex(&content);
+    client
+        .upload(&ArtifactUpload {
+            content: content.clone(),
+            digest: digest.clone(),
+            provenance: provenance(SessionId::new()),
+        })
+        .await
+        .expect("upload accepted");
+
+    assert_eq!(
+        client.download(&digest).await.expect("download"),
+        Some(content),
+        "the whole payload comes back, decompressed"
+    );
+    assert_eq!(
+        client
+            .download(&sha256_hex(b"never uploaded"))
+            .await
+            .expect("an unknown digest is not an error"),
+        None
+    );
+    assert!(matches!(
+        client.download("not-a-digest").await,
+        Err(ArtifactClientError::Rejected { status: 400, .. })
+    ));
+
+    // A blob damaged on the hub's disk is refused, never served as-is.
+    std::fs::write(hub.blob_path(&digest), b"garbage").expect("tamper");
+    assert!(matches!(
+        client.download(&digest).await,
+        Err(ArtifactClientError::Integrity { status: 500, .. })
+    ));
+}

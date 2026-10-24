@@ -22,7 +22,7 @@ use sessionmunch_workstream::{
     ArtifactClient, ArtifactProvenance, ArtifactUpload, ExportedTranscript, HarnessDiscovery,
     HttpEventSink, IMPORTABLE_HARNESSES, ManagedHarness, Spool, SpoolBatch, SpoolConfig,
     SpoolDrainer, StoreStatus, discover_harness_history, discover_hermes_history,
-    export_discovered, export_hermes_session, to_session_events,
+    export_discovered, export_hermes_session, stage_snapshot_home, to_session_events,
 };
 
 use crate::cli::ImportSessionsArgs;
@@ -61,6 +61,9 @@ struct ImportReport {
     dry_run: bool,
     hub: Option<String>,
     harnesses: Vec<HarnessReport>,
+    /// Snapshot blobs that could not be staged (`--from-snapshots` only).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    snapshot_losses: Vec<String>,
     events_delivered: usize,
     events_already_known: usize,
     batches_pending: u64,
@@ -79,23 +82,43 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
     let since = SystemTime::now()
         .checked_sub(since_window)
         .unwrap_or(SystemTime::UNIX_EPOCH);
-    let home = args
-        .home
-        .clone()
-        .or_else(|| config.home_dir.as_deref().map(PathBuf::from))
-        .or_else(|| host.home_dir())
-        .ok_or_else(|| anyhow!("cannot resolve the home directory; pass --home"))?;
+    let import_dir = config.data_dir.join("history-import");
+    let (harnesses, include_hermes) = select_sources(args.harness.as_deref())?;
+    let mut staging_losses = Vec::new();
+    let (home, harnesses, include_hermes, staging) = match &args.from_snapshots {
+        Some(dir) => {
+            let snapshots = dir
+                .clone()
+                .unwrap_or_else(|| config.data_dir.join("snapshots"));
+            let staging = import_dir.join("snapshot-home");
+            remove_staging(&staging)?;
+            let staged = stage_snapshot_home(&snapshots, &staging)
+                .with_context(|| format!("staging snapshots from {}", snapshots.display()))?;
+            staging_losses = staged.losses;
+            let harnesses = harnesses
+                .into_iter()
+                .filter(|harness| staged.harnesses.contains(harness))
+                .collect();
+            (staging.clone(), harnesses, false, Some(staging))
+        }
+        None => {
+            let home = args
+                .home
+                .clone()
+                .or_else(|| config.home_dir.as_deref().map(PathBuf::from))
+                .or_else(|| host.home_dir())
+                .ok_or_else(|| anyhow!("cannot resolve the home directory; pass --home"))?;
+            (home, harnesses, include_hermes, None)
+        }
+    };
     let machine = machine_identity();
     let sanitizer = Sanitizer::new(&config.sanitize).context("building canonical sanitizer")?;
     let (hub_url, token) = hub_target(config).await;
-
-    let (harnesses, include_hermes) = select_sources(args.harness.as_deref())?;
     let hermes_home = args
         .hermes_home
         .clone()
         .unwrap_or_else(|| home.join(".hermes"));
 
-    let import_dir = config.data_dir.join("history-import");
     let cursor_path = import_dir.join("cursors.json");
     let mut cursors = read_cursors(&cursor_path);
     let spool = if args.dry_run {
@@ -179,6 +202,10 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
         .await;
         reports.push(report);
     }
+    // Every transcript has been read; the staged links are no longer needed.
+    if let Some(staging) = &staging {
+        remove_staging(staging)?;
+    }
 
     let mut events_delivered = 0;
     let mut events_already_known = 0;
@@ -239,6 +266,7 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
         dry_run: args.dry_run,
         hub: (!args.dry_run).then_some(hub_url),
         harnesses: reports,
+        snapshot_losses: staging_losses,
         events_delivered,
         events_already_known,
         batches_pending,
@@ -256,6 +284,17 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
         ));
     }
     Ok(())
+}
+
+/// Clear the staged snapshot home. It only ever holds links to, or copies of,
+/// snapshot blobs, so removing it loses nothing.
+fn remove_staging(staging: &Path) -> Result<()> {
+    match std::fs::remove_dir_all(staging) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            Err(error).with_context(|| format!("clearing {}", staging.display()))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Reads one session's transcript tail after an optional cursor.
@@ -462,7 +501,7 @@ pub(crate) fn machine_identity() -> String {
 
 /// Where imported events go: a satellite's configured hub, else the server
 /// this CLI already talks to.
-async fn hub_target(config: &Config) -> (String, Option<String>) {
+pub(crate) async fn hub_target(config: &Config) -> (String, Option<String>) {
     if let Some(central) = config.cluster.central_url() {
         let token = config
             .cluster
@@ -562,6 +601,9 @@ fn print_report(report: &ImportReport) {
         if harness.losses.len() > 5 {
             println!("      … {} more (see --json)", harness.losses.len() - 5);
         }
+    }
+    for loss in &report.snapshot_losses {
+        println!("  snapshot lost: {loss}");
     }
     if let Some(hub) = &report.hub {
         println!(

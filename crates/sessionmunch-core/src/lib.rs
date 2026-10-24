@@ -8,7 +8,7 @@
 pub mod active_project;
 pub mod actor;
 pub mod cluster;
-pub use cluster::{ClusterRole, NodeId};
+pub use cluster::NodeId;
 pub mod error;
 pub mod handoff;
 pub mod ingest_metrics;

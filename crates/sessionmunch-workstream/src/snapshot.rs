@@ -58,6 +58,23 @@ const SNAPSHOT_VERSION: &str = "harness-store-v1";
 const INDEX_FILE: &str = "index.json";
 const PROVENANCE_LEDGER: &str = "provenance.jsonl";
 
+/// Every harness a full snapshot covers, in report order.
+const SNAPSHOT_HARNESSES: [ManagedHarness; 13] = [
+    ManagedHarness::Claude,
+    ManagedHarness::Codex,
+    ManagedHarness::OpenCode,
+    ManagedHarness::OpenCode2,
+    ManagedHarness::Pi,
+    ManagedHarness::Crush,
+    ManagedHarness::Omp,
+    ManagedHarness::Kimi,
+    ManagedHarness::CommandCode,
+    ManagedHarness::Kiro,
+    ManagedHarness::KiroV3,
+    ManagedHarness::Grok,
+    ManagedHarness::Antigravity,
+];
+
 /// Why a single source file was or was not preserved.
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum SnapshotOutcome {
@@ -227,22 +244,8 @@ pub async fn snapshot_all_harnesses(
     machine_id: &str,
     sanitizer: &Sanitizer,
 ) -> Result<SnapshotReport> {
-    let mut harnesses = Vec::with_capacity(13);
-    for harness in [
-        ManagedHarness::Claude,
-        ManagedHarness::Codex,
-        ManagedHarness::OpenCode,
-        ManagedHarness::OpenCode2,
-        ManagedHarness::Pi,
-        ManagedHarness::Crush,
-        ManagedHarness::Omp,
-        ManagedHarness::Kimi,
-        ManagedHarness::CommandCode,
-        ManagedHarness::Kiro,
-        ManagedHarness::KiroV3,
-        ManagedHarness::Grok,
-        ManagedHarness::Antigravity,
-    ] {
+    let mut harnesses = Vec::with_capacity(SNAPSHOT_HARNESSES.len());
+    for harness in SNAPSHOT_HARNESSES {
         harnesses.push(
             snapshot_store(
                 harness,
@@ -704,6 +707,119 @@ fn write_index(snap: &HarnessSnapshot, artifact_root: &Path) -> Result<()> {
     let index = dir.join(INDEX_FILE);
     write_atomic(&index, serialized.as_bytes())
         .with_context(|| format!("writing {}", index.display()))?;
+    Ok(())
+}
+
+/// What [`stage_snapshot_home`] laid out, and what it could not.
+#[derive(Debug, Default)]
+pub struct StagedSnapshots {
+    /// Harnesses that have at least one source staged.
+    pub harnesses: Vec<ManagedHarness>,
+    /// Blobs placed in the staged home.
+    pub staged: usize,
+    /// Sources that could not be staged, by name and reason.
+    pub losses: Vec<String>,
+}
+
+/// Lay the preserved blobs under `snapshot_root` out as a harness home at
+/// `staging_home`, each at the path its live store would use, so the normal
+/// history importer can read a snapshot exactly as it reads a live store.
+///
+/// Blobs are hard-linked where the filesystem allows and copied otherwise;
+/// the snapshot itself is never modified. A crush database is skipped
+/// because its store is per checkout, not per home.
+///
+/// # Errors
+/// Fails when `snapshot_root` cannot be listed or the staging home cannot be
+/// created. A bad index or blob is reported in [`StagedSnapshots::losses`].
+pub fn stage_snapshot_home(snapshot_root: &Path, staging_home: &Path) -> Result<StagedSnapshots> {
+    fs::create_dir_all(staging_home)
+        .with_context(|| format!("creating {}", staging_home.display()))?;
+    let mut staged = StagedSnapshots::default();
+    for harness in SNAPSHOT_HARNESSES {
+        let dir = snapshot_root.join(harness.as_str());
+        let index_path = dir.join(INDEX_FILE);
+        if !index_path.is_file() || harness == ManagedHarness::Crush {
+            continue;
+        }
+        let index: SnapshotIndex = match fs::read(&index_path)
+            .map_err(anyhow::Error::from)
+            .and_then(|raw| serde_json::from_slice(&raw).map_err(anyhow::Error::from))
+        {
+            Ok(index) => index,
+            Err(error) => {
+                staged.losses.push(format!(
+                    "{}: unreadable index: {error:#}",
+                    index_path.display()
+                ));
+                continue;
+            }
+        };
+        let mut any = false;
+        for entry in &index.sources {
+            let Some(target) = staged_path(harness, staging_home, &entry.rel) else {
+                staged
+                    .losses
+                    .push(format!("{}: unsafe path {:?}", harness.as_str(), entry.rel));
+                continue;
+            };
+            match place_blob(&dir.join(&entry.blob), &target) {
+                Ok(()) => {
+                    staged.staged += 1;
+                    any = true;
+                }
+                Err(error) => {
+                    staged
+                        .losses
+                        .push(format!("{} {}: {error:#}", harness.as_str(), entry.rel))
+                }
+            }
+        }
+        if any {
+            staged.harnesses.push(harness);
+        }
+    }
+    Ok(staged)
+}
+
+/// Where a preserved source sits in a staged home, or `None` for a `rel`
+/// that would escape its store root.
+fn staged_path(harness: ManagedHarness, home: &Path, rel: &str) -> Option<PathBuf> {
+    let rel = Path::new(rel);
+    if rel.as_os_str().is_empty()
+        || !rel
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)))
+    {
+        return None;
+    }
+    match harness {
+        // One database serves both adapters; its index entry is the file name.
+        ManagedHarness::OpenCode | ManagedHarness::OpenCode2 => Some(opencode_db(home, None)),
+        _ => session_roots(harness, home, None)
+            .first()
+            .map(|root| root.join(rel)),
+    }
+}
+
+fn place_blob(blob: &Path, target: &Path) -> Result<()> {
+    if target.exists() {
+        // OpenCode and OpenCode 2 share one database blob.
+        return Ok(());
+    }
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    if fs::hard_link(blob, target).is_err() {
+        fs::copy(blob, target).with_context(|| format!("copying {}", blob.display()))?;
+        // The importer's `--since` reads mtime; a copy must keep the blob's.
+        let preserved = fs::metadata(blob).and_then(|meta| meta.modified())?;
+        File::options()
+            .write(true)
+            .open(target)
+            .and_then(|file| file.set_modified(preserved))
+            .with_context(|| format!("dating {}", target.display()))?;
+    }
     Ok(())
 }
 
@@ -1200,5 +1316,47 @@ mod tests {
                 "committed WAL-resident row must be preserved in the blob"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn staged_home_puts_each_blob_where_the_live_store_keeps_it() {
+        let tmp = tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let store = session_roots(ManagedHarness::Claude, &home, None)
+            .remove(0)
+            .join("-work-repo");
+        let source = write_claude_store(&store, "s1", r#"{"type":"user","sessionId":"s1"}"#);
+        let artifact = tmp.path().join("snapshots");
+        snapshot_all_harnesses(&artifact, &home, tmp.path(), TEST_MACHINE, &sanitizer())
+            .await
+            .unwrap();
+
+        let staging = tmp.path().join("staged");
+        let staged = stage_snapshot_home(&artifact, &staging).unwrap();
+        assert_eq!(staged.harnesses, vec![ManagedHarness::Claude]);
+        assert_eq!(staged.staged, 1);
+        assert!(staged.losses.is_empty(), "{:?}", staged.losses);
+        let rel = source.strip_prefix(&home).unwrap();
+        assert_eq!(
+            fs::read(staging.join(rel)).unwrap(),
+            fs::read(&source).unwrap(),
+            "the importer finds the transcript at its usual path"
+        );
+    }
+
+    #[test]
+    fn staged_paths_never_leave_the_store_root() {
+        let home = Path::new("/staged");
+        for rel in ["../escape.jsonl", "/etc/passwd", "", "a/../../b"] {
+            assert_eq!(
+                staged_path(ManagedHarness::Claude, home, rel),
+                None,
+                "{rel}"
+            );
+        }
+        assert_eq!(
+            staged_path(ManagedHarness::OpenCode2, home, "opencode.db"),
+            Some(opencode_db(home, None))
+        );
     }
 }

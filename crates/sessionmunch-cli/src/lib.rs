@@ -185,6 +185,9 @@ pub async fn run() -> Result<()> {
             commands::import_sessions::run(&config, &host, args).await
         }
         Command::SearchEvents(args) => commands::search_events::run(&config, args).await,
+        Command::Artifact(crate::cli::ArtifactCommand::Get(args)) => {
+            commands::artifact::get(&config, args).await
+        }
         // `Completions` is handled in the fast-path above (before config/tracing).
         Command::Completions(args) => commands::completions::run(args),
     }
