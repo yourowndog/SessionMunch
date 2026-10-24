@@ -320,12 +320,17 @@ no tiers.
   full-history gitleaks scan.
 - **Windows runs in its own workflow** (`.github/workflows/windows.yml`):
   nightly, on demand, and on any PR labelled `windows`. It is the only place
-  `#[cfg(windows)]` tests compile, and it is ~4x slower than the same tests on
+  `#[cfg(windows)]` tests run, and it is ~4x slower than the same tests on
   Linux — keeping it out of `ci.yml`
   is what holds PR feedback near the eight minutes the gating jobs take.
+  Every PR still type-checks the Windows code: `ci.yml`'s `clippy-windows`
+  job runs clippy for `x86_64-pc-windows-gnu` on Linux (locally:
+  `rustup target add x86_64-pc-windows-gnu`, install mingw-w64's gcc, then
+  `cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnu`).
   **Add the `windows` label** to a PR touching path handling, file
   locking, or git plumbing, so the check runs before the merge rather
-  than after it.
+  than after it. During iteration, add it once the branch is close to
+  done; each push to a labelled PR waits on the native run.
 
 ## Code style guidelines
 

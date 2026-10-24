@@ -64,5 +64,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      # The runner VM is thrown away after the job, and real-time scanning
+      # otherwise inspects every object file, rlib, and freshly linked test
+      # binary the build writes.
+      - name: Turn off Defender real-time scanning
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      # rust-lld links the test binaries faster than MSVC link.exe.
       - run: cargo test --workspace --all-targets
+        env:
+          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld
