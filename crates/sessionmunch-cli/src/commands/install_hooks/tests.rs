@@ -206,6 +206,8 @@ fn bash_program_for_installer_test() -> Option<std::path::PathBuf> {
 }
 
 #[cfg(windows)]
+// Test-only: locates Git Bash on the CI runner, not a sessionmunch setting.
+#[allow(clippy::disallowed_methods)]
 fn bash_program_for_installer_test() -> Option<std::path::PathBuf> {
     let mut candidates = Vec::new();
     if let Some(root) = std::env::var_os("EXEPATH") {

@@ -1463,11 +1463,12 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_resolution_skips_the_extension_less_shim() {
+        let host = HostEnv::from_vars([("PATHEXT", ".COM;.EXE;.BAT;.CMD")]);
         let tmp = tempfile::TempDir::new().unwrap();
         std::fs::write(tmp.path().join("faux-harness"), "#!/bin/sh\n").unwrap();
 
         assert_eq!(
-            resolve_candidate(&tmp.path().join("faux-harness")),
+            resolve_candidate(&host, &tmp.path().join("faux-harness")),
             None,
             "an extension-less script is not launchable by CreateProcess"
         );
@@ -1477,8 +1478,8 @@ mod tests {
             "@echo off\r\nexit /b 0\r\n",
         )
         .unwrap();
-        let resolved =
-            resolve_candidate(&tmp.path().join("faux-harness")).expect("the wrapper resolves");
+        let resolved = resolve_candidate(&host, &tmp.path().join("faux-harness"))
+            .expect("the wrapper resolves");
         // PATHEXT is upper-case, and Windows paths are case-insensitive, so the
         // resolved name carries whichever casing the probe used.
         assert_eq!(
