@@ -258,6 +258,9 @@ pub async fn run(args: AbArgs) -> Result<()> {
 }
 
 /// Resolve `ProviderConfig` for one side from CLI args + env.
+// The eval harness is its own unshipped binary with no `Config`; `--*-api-key-env`
+// names the variable to read.
+#[allow(clippy::disallowed_methods)]
 fn resolve_provider(side: &str, args: &AbArgs) -> Result<ResolvedConfig> {
     let (provider_str, base_url, model, api_key_inline, api_key_env, token_file) = match side {
         "baseline" => (

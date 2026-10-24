@@ -12,7 +12,7 @@
 //! ```bash
 //! docker run --rm \
 //!   -v "$HOME/.sessionmunch:/host" \
-//!   akitaonrails/ai-memory:latest \
+//!   yourowndog/sessionmunch:latest \
 //!   setup-agent \
 //!     --agent claude-code \
 //!     --to /host/hooks \
@@ -45,6 +45,7 @@ use crate::commands::render_shared::{
     hook_script_for_current_platform,
 };
 use crate::config::{Config, DEFAULT_SERVER_URL};
+use crate::host_env::HostEnv;
 
 /// Run the `setup-agent` subcommand.
 ///
@@ -52,7 +53,7 @@ use crate::config::{Config, DEFAULT_SERVER_URL};
 /// Returns an error if the source bundle can't be located, the
 /// destination directory can't be created, any script copy fails,
 /// or the JSON config can't be serialised.
-pub fn run(config: &Config, args: SetupAgentArgs) -> Result<()> {
+pub fn run(config: &Config, host: &HostEnv, args: SetupAgentArgs) -> Result<()> {
     let server_url = if args.server_url == DEFAULT_SERVER_URL && config.server_url_configured() {
         normalise_hook_server_url(&config.server_url)
     } else {
@@ -142,18 +143,27 @@ pub fn run(config: &Config, args: SetupAgentArgs) -> Result<()> {
         .join(agent_sub);
 
     match args.agent {
-        AgentChoice::ClaudeCode => emit_claude_code(&emit_root, &args)?,
-        AgentChoice::Grok => emit_grok(&emit_root, &args)?,
-        AgentChoice::Devin => emit_devin(&emit_root, &args)?,
-        AgentChoice::Codex => emit_other(&emit_root, agent_sub, &args, &[CODEX_PROFILE.events]),
-        AgentChoice::CommandCode => {
-            emit_other(&emit_root, agent_sub, &args, &[COMMAND_CODE_PROFILE.events])
+        AgentChoice::ClaudeCode => emit_claude_code(host, &emit_root, &args)?,
+        AgentChoice::Grok => emit_grok(host, &emit_root, &args)?,
+        AgentChoice::Devin => emit_devin(host, &emit_root, &args)?,
+        AgentChoice::Codex => {
+            emit_other(host, &emit_root, agent_sub, &args, &[CODEX_PROFILE.events])
         }
-        AgentChoice::Cursor => emit_other(&emit_root, agent_sub, &args, &[CURSOR_PROFILE.events]),
+        AgentChoice::CommandCode => emit_other(
+            host,
+            &emit_root,
+            agent_sub,
+            &args,
+            &[COMMAND_CODE_PROFILE.events],
+        ),
+        AgentChoice::Cursor => {
+            emit_other(host, &emit_root, agent_sub, &args, &[CURSOR_PROFILE.events])
+        }
         AgentChoice::GeminiCli => {
-            emit_other(&emit_root, agent_sub, &args, &[GEMINI_PROFILE.events]);
+            emit_other(host, &emit_root, agent_sub, &args, &[GEMINI_PROFILE.events]);
         }
         AgentChoice::AntigravityCli => emit_other(
+            host,
             &emit_root,
             agent_sub,
             &args,
@@ -162,14 +172,16 @@ pub fn run(config: &Config, args: SetupAgentArgs) -> Result<()> {
         // Kimi's success and failure post-tool events share one script. The
         // script listing is deduplicated below; apply-mode owns the exact
         // `[[hooks]]` TOML merge into the user's config.toml.
-        AgentChoice::KimiCode => emit_other(&emit_root, agent_sub, &args, &[&KIMI_CODE_EVENTS]),
+        AgentChoice::KimiCode => {
+            emit_other(host, &emit_root, agent_sub, &args, &[&KIMI_CODE_EVENTS])
+        }
         AgentChoice::KiroCli => {
-            emit_other(&emit_root, agent_sub, &args, &[&KIRO_CLI_V2_EVENTS]);
+            emit_other(host, &emit_root, agent_sub, &args, &[&KIRO_CLI_V2_EVENTS]);
         }
         AgentChoice::KiroCliV3 => {
-            emit_other(&emit_root, agent_sub, &args, &[&KIRO_CLI_V3_EVENTS]);
+            emit_other(host, &emit_root, agent_sub, &args, &[&KIRO_CLI_V3_EVENTS]);
         }
-        AgentChoice::Pool => emit_pool(&emit_root, &args),
+        AgentChoice::Pool => emit_pool(host, &emit_root, &args),
         AgentChoice::OpenCode
         | AgentChoice::OpenCode2
         | AgentChoice::Pi
@@ -313,12 +325,16 @@ fn emit_extension_setup_hint(args: &SetupAgentArgs) -> Result<()> {
     Ok(())
 }
 
-fn emit_claude_code(emit_root: &Path, args: &SetupAgentArgs) -> Result<()> {
-    let payload =
-        build_claude_code_payload(emit_root, &args.server_url, args.auth_token.as_deref());
+fn emit_claude_code(host: &HostEnv, emit_root: &Path, args: &SetupAgentArgs) -> Result<()> {
+    let payload = build_claude_code_payload(
+        host,
+        emit_root,
+        &args.server_url,
+        args.auth_token.as_deref(),
+    );
     let serialized =
         serde_json::to_string_pretty(&payload).context("serializing Claude Code hook config")?;
-    let settings_path = crate::commands::install_hooks::claude_settings_path()?;
+    let settings_path = crate::commands::install_hooks::claude_settings_path(host)?;
     println!("# Claude Code — merge into {}", settings_path.display());
     println!("# Hook scripts (must be reachable from the host that runs Claude Code):");
     println!("#   {}", emit_root.display());
@@ -337,11 +353,16 @@ fn emit_claude_code(emit_root: &Path, args: &SetupAgentArgs) -> Result<()> {
     Ok(())
 }
 
-fn emit_grok(emit_root: &Path, args: &SetupAgentArgs) -> Result<()> {
-    let payload = build_grok_payload(emit_root, &args.server_url, args.auth_token.as_deref());
+fn emit_grok(host: &HostEnv, emit_root: &Path, args: &SetupAgentArgs) -> Result<()> {
+    let payload = build_grok_payload(
+        host,
+        emit_root,
+        &args.server_url,
+        args.auth_token.as_deref(),
+    );
     let serialized =
         serde_json::to_string_pretty(&payload).context("serializing Grok hook config")?;
-    let grok_home = install_mcp::grok_home()?;
+    let grok_home = install_mcp::grok_home(host)?;
     let hooks_path = grok_home.join("hooks/sessionmunch.json");
     println!("# Grok Build CLI — write to {}", hooks_path.display());
     println!("# Hook scripts (must be reachable from the host that runs Grok):");
@@ -371,8 +392,13 @@ fn emit_grok(emit_root: &Path, args: &SetupAgentArgs) -> Result<()> {
 /// scripts are the artifact — Pool's hook config is a project-scoped YAML
 /// file at the repo root, so the snippet is pasted into each repository
 /// rather than written by sessionmunch.
-fn emit_pool(emit_root: &Path, args: &SetupAgentArgs) {
-    let snippet = build_pool_settings_yaml(emit_root, &args.server_url, args.auth_token.as_deref());
+fn emit_pool(host: &HostEnv, emit_root: &Path, args: &SetupAgentArgs) {
+    let snippet = build_pool_settings_yaml(
+        host,
+        emit_root,
+        &args.server_url,
+        args.auth_token.as_deref(),
+    );
     println!("# Pool (Poolside Agent CLI) — merge into the repo-root .poolside/settings.yaml");
     println!("# of each project Pool runs in; sessionmunch does not write project-local files.");
     println!("# Hook scripts (must be reachable from the host that runs Pool):");
@@ -390,13 +416,22 @@ fn emit_pool(emit_root: &Path, args: &SetupAgentArgs) {
     print!("{snippet}");
 }
 
-fn emit_devin(emit_root: &Path, args: &SetupAgentArgs) -> Result<()> {
-    print!("{}", render_devin_setup_output(emit_root, args)?);
+fn emit_devin(host: &HostEnv, emit_root: &Path, args: &SetupAgentArgs) -> Result<()> {
+    print!("{}", render_devin_setup_output(host, emit_root, args)?);
     Ok(())
 }
 
-fn render_devin_setup_output(emit_root: &Path, args: &SetupAgentArgs) -> Result<String> {
-    let payload = build_devin_payload(emit_root, &args.server_url, args.auth_token.as_deref());
+fn render_devin_setup_output(
+    host: &HostEnv,
+    emit_root: &Path,
+    args: &SetupAgentArgs,
+) -> Result<String> {
+    let payload = build_devin_payload(
+        host,
+        emit_root,
+        &args.server_url,
+        args.auth_token.as_deref(),
+    );
     let serialized =
         serde_json::to_string_pretty(&payload).context("serializing Devin hook config")?;
     let mut out = String::new();
@@ -422,6 +457,7 @@ fn render_devin_setup_output(emit_root: &Path, args: &SetupAgentArgs) -> Result<
 }
 
 fn emit_other(
+    host: &HostEnv,
     emit_root: &Path,
     label: &str,
     args: &SetupAgentArgs,
@@ -438,7 +474,7 @@ fn emit_other(
         println!("#       value you passed via --auth-token (not echoed).");
     }
     println!();
-    for path in event_script_paths(emit_root, event_lists) {
+    for path in event_script_paths(host, emit_root, event_lists) {
         println!("- {}", path.display());
     }
     println!();
@@ -446,11 +482,15 @@ fn emit_other(
     println!("Also run `sessionmunch install-mcp --client {label}` to wire MCP separately.");
 }
 
-fn event_script_paths(emit_root: &Path, event_lists: &[&[(&str, &str)]]) -> Vec<PathBuf> {
+fn event_script_paths(
+    host: &HostEnv,
+    emit_root: &Path,
+    event_lists: &[&[(&str, &str)]],
+) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     for events in event_lists {
         for (_, script) in *events {
-            let script = hook_script_for_current_platform(script);
+            let script = hook_script_for_current_platform(host, script);
             let path = emit_root.join(script.as_ref());
             // Two events may share one script (Kimi Code's PostToolUseFailure
             // reuses post-tool-use); list each file once.
@@ -615,7 +655,7 @@ mod tests {
             source: Some(tmp.path().join("source")),
         };
 
-        run(&Config::default(), args).unwrap();
+        run(&Config::default(), &HostEnv::default(), args).unwrap();
 
         assert!(!tmp.path().join("hooks").exists());
     }
@@ -632,7 +672,7 @@ mod tests {
         };
         let emit_root = Path::new("/host/hooks/devin");
 
-        let rendered = render_devin_setup_output(emit_root, &args).unwrap();
+        let rendered = render_devin_setup_output(&HostEnv::default(), emit_root, &args).unwrap();
 
         assert!(rendered.contains("# Devin CLI"));
         assert!(rendered.contains("~/.devin/hooks.v1.json"));
@@ -693,7 +733,7 @@ mod tests {
             source: Some(source_root),
         };
 
-        run(&Config::default(), args).unwrap();
+        run(&Config::default(), &HostEnv::default(), args).unwrap();
 
         assert!(dest.join("devin/session-start.sh").exists());
         assert!(dest.join("_lib.sh").exists());
@@ -702,7 +742,7 @@ mod tests {
     #[test]
     fn manual_script_paths_use_agent_specific_events() {
         let root = Path::new("/hooks/gemini-cli");
-        let paths = event_script_paths(root, &[GEMINI_PROFILE.events]);
+        let paths = event_script_paths(&HostEnv::default(), root, &[GEMINI_PROFILE.events]);
         let rendered = paths
             .iter()
             .map(|path| path.to_string_lossy())
@@ -730,7 +770,7 @@ mod tests {
         // PostToolUseFailure; the failure entry reuses post-tool-use.sh,
         // so the script list carries nine unique files for ten events.
         let root = Path::new("/hooks/kimi-code");
-        let paths = event_script_paths(root, &[&KIMI_CODE_EVENTS]);
+        let paths = event_script_paths(&HostEnv::default(), root, &[&KIMI_CODE_EVENTS]);
         let rendered = paths
             .iter()
             .map(|path| path.to_string_lossy())
@@ -765,7 +805,7 @@ mod tests {
     #[test]
     fn kiro_cli_manual_script_paths_cover_v2_event_set() {
         let root = Path::new("/hooks/kiro-cli");
-        let v2_paths = event_script_paths(root, &[&KIRO_CLI_V2_EVENTS]);
+        let v2_paths = event_script_paths(&HostEnv::default(), root, &[&KIRO_CLI_V2_EVENTS]);
         let rendered = v2_paths
             .iter()
             .map(|path| path.to_string_lossy())
@@ -793,12 +833,12 @@ mod tests {
     #[test]
     fn kiro_cli_manual_script_paths_cover_v3_event_set() {
         let root = Path::new("/hooks/kiro-cli");
-        let paths = event_script_paths(root, &[&KIRO_CLI_V3_EVENTS]);
+        let paths = event_script_paths(&HostEnv::default(), root, &[&KIRO_CLI_V3_EVENTS]);
         assert_eq!(KIRO_CLI_V3_EVENTS.len(), 5);
         assert_eq!(paths.len(), 5);
         assert_eq!(
             paths,
-            event_script_paths(root, &[&KIRO_CLI_V2_EVENTS]),
+            event_script_paths(&HostEnv::default(), root, &[&KIRO_CLI_V2_EVENTS]),
             "v2 and v3 use different trigger names but the same bounded script bundle"
         );
     }

@@ -213,10 +213,116 @@ pub enum Command {
     /// the root bearer token and `[auth].token_pepper`.
     #[command(name = "api-key")]
     ApiKey(ApiKeyArgs),
+    /// Detect and import a legacy ai-memory installation into SessionMunch.
+    /// Read-only detection by default; use `--apply` to copy pages.
+    /// Source files are never modified — integrity is verified via SHA-256.
+    #[command(name = "legacy-import")]
+    LegacyImport(LegacyImportArgs),
     /// Print a shell-completion script to stdout. Generated from this
     /// binary's own command tree, so it never drifts from the real CLI
     /// surface. See `docs/shell-completions.md` for install paths.
     Completions(CompletionsArgs),
+    /// Snapshot perishable native harness transcript stores into hashed,
+    /// content-addressed, read-only artifacts so a future importer can replay
+    /// from the original bytes (North Star §5.9 — P0 "stop losing history").
+    /// Sources are never modified; re-running from an unchanged store writes no
+    /// new blobs. Mirrors the transcript files the existing readers use.
+    #[command(name = "snapshot-harness-history")]
+    SnapshotHarnessHistory(SnapshotHarnessHistoryArgs),
+    /// Import native harness history into the session event ledger.
+    #[command(subcommand)]
+    Import(ImportCommand),
+    /// Search preserved session events (commands, prompts, tool output)
+    /// across every project, machine, and harness.
+    #[command(name = "search-events")]
+    SearchEvents(SearchEventsArgs),
+}
+
+/// `import` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum ImportCommand {
+    /// Import every native session this machine's harness stores changed
+    /// within `--since`, independent of the current directory. Events are
+    /// sanitized, queued in a crash-safe local spool, and delivered to the hub
+    /// idempotently; unsupported or unreadable stores are reported by name.
+    Sessions(ImportSessionsArgs),
+}
+
+/// Arguments for `import sessions`.
+#[derive(Debug, Args)]
+pub struct ImportSessionsArgs {
+    /// How far back to look: `30m`, `12h`, `7d`, `2w`, or `all`.
+    #[arg(long, default_value = "7d")]
+    pub since: String,
+    /// Only import this harness's store: `hermes`, or any `run` harness name
+    /// (`claude`, `codex`, `opencode`, …). Defaults to every known store.
+    #[arg(long)]
+    pub harness: Option<String>,
+    /// Override the home directory that holds the native harness stores.
+    #[arg(long)]
+    pub home: Option<PathBuf>,
+    /// Override the Hermes home (defaults to `<home>/.hermes`).
+    #[arg(long)]
+    pub hermes_home: Option<PathBuf>,
+    /// Count what would be imported without queueing or sending anything.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Emit the report as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for `search-events`.
+#[derive(Debug, Args)]
+pub struct SearchEventsArgs {
+    /// FTS5 query (e.g. `"cargo nextest"` or `deploy AND weakling`).
+    pub query: String,
+    /// Only sessions recorded on this machine (e.g. `sleeper`).
+    #[arg(long)]
+    pub machine: Option<String>,
+    /// Only this harness (e.g. `claude-code`, `codex`, `hermes`).
+    #[arg(long)]
+    pub harness: Option<String>,
+    /// Only events from the last `30m`, `12h`, `7d`, `2w`.
+    #[arg(long)]
+    pub since: Option<String>,
+    /// Restrict to one project (requires the workspace to resolve too).
+    #[arg(long)]
+    pub project: Option<String>,
+    /// Workspace for `--project`. Defaults to `default`.
+    #[arg(long)]
+    pub workspace: Option<String>,
+    /// Order newest first instead of by relevance.
+    #[arg(long)]
+    pub newest: bool,
+    /// Maximum number of hits.
+    #[arg(short = 'n', long, default_value_t = 20)]
+    pub limit: usize,
+    /// Emit results as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for `snapshot-harness-history`.
+#[derive(Debug, Args)]
+pub struct SnapshotHarnessHistoryArgs {
+    /// Only snapshot this harness's store (defaults to every known harness).
+    #[arg(long, value_enum)]
+    pub harness: Option<RunHarnessChoice>,
+    /// Override the native harness home directory (defaults to the OS user
+    /// home, as resolved by the config/runtime environment).
+    #[arg(long)]
+    pub home: Option<PathBuf>,
+    /// Override the harness session-store root (as `run` resolves it).
+    #[arg(long)]
+    pub session_dir: Option<PathBuf>,
+    /// Destination root for the content-addressed snapshot blobs (defaults to
+    /// `<data_dir>/snapshots`).
+    #[arg(long, short = 'o')]
+    pub to: Option<PathBuf>,
+    /// Emit the report as JSON instead of human-readable text.
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for `run`. Wrapper-owned flags must precede `harness`; the
@@ -1244,6 +1350,34 @@ pub struct GenerateAuthTokenArgs {
     /// (256 bits) is plenty for any homelab threat model.
     #[arg(long, default_value_t = 32)]
     pub bytes: usize,
+}
+
+/// Arguments for `legacy-import`.
+#[derive(Debug, Args)]
+pub struct LegacyImportArgs {
+    /// Source legacy ai-memory data directory. Auto-detected from
+    /// `AI_MEMORY_DATA_DIR` env var or default paths when omitted.
+    #[arg(long)]
+    pub path: Option<PathBuf>,
+    /// Workspace name for the imported pages. Defaults to the one
+    /// declared in the source, or `"default"`.
+    #[arg(long)]
+    pub workspace: Option<String>,
+    /// Project name for the imported pages. Defaults to the one
+    /// declared in the source, or the source dir's basename.
+    #[arg(long)]
+    pub project: Option<String>,
+    /// Actually copy pages. Without this flag the command only
+    /// detects and prints an import plan (dry-run).
+    #[arg(long)]
+    pub apply: bool,
+    /// Path for the import manifest.
+    #[arg(long)]
+    pub manifest_out: Option<PathBuf>,
+    /// Create the destination workspace/project directory if it does
+    /// not already exist.
+    #[arg(long)]
+    pub create_destination: bool,
 }
 
 /// Arguments for `init`.

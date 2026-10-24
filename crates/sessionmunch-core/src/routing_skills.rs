@@ -102,6 +102,7 @@ mod tests {
         ("memory_recent", "sessionmunch-retrieval"),
         ("memory_read_page", "sessionmunch-retrieval"),
         ("memory_read_session_observations", "sessionmunch-retrieval"),
+        ("memory_search_events", "sessionmunch-retrieval"),
         ("memory_status", "sessionmunch-retrieval"),
         ("memory_briefing", "sessionmunch-retrieval"),
         ("memory_explore", "sessionmunch-retrieval"),

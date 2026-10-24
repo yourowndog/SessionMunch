@@ -7,14 +7,19 @@
 //! and the FTS-only control in the same test misses it, so the vector
 //! stream is demonstrably the reason.
 //!
-//! `#[ignore]`d like the eval smoke: the ~87 MB model is not in CI.
+//! `#[ignore]`d like the eval smoke: the ~522 MB model is not in CI.
 //! Run after fetching the model (any of these seeds it):
 //!
 //! ```bash
 //! cargo run -p sessionmunch-eval -- retrieval --sample 1 --embeddings local
-//! SESSIONMUNCH_TEST_MODELS_DIR=$PWD/evals/models \
+//! SESSIONMUNCH_TEST_MODELS_DIR=$PWD/evals/models \\
 //!   cargo test -p sessionmunch-consolidate --test local_embeddings -- --ignored
 //! ```
+//!
+//! NOTE: several tests below hardcode `all-MiniLM-L6-v2` and `384` dim to
+//! exercise the EXACT migration path from the v0.1 default.  They will not
+//! pass against the current nomic-embed-text-v1.5 model — keep the old model
+//! files around if you need to re-run the migration smoke tests.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -27,7 +32,7 @@ use tempfile::TempDir;
 
 fn models_root() -> String {
     std::env::var("SESSIONMUNCH_TEST_MODELS_DIR")
-        .expect("set SESSIONMUNCH_TEST_MODELS_DIR to a dir containing all-MiniLM-L6-v2")
+        .expect("set SESSIONMUNCH_TEST_MODELS_DIR to a dir containing a fetched nomic-embed-text-v1.5 or all-MiniLM-L6-v2 model")
 }
 
 async fn wiki_with_local_embedder() -> (

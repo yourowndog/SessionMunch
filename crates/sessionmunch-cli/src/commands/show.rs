@@ -21,6 +21,7 @@ use crate::cli::{
 };
 use crate::commands::{install_instructions, project_registry};
 use crate::config::{Config, DEFAULT_WORKSPACE};
+use crate::host_env::HostEnv;
 use crate::http_client::{ServerEndpoint, get_json};
 
 const PROJECT_MARKERS: [&str; 12] = [
@@ -126,7 +127,7 @@ struct JsonOutput {
 }
 
 /// Pick a local checkout and harness, then delegate to managed `run`.
-pub async fn run(config: &Config, args: ShowArgs) -> Result<i32> {
+pub async fn run(config: &Config, host: &HostEnv, args: ShowArgs) -> Result<i32> {
     if args.json && (args.yolo || args.fresh || !args.native_args.is_empty()) {
         bail!("--json only lists launch options; do not combine it with launch arguments");
     }
@@ -143,7 +144,7 @@ pub async fn run(config: &Config, args: ShowArgs) -> Result<i32> {
         !args.no_scan,
     )
     .await;
-    let harnesses = available_harnesses();
+    let harnesses = available_harnesses(host);
 
     if args.json {
         print_json(&endpoint, &candidates, &harnesses)?;
@@ -204,7 +205,7 @@ pub async fn run(config: &Config, args: ShowArgs) -> Result<i32> {
 
     let (target, workspace, project) = if let Some(name) = new_project {
         let workspace = args.workspace.as_deref().unwrap_or(DEFAULT_WORKSPACE);
-        let target = create_project(&root, &name, workspace, harness)?;
+        let target = create_project(host, &root, &name, workspace, harness)?;
         (target, workspace.to_owned(), name)
     } else {
         let candidate = &candidates[project_index - 1];
@@ -218,6 +219,7 @@ pub async fn run(config: &Config, args: ShowArgs) -> Result<i32> {
 
     crate::commands::run::run_from(
         config,
+        host,
         RunArgs {
             workspace: Some(workspace),
             project: Some(project),
@@ -414,11 +416,11 @@ fn print_json(
     Ok(())
 }
 
-pub(super) fn available_harnesses() -> Vec<RunHarnessChoice> {
+pub(super) fn available_harnesses(host: &HostEnv) -> Vec<RunHarnessChoice> {
     RunHarnessChoice::value_variants()
         .iter()
         .copied()
-        .filter(|choice| crate::commands::run::harness_available(*choice))
+        .filter(|choice| crate::commands::run::harness_available(host, *choice))
         .collect()
 }
 
@@ -538,13 +540,14 @@ fn marker_body(workspace: &str, project: &str) -> String {
 }
 
 fn create_project(
+    host: &HostEnv,
     parent: &Path,
     name: &str,
     workspace: &str,
     harness: RunHarnessChoice,
 ) -> Result<PathBuf> {
     create_project_with_initializer(parent, name, workspace, |staging| {
-        install_context_files(harness, staging)
+        install_context_files(host, harness, staging)
     })
 }
 
@@ -588,7 +591,7 @@ fn create_project_with_initializer(
     Ok(target)
 }
 
-fn install_context_files(harness: RunHarnessChoice, path: &Path) -> Result<()> {
+fn install_context_files(host: &HostEnv, harness: RunHarnessChoice, path: &Path) -> Result<()> {
     let (instruction, agent, skill_root) = match harness {
         RunHarnessChoice::Claude => (
             "CLAUDE.md",
@@ -601,16 +604,19 @@ fn install_context_files(harness: RunHarnessChoice, path: &Path) -> Result<()> {
             path.join(".agents/skills"),
         ),
     };
-    install_instructions::run_quiet(InstallInstructionsArgs {
-        target: Some(path.join(instruction)),
-        print: false,
-        no_skills: false,
-        compact: false,
-        skills_scope: None,
-        skills_agent: Some(agent),
-        skills_target_dir: Some(skill_root),
-        skills_force: false,
-    })
+    install_instructions::run_quiet(
+        host,
+        InstallInstructionsArgs {
+            target: Some(path.join(instruction)),
+            print: false,
+            no_skills: false,
+            compact: false,
+            skills_scope: None,
+            skills_agent: Some(agent),
+            skills_target_dir: Some(skill_root),
+            skills_force: false,
+        },
+    )
 }
 
 fn humanize_age(timestamp: Option<&str>) -> String {

@@ -203,9 +203,9 @@ crates/
 ├── sessionmunch-workstream/  read-only native transcript + launch adapters (`sessionmunch run`).
 └── sessionmunch-cli/         `sessionmunch` binary entry point + thin HTTP subcommands.
 evals/                     live A/B harness; workspace member, not shipped.
-companions/sessionmunch-importer/  standalone OMC + external-conversation importer; NOT a root
+companions/ai-memory-importer/  standalone OMC + external-conversation importer; NOT a root
                            workspace member — build/test it with
-                           `--manifest-path companions/sessionmunch-importer/Cargo.toml`.
+                           `--manifest-path companions/ai-memory-importer/Cargo.toml`.
 hooks/                     per-agent lifecycle hook bundles (shell/native).
 bin/                       host wrapper scripts (`sessionmunch`, `deploy`, `release`).
 docker/                    Dockerfile, compose files, TLS proxy templates.
@@ -278,7 +278,7 @@ no tiers.
   `static/tailwind.css`; commit the result. CI regenerates it on Linux and
   fails if the committed file is stale, so nothing else needs the download.
 - Run the companion importer separately:
-  `cargo test --manifest-path companions/sessionmunch-importer/Cargo.toml`
+  `cargo test --manifest-path companions/ai-memory-importer/Cargo.toml`
   (plus fmt/clippy on the same manifest). Root `--workspace` commands do
   not cover it.
 
@@ -353,7 +353,10 @@ These are carved into the architecture; each traces to a documented
 prior-art bug (see `docs/ARCHITECTURE.md` and `docs/issues-*.md`):
 
 1. **One config-read path.** `Config::load()` runs once at startup; never
-   call `std::env::var` outside it.
+   call `std::env::var` outside it. Host facts the CLI needs (harness config
+   homes, `$HOME`, `PATH`, ...) come from the `HostEnv` snapshot taken once in
+   `sessionmunch_cli::run` and passed down; library crates take values from
+   their callers. `clippy.toml` `disallowed-methods` enforces this.
 2. **Single-writer SQLite actor.** All writes go through one `mpsc`
    channel to one dedicated thread (`WriterHandle`). Batch hot-path work
    into one command/transaction; avoid N+1 reads.
@@ -520,7 +523,7 @@ Additional boundary rules:
 - **MCP tool surface changes** require updating `MEMORY_INSTRUCTIONS`,
   `sessionmunch_core::SNIPPET_BODY`, README/docs tool references, and the
   regression tests asserting every tool appears in both prompt surfaces.
-  The tool count is currently 19 (see `docs/ARCHITECTURE.md`).
+  The tool count is currently 20 (see `docs/ARCHITECTURE.md`).
 - **Semantic versioning:** patch = fixes; minor = additive (new CLI
   subcommands, MCP tools, config keys, a new agent harness or LLM
   provider); major = breaking (on-disk format without migration, removed

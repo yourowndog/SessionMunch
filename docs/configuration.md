@@ -47,21 +47,30 @@ Environment variable overrides:
 ---
 ## Embeddings & Vector Search
 
-By default, SessionMunch operates in zero-egress local mode using fast in-process FTS5 full-text search, graph traversals, and entity indexing. When embeddings are configured, hybrid Reciprocal Rank Fusion (RRF) combines text, graph, and semantic scores.
+By default, SessionMunch uses **best-effort local embeddings** with Nomic Embed Text v1.5 in-process. If the local model cannot be fetched or loaded, the server degrades to the non-vector retrieval path rather than refusing to start. FTS5, entities, graph traversal, and passage retrieval remain available.
+
+Set the provider explicitly when you want different behavior:
 
 ```toml
-# Options: "none" (default), "openai", "voyage", "google", "openai-compat"
-embedding_provider = "none"
+# Unset = best-effort local Nomic embeddings (default)
+# embedding_provider = "local"   # require local embeddings; load failure is an error
+# embedding_provider = "none"    # disable vector inference entirely
+# embedding_provider = "openai"
+# embedding_provider = "voyage"
+# embedding_provider = "google"
+# embedding_provider = "openai-compat"
 
-# Model name matching your provider (e.g. text-embedding-3-small)
+# Model name matching your provider (hosted/self-hosted examples)
 # embedding_model = "text-embedding-3-small"
 
-# Embedding dimension (must match model dimension)
+# Embedding dimension (must match the configured model)
 # embedding_dim = 1536
 
 # Base URL for openai-compat (e.g. Ollama, vLLM, LM Studio)
 # embedding_base_url = "http://127.0.0.1:11434/v1"
 ```
+
+When vectors are active, Reciprocal Rank Fusion (RRF) combines semantic results with the lexical/entity/graph retrieval streams. Setting `embedding_provider = "none"` gives you a zero-inference retrieval path; it does **not** disable SessionMunch.
 
 For hardware-specific recommendations and copy-paste profiles, consult [`docs/models.md`](models.md).
 
@@ -85,17 +94,22 @@ max_output_tokens = 32000
 
 ---
 
-## Reranking (JEV & LLM)
+## Reranking
 
-SessionMunch supports optional post-retrieval reranking to refine hybrid candidate lists.
+Reranking happens **after** SessionMunch has already retrieved and fused a bounded candidate set. It can improve the order of those results, but it never owns storage or baseline recall.
+
+### v0.1: optional LLM reranking
 
 ```toml
-# Options: "none" (default), "jev", "llm"
-# reranker = "jev"
+# Off by default. Current supported value: "llm".
+# reranker = "llm"
 ```
 
-- **JEV Reranker:** Evaluates candidates via fast JEV scoring with zero external data leakage or deterministic fail-open fallback.
-- **LLM Reranker:** Calls the configured LLM provider to score snippet relevance. Note that this sends candidate titles and excerpts to the configured LLM provider.
+With `reranker = "llm"`, SessionMunch sends the bounded query plus candidate titles/snippets to the configured LLM provider for one final relevance pass. Any provider error, timeout, malformed response, or concurrency saturation preserves the normal pre-rerank order.
+
+### Planned: JEV reranking
+
+The codebase already contains the generic reranker boundary and JEV-oriented fail-open benchmark scaffolding, but **`reranker = "jev"` is not a valid v0.1 configuration option**. JEV is planned as an optional post-retrieval reranker in a subsequent release. The intended contract is the same: SessionMunch performs storage and recall; JEV judges a small shortlist; failure leaves baseline ranking untouched.
 
 ---
 

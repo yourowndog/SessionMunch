@@ -788,6 +788,35 @@ whose manifests were removed by hand. If `reindex` reports a missing manifest,
 start the server once against that data directory and let the backfill write
 it, then stop the server and reindex again.
 
+## Migration rollback and restore
+
+Schema migrations run forward automatically on server start (refinery). There
+is no in-place "undo" of an already-applied migration: the rollback boundary is
+the last backup you took *before* the upgrade. If a freshly migrated store must
+return to an earlier schema (for example, downgrading from a build that applied
+V65), restore the pre-upgrade backup and run the older binary. The restore
+process below is the supported path.
+
+**V65 (`session_owned_events_and_provenance`) — North Star P1.** A forward-only
+promotion that is safe to ship because it preserves old data:
+
+- The `sessions.agent_kind` CHECK enum is dropped and the column carries the
+  same values as free text, so every existing harness string is read intact.
+  This is intentionally the **last** `sessions` table rebuild of that class —
+  future harnesses need no schema change.
+- `project_id` becomes nullable; existing non-NULL rows are unchanged.
+- New provenance columns (`native_session_id`, `machine_id`, `git_root`,
+  `git_branch`, `commit_at_start`, `source`, `import_cursor`) are additive and
+  NULL for existing rows.
+- A new `session_events` ledger table and its FTS index are additive. Because
+  session events cascade-delete with sessions, it was added to the same
+  `--compact` FTS-reclaim list as the other session-scoped indexes.
+
+Rolling this back to the pre-V65 schema means restoring the pre-upgrade backup
+(`sessionmunch backup --to` before upgrading, then `restore --from` after
+stopping the server). No migration in this migration loses rows readably; the
+only reason to restore is an unrelated upgrade failure.
+
 ## Operator workflows
 
 ### "Fresh start" (wipe everything)

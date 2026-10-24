@@ -21,6 +21,20 @@ ignore = [
     # embeddings); no runtime code ships from it. Revisit when candle
     # replaces it upstream.
     "RUSTSEC-2024-0436",
+    # RUSTSEC-2026-0367/0368/0369: `zip` extraction (`ZipArchive::extract`,
+    # `ZipStreamReader::extract`) mishandles SUID bits and symlinks. Pulled
+    # only by candle-core 0.11 (latest), which pins zip ^8 and never calls
+    # either extract function: it opens `.npz`/`.pth` archives entry by
+    # entry, and SessionMunch loads models from safetensors only. Remove
+    # when candle moves to zip >= 9.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
+    # RUSTSEC-2024-0449: `unsafe-libyaml` is unmaintained, via the deprecated
+    # `serde_yaml` used for wiki frontmatter. Unmaintained, not a known
+    # vulnerability, and no drop-in successor is chosen yet; replacing the
+    # YAML parser is tracked as follow-up work rather than a release-day swap.
+    "RUSTSEC-2024-0449",
 ]
 
 [licenses]
