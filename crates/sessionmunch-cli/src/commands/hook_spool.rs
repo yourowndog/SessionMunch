@@ -1307,6 +1307,91 @@ mod tests {
         assert!(absent_bearer.is_none());
     }
 
+    /// The script hooks in `hooks/_lib.sh` write and read this spool with
+    /// their own JSON code. Run that code and check both directions, so a
+    /// change on either side that the other can no longer read fails here.
+    #[cfg(unix)]
+    mod shell_format {
+        use super::*;
+        use std::process::Command;
+
+        const BODY: &str = "{\"prompt\":\"say \\\"hi\\\"\\n\\tthen a \\\\ and é\"}";
+
+        fn lib() -> PathBuf {
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../hooks/_lib.sh")
+        }
+
+        fn shell(data_dir: &Path, script: &str, args: &[&str]) -> std::process::Output {
+            let output = Command::new("sh")
+                .arg("-c")
+                .arg(format!(". \"$0\"; {script}"))
+                .arg(lib())
+                .args(args)
+                .env("SESSIONMUNCH_DATA_DIR", data_dir)
+                .env("SESSIONMUNCH_AUTH_TOKEN", "sh-token")
+                .output()
+                .expect("run sh");
+            assert!(output.status.success(), "{output:?}");
+            output
+        }
+
+        #[test]
+        fn a_shell_spooled_event_parses_as_a_spool_entry() {
+            let tmp = tempfile::tempdir().unwrap();
+            let url = "http://127.0.0.1:1/hook?event=stop&agent=cursor";
+            shell(
+                tmp.path(),
+                "sessionmunch_spool_event \"$1\" \"$2\"",
+                &[url, BODY],
+            );
+
+            let (files, unreadable) = list_entries(&spool_dir(tmp.path())).unwrap();
+            assert_eq!((files.len(), unreadable), (1, 0));
+            let name = files[0].file_name().unwrap().to_str().unwrap();
+            let created = created_ms_from_name(name).expect("the drain accepts the file name");
+            let entry: SpoolEntry =
+                serde_json::from_slice(&std::fs::read(&files[0]).unwrap()).unwrap();
+            assert_eq!(entry.body, BODY, "the body survives escaping byte for byte");
+            assert!(
+                entry.url.starts_with(&format!("{url}&ingest_key=sh")),
+                "{}",
+                entry.url
+            );
+            assert_eq!(entry.created_ms, created);
+            assert_eq!(entry.auth_mode, AuthMode::Static);
+            assert_eq!(entry.token.as_deref(), Some("sh-token"));
+            assert_eq!(entry.attempts, 0);
+            assert!(!body_is_malformed(&entry));
+        }
+
+        #[test]
+        fn a_rust_spooled_event_reads_back_in_the_shell() {
+            let tmp = tempfile::tempdir().unwrap();
+            let spool = spool_dir(tmp.path());
+            let url = "http://127.0.0.1:1/hook?event=stop&agent=cursor&ingest_key=k1";
+            enqueue(
+                &spool,
+                &entry_for(url.into(), BODY.into(), Some("rs-token"), false),
+            )
+            .unwrap();
+            let (files, _) = list_entries(&spool).unwrap();
+            let file = files[0].to_str().unwrap();
+
+            let field = |key: &str| {
+                let out = shell(
+                    tmp.path(),
+                    "sessionmunch_json_field \"$1\" \"$2\"",
+                    &[key, file],
+                );
+                String::from_utf8(out.stdout).unwrap()
+            };
+            assert_eq!(field("url"), url);
+            assert_eq!(field("body"), BODY);
+            assert_eq!(field("token"), "rs-token");
+            assert_eq!(field("auth_mode"), "static");
+        }
+    }
+
     #[test]
     fn enqueue_then_list_round_trips() {
         let tmp = tempfile::tempdir().unwrap();
