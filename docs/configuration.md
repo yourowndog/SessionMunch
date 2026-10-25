@@ -113,6 +113,13 @@ ai_summary = true
 Set `SESSIONMUNCH_SESSION_CARDS__AI_SUMMARY=false` (or `ai_summary = false`)
 to keep cards deterministic-only while still using a provider elsewhere.
 
+The reverse also works. A provider normally also runs LLM consolidation at
+every PreCompact / PostCompaction, which replaces that session's page with a
+consolidated page that cards never overwrite. To use the provider only for
+card summaries, set `SESSIONMUNCH_CONSOLIDATE_ON_COMPACT=false` (or top-level
+`consolidate_on_compact = false`); compaction then writes the rule-based
+checkpoint. Manual `memory_consolidate` is unaffected.
+
 ---
 
 ## Reranking

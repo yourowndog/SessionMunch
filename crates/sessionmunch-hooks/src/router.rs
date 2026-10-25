@@ -147,6 +147,11 @@ pub struct HookState {
     /// session close stays cheap; the LLM checkpoint otherwise happens on
     /// PreCompact and via manual `memory_consolidate`.
     pub consolidate_on_session_end: bool,
+    /// `SESSIONMUNCH_CONSOLIDATE_ON_COMPACT` (default true): when false,
+    /// PreCompact / PostCompaction write the rule-based checkpoint even with
+    /// a `consolidator` present, so a provider kept for session-card AI
+    /// summaries does not rewrite session pages at every compaction.
+    pub consolidate_on_compact: bool,
     /// Coalescing wake-up for the durable SessionEnd consolidation worker.
     /// The database is the queue; notifications only reduce pickup latency.
     pub session_consolidation_notify: Option<Arc<tokio::sync::Notify>>,

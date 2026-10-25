@@ -104,6 +104,7 @@ async fn make_state(tmp: &TempDir) -> HookState {
         project_cache: Arc::new(tokio::sync::Mutex::new(ProjectCacheStore::default())),
         active_project: ActiveProject::new(),
         consolidate_on_session_end: false,
+        consolidate_on_compact: true,
         session_consolidation_notify: None,
         capture_assistant_enabled: false,
         subagent_sessions: Arc::new(tokio::sync::Mutex::new(SubagentSessionSet::default())),
@@ -155,6 +156,76 @@ async fn seed_checkpoint_observation(state: &HookState, title: &str) -> SessionI
         .await
         .unwrap();
     session_id
+}
+
+/// Counts provider calls; any call is a failure for the test using it.
+struct CountingLlm(Arc<std::sync::atomic::AtomicUsize>);
+
+#[async_trait::async_trait]
+impl LlmProvider for CountingLlm {
+    fn name(&self) -> &'static str {
+        "counting"
+    }
+    fn model(&self) -> &str {
+        "counting-test"
+    }
+    async fn complete(&self, _request: ChatRequest) -> LlmResult<ChatResponse> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err(ContextOverflowLlm.overflow())
+    }
+    async fn complete_structured_raw(
+        &self,
+        _request: ChatRequest,
+        _schema: serde_json::Value,
+    ) -> LlmResult<serde_json::Value> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err(ContextOverflowLlm.overflow())
+    }
+}
+
+/// With `consolidate_on_compact` off, a configured provider (kept for
+/// session-card AI summaries) is not called at compaction, and the
+/// checkpoint is the rule-based page a zero-LLM install writes.
+#[tokio::test]
+async fn compaction_checkpoint_skips_the_provider_when_consolidate_on_compact_is_off() {
+    let tmp = TempDir::new().unwrap();
+    let mut state = make_state(&tmp).await;
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    state.consolidator = Some(Arc::new(Consolidator::new(
+        state.reader.clone(),
+        state.writer.clone(),
+        state.wiki.clone(),
+        Arc::new(CountingLlm(calls.clone())),
+        state.workspace_id,
+        state.project_id,
+    )));
+    state.consolidate_on_compact = false;
+
+    let session_id = seed_checkpoint_observation(&state, "rule-based-only-checkpoint").await;
+
+    consolidate_or_synth(
+        &state,
+        session_id,
+        state.workspace_id,
+        state.project_id,
+        AgentKind::ClaudeCode,
+        "pre-compact",
+        sessionmunch_core::ActorContext::anonymous(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "the provider must not be called at compaction"
+    );
+    let path = sessionmunch_core::PagePath::new(format!("sessions/{session_id}.md")).unwrap();
+    let page = state
+        .wiki
+        .read_page(state.workspace_id, state.project_id, &path)
+        .expect("rule-based checkpoint page must exist");
+    assert!(page.body.contains("rule-based-only-checkpoint"));
 }
 
 /// Regression: a configured-but-failing LLM used to make PreCompact

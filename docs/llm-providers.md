@@ -18,7 +18,10 @@ With a provider, session cards also gain a cited "AI summary" section
 (outcome, decisions, retractions, next step) from a bounded background tick;
 set `[session_cards] ai_summary = false` to opt out. Unchanged sessions are
 served from a job cache and make no provider calls. See
-[configuration.md](configuration.md#session-cards).
+[configuration.md](configuration.md#session-cards). To keep a provider for
+those summaries without LLM consolidation at every compaction, set
+`SESSIONMUNCH_CONSOLIDATE_ON_COMPACT=false`; the compaction checkpoint then
+stays rule-based.
 When the session-end opt-in is enabled, provider work is durably queued after
 those deterministic writes and handled by one bounded server worker, so hook
 drain latency does not cancel it. Failed jobs retry with backoff and survive a

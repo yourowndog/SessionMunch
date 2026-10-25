@@ -992,8 +992,12 @@ pub(super) async fn consolidate_or_synth(
     checkpoint_label: &str,
     actor: sessionmunch_core::ActorContext,
 ) -> anyhow::Result<()> {
-    let fallback_from_llm = state.consolidator.is_some();
-    if let Some(c) = state.consolidator.as_ref() {
+    let consolidator = state
+        .consolidator
+        .as_ref()
+        .filter(|_| state.consolidate_on_compact);
+    let fallback_from_llm = consolidator.is_some();
+    if let Some(c) = consolidator {
         let result = c
             // The hook path has no per-call override, so `None` lets the
             // project's standing `_prompts/consolidation.md` preferences
