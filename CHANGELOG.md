@@ -137,6 +137,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#t_c51f1a51).
 
 ### Fixed
+- Hook events in the session-event ledger are now dated by when the client captured them, not when their spooled batch reached the server. Previously every event in a drained batch shared one arrival timestamp, so a session's timeline collapsed. The drain sends each entry's enqueue time as a `captured_ms` query param; the server accepts it within the spool's 7-day window and up to 5 minutes ahead of its own clock, otherwise it keeps arrival time. Older clients are unaffected.
 - Codex history import now keeps code-mode tool output. Codex records it as a list of content parts, which the importer read as empty and dropped without a loss note. Text parts are imported; image parts are excluded and noted. Codex tool calls and results also keep their `call_id`, so a result can be matched to its call. (#20)
 - `snapshot-harness-history --json` printed a plain-text summary line after
   the JSON report, so its output could not be parsed. (#18)
