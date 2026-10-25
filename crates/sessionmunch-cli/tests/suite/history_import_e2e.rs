@@ -214,3 +214,86 @@ fn imported_transcript_answers_when_did_we_run_x() {
     ]));
     assert_eq!(elsewhere.as_array().unwrap().len(), 0);
 }
+
+/// A snapshot outlives its live store: once the native transcript is gone,
+/// `import sessions --from-snapshots` still delivers it, and the payload the
+/// import cut to a head and tail comes back whole from `artifact get`.
+#[test]
+fn snapshot_imports_after_the_live_store_is_gone_and_artifacts_read_back() {
+    let tmp = tempfile::tempdir().unwrap();
+    let hub_data = tmp.path().join("hub");
+    let node_data = tmp.path().join("node");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    write_claude_transcript(&home);
+    let big_output = format!("{PROBE} {}", "x".repeat(40 * 1024));
+    let transcript = home.join(format!(
+        ".claude/projects/-work-probe-repo/{NATIVE_ID}.jsonl"
+    ));
+    let mut body = std::fs::read_to_string(&transcript).unwrap();
+    body.push_str(&format!(
+        "{}\n",
+        serde_json::json!({
+            "type": "user", "sessionId": NATIVE_ID, "cwd": "/work/probe-repo",
+            "uuid": "u2", "timestamp": "2026-10-19T00:00:02Z",
+            "message": { "role": "user", "content": [
+                { "type": "tool_result", "tool_use_id": "toolu_1", "content": big_output }
+            ]}
+        })
+    ));
+    std::fs::write(&transcript, body).unwrap();
+    let (_hub, url) = start_hub(&hub_data, &home);
+
+    run_json(child(&node_data, &home, &url).args([
+        "snapshot-harness-history",
+        "--harness",
+        "claude",
+        "--json",
+    ]));
+    std::fs::remove_dir_all(home.join(".claude")).unwrap();
+
+    let imported = run_json(child(&node_data, &home, &url).args([
+        "import",
+        "sessions",
+        "--from-snapshots",
+        "--since",
+        "all",
+        "--harness",
+        "claude",
+        "--json",
+    ]));
+    assert_eq!(imported["harnesses"][0]["sessions_found"], 1, "{imported}");
+    assert_eq!(
+        imported["harnesses"][0]["artifacts_uploaded"], 1,
+        "{imported}"
+    );
+    let leftovers: Vec<_> = std::fs::read_dir(node_data.join("history-import"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("snapshot-home")
+        })
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "the staged home is removed: {leftovers:?}"
+    );
+
+    let hits = run_json(child(&node_data, &home, &url).args(["search-events", PROBE, "--json"]));
+    let digest = hits
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|hit| hit["metadata"]["artifact_sha256"].as_str())
+        .unwrap_or_else(|| panic!("the cut event names its artifact: {hits}"))
+        .to_owned();
+    let output = child(&node_data, &home, &url)
+        .args(["artifact", "get", &digest])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), big_output);
+}

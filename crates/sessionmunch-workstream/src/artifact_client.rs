@@ -15,6 +15,7 @@
 
 use crate::artifact::{ARTIFACTS_PATH, ArtifactReceipt, ArtifactUpload};
 use reqwest::Client;
+use sha2::Digest as _;
 
 /// Upper bound on raw artifact bytes the client will even attempt to ship.
 /// Matches the Hub's server-side cap so an oversized payload is refused
@@ -164,6 +165,55 @@ impl ArtifactClient {
             _ => Err(ArtifactClientError::Integrity {
                 status,
                 message: trimmed,
+            }),
+        }
+    }
+
+    /// Fetch one artifact's full bytes by digest. A digest the hub does not
+    /// hold is `Ok(None)`; bytes that do not hash to the digest are refused.
+    ///
+    /// # Errors
+    /// [`ArtifactClientError::Unauthorized`] (401/403),
+    /// [`ArtifactClientError::Rejected`] (other 4xx, such as a malformed
+    /// digest), [`ArtifactClientError::Integrity`] (5xx, or a body that fails
+    /// the hash check), and [`ArtifactClientError::Transport`].
+    pub async fn download(&self, digest: &str) -> Result<Option<Vec<u8>>, ArtifactClientError> {
+        let url = format!("{}/{digest}", self.upload_url());
+        let mut builder = self.client.get(&url);
+        if let Some(token) = &self.token {
+            builder = builder.bearer_auth(token);
+        }
+        let transport = |e: reqwest::Error| ArtifactClientError::Transport {
+            url: url.clone(),
+            message: format!("fetch {url}: {e}"),
+        };
+        let response = builder.send().await.map_err(transport)?;
+        let status = response.status().as_u16();
+        if status == 404 {
+            return Ok(None);
+        }
+        let body = response.bytes().await.map_err(transport)?;
+        let message = || String::from_utf8_lossy(&body).chars().take(512).collect();
+        match status {
+            200 => {
+                let computed = format!("{:x}", sha2::Sha256::digest(&body));
+                if computed == digest {
+                    Ok(Some(body.to_vec()))
+                } else {
+                    Err(ArtifactClientError::Integrity {
+                        status,
+                        message: format!("body hashes to {computed}, not {digest}"),
+                    })
+                }
+            }
+            401 | 403 => Err(ArtifactClientError::Unauthorized { message: message() }),
+            400..=499 => Err(ArtifactClientError::Rejected {
+                status,
+                message: message(),
+            }),
+            _ => Err(ArtifactClientError::Integrity {
+                status,
+                message: message(),
             }),
         }
     }

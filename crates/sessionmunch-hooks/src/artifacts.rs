@@ -20,10 +20,10 @@
 //! - The store root derives from the configured data dir (a hub owns the
 //!   authoritative artifact store); the caller passes no path.
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use serde::Serialize;
 use sessionmunch_core::{AuthLevel, Capability};
@@ -49,6 +49,10 @@ pub struct ArtifactState {
 pub fn artifacts_router(state: ArtifactState) -> Router {
     Router::new()
         .route(ARTIFACTS_PATH, post(upload_artifact))
+        .route(
+            &format!("{ARTIFACTS_PATH}/{{digest}}"),
+            get(download_artifact),
+        )
         .with_state(state)
 }
 
@@ -83,6 +87,32 @@ fn authorize(
         };
         api_failure(status, failure.message())
     })
+}
+
+/// `GET {ARTIFACTS_PATH}/{digest}`: the full bytes of a stored artifact, so
+/// an event whose inline content was cut to a head and tail can be read
+/// whole. The store re-hashes the bytes against the digest before serving.
+async fn download_artifact(
+    State(state): State<ArtifactState>,
+    level: Option<Extension<AuthLevel>>,
+    Path(digest): Path<String>,
+) -> Response {
+    if let Err(response) = authorize(level, Capability::NormalRead) {
+        return response.into_response();
+    }
+    match state.store.retrieve(&digest) {
+        Ok(Some(content)) => (
+            StatusCode::OK,
+            [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+            content,
+        )
+            .into_response(),
+        Ok(None) => error(StatusCode::NOT_FOUND, format!("no artifact {digest}")),
+        Err(ArtifactError::InvalidDigest { digest, .. }) => {
+            error(StatusCode::BAD_REQUEST, format!("invalid digest {digest}"))
+        }
+        Err(failure) => error(StatusCode::INTERNAL_SERVER_ERROR, failure.to_string()),
+    }
 }
 
 /// `POST {ARTIFACTS_PATH}`
