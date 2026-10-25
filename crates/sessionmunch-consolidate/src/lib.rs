@@ -70,12 +70,12 @@ pub use embed::{
 pub use experience::{EXPERIENCE_SYSTEM_PROMPT, ExperienceConfig, run_experience_review};
 pub use lint::{LintError, LintFinding, LintOptions, LintReport, run_lint, stale_days_for};
 pub use session_cards::{
-    CARDS_PER_TICK, SESSION_CARD_TICK_INTERVAL, SessionCardTick, run_session_card_tick,
-    session_card_page,
+    CARDS_PER_TICK, SESSION_CARD_CATCH_UP_PAUSE, SESSION_CARD_TICK_INTERVAL, SessionCardTick,
+    run_session_card_tick, session_card_page,
 };
 pub use session_summary::{
-    SESSION_SUMMARY_TICK_INTERVAL, SUMMARIES_PER_TICK, SessionSummaryTick, SummaryBudgets,
-    run_session_summary_tick,
+    SESSION_SUMMARY_CATCH_UP_PAUSE, SESSION_SUMMARY_TICK_INTERVAL, SUMMARIES_PER_TICK,
+    SessionSummaryTick, SummaryBudgets, run_session_summary_tick,
 };
 pub use sweep::{
     DEFAULT_OBSERVATION_PRUNE_BATCH, EvictedPage, ObservationRetention, SweepError, SweepReport,

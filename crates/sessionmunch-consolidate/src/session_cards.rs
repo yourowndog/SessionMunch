@@ -32,6 +32,10 @@ use tracing::{debug, warn};
 pub const CARDS_PER_TICK: usize = 25;
 /// How often the server runs the card tick while maintenance is enabled.
 pub const SESSION_CARD_TICK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+/// Pause between ticks while a backlog remains (the last tick filled its
+/// batch). A large import or a builder bump then drains in minutes instead
+/// of one batch a minute, while hooks still interleave on the writer.
+pub const SESSION_CARD_CATCH_UP_PAUSE: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Most transcript events one card reads. A longer session's card is built
 /// from its latest events and says so.
@@ -263,6 +267,7 @@ pub struct SessionCardTick {
 /// make one wiki commit. Ticks walk the due set like a ring, so a session
 /// whose card keeps failing cannot hold up the rest. Imported sessions get
 /// their page here, off the ingest path; SessionEnd writes its own card.
+/// Up to `lanes` cards build at once; each writes its own page.
 ///
 /// # Errors
 /// Propagates a failure of the due-set query; per-card failures are logged
@@ -272,7 +277,10 @@ pub async fn run_session_card_tick(
     wiki: &Wiki,
     after: Option<SessionId>,
     limit: usize,
+    lanes: usize,
 ) -> StoreResult<SessionCardTick> {
+    use futures_util::StreamExt as _;
+
     let due = reader
         .session_cards_due(CARD_BUILDER_VERSION, None, after, limit)
         .await?;
@@ -281,8 +289,11 @@ pub async fn run_session_card_tick(
         next_after: (due.len() == limit).then(|| due.last().copied()).flatten(),
         ..SessionCardTick::default()
     };
-    for id in due {
-        match refresh_one(wiki, reader, id).await {
+    let mut results = futures_util::stream::iter(due)
+        .map(|id| async move { (id, refresh_one(wiki, reader, id).await) })
+        .buffer_unordered(lanes.max(1));
+    while let Some((id, result)) = results.next().await {
+        match result {
             Ok(true) => tick.written += 1,
             Ok(false) => {}
             Err(error) => {

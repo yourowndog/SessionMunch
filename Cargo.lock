@@ -3388,6 +3388,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "futures-util",
  "git2",
  "jiff",
  "rusqlite",
