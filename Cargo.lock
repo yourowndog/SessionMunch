@@ -3399,6 +3399,7 @@ dependencies = [
  "sessionmunch-store",
  "sessionmunch-test-support",
  "sessionmunch-wiki",
+ "sessionmunch-workstream",
  "sha2",
  "tempfile",
  "thiserror 2.0.18",
