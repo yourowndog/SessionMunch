@@ -921,14 +921,14 @@ pub async fn summarize(
     let reduce = reduce_job(digest, &run.ctx, &answers, budgets);
     run.report.job_ids.push(reduce.key.id());
     let mut final_fields = cached(cache, &reduce.key, || run.job(&reduce)).await?;
-    // Union rule: a reduce that loses every open step keeps the latest one,
-    // so pending work cannot vanish in the merge.
+    // A reduce that drops the final segment's open step keeps it, so pending
+    // work cannot vanish in the merge. An earlier segment's step is not
+    // restored: the final segment is the latest state and may have finished it.
     if let Some(fields) = final_fields.as_mut()
         && is_none_text(&fields.next_action.text)
         && let Some(open) = answers
-            .iter()
-            .rev()
-            .find(|a| !is_none_text(&a.next_action.text))
+            .last()
+            .filter(|a| !is_none_text(&a.next_action.text))
     {
         fields.next_action = open.next_action.clone();
         run.report.next_action_from_segment = true;
@@ -957,6 +957,13 @@ where
     Ok(answer)
 }
 
+/// The reduce prompt's fixed wording, counted against the segment budget.
+const REDUCE_TEMPLATE_OVERHEAD: &str = "EARLIER SEGMENT SUMMARIES (in order) FINAL SEGMENT SUMMARY (the latest state; \
+     where it resolves or supersedes an earlier segment, it wins) NEXT STEPS NAMED BY SEGMENTS (oldest first) \
+     Combine them into one summary of the whole session. The outcome and next_action must reflect the final \
+     segment and the final reply. next_action must keep every step above that the final segment and final reply \
+     do not show as done; drop only those. Cite only ids that appear above.";
+
 fn reduce_job(
     digest: &SessionDigest,
     ctx: &FactContext,
@@ -968,20 +975,27 @@ fn reduce_job(
     let (latest, mut earlier) = answers
         .split_last()
         .map_or((None, answers), |(l, e)| (Some(l), e));
+    let open_step = |a: &SummaryFields| {
+        (!is_none_text(&a.next_action.text))
+            .then(|| serde_json::to_string(&a.next_action).unwrap_or_default())
+    };
     // Keep the reduce within the segment budget: the oldest segment
-    // summaries give way first; the final one and the open steps always stay.
-    let fixed = tokens(&facts) + latest.map_or(0, |l| tokens(&encode(l)));
-    while !earlier.is_empty()
-        && fixed + earlier.iter().map(|a| tokens(&encode(a))).sum::<usize>()
-            > budgets.segment_tokens()
-    {
+    // summaries, and the steps they named, give way first; the final one
+    // always stays.
+    let fixed = tokens(&facts)
+        + tokens(REDUCE_TEMPLATE_OVERHEAD)
+        + latest.map_or(0, |l| {
+            tokens(&encode(l)) + open_step(l).map_or(0, |o| tokens(&o))
+        });
+    let kept_cost = |kept: &[SummaryFields]| {
+        kept.iter()
+            .map(|a| tokens(&encode(a)) + open_step(a).map_or(0, |o| tokens(&o)))
+            .sum::<usize>()
+    };
+    while !earlier.is_empty() && fixed + kept_cost(earlier) > budgets.segment_tokens() {
         earlier = &earlier[1..];
     }
-    let open: Vec<String> = answers
-        .iter()
-        .filter(|a| !is_none_text(&a.next_action.text))
-        .map(|a| serde_json::to_string(&a.next_action).unwrap_or_default())
-        .collect();
+    let open: Vec<String> = earlier.iter().chain(latest).filter_map(open_step).collect();
     let prompt = format!(
         "FACTS\n{facts}\nEARLIER SEGMENT SUMMARIES (in order)\n{}\n\nFINAL SEGMENT SUMMARY (the latest state; \
          where it resolves or supersedes an earlier segment, it wins)\n{}\n\nNEXT STEPS NAMED BY SEGMENTS \
@@ -1207,15 +1221,35 @@ async fn summarize_one(
             cache.insert(job_id, fields);
         }
     }
-    let report = summarize(
+    let report = match summarize(
         Some(provider),
         &card.digest,
         &card.events,
         budgets,
         &mut cache,
     )
-    .await?
-    .ok_or_else(|| anyhow::anyhow!("no provider"))?;
+    .await
+    {
+        Ok(report) => report.ok_or_else(|| anyhow::anyhow!("no provider"))?,
+        Err(error) => {
+            // Keep the answers already accepted so the next tick asks only
+            // for the jobs that failed instead of repeating paid calls.
+            let rows: Vec<(String, String, String)> = cache
+                .iter()
+                .filter_map(|(id, fields)| {
+                    let model = models
+                        .get(id)
+                        .cloned()
+                        .unwrap_or_else(|| provider.model().to_string());
+                    Some((id.clone(), model, serde_json::to_string(fields).ok()?))
+                })
+                .collect();
+            writer
+                .replace_session_summary_jobs(session_id, rows)
+                .await?;
+            return Err(error.into());
+        }
+    };
     let rows: Vec<(String, String, String)> = report
         .job_ids
         .iter()

@@ -359,8 +359,8 @@ async fn long_sessions_map_per_request_then_reduce_and_keep_open_steps() {
     };
     let provider = FakeProvider::new(vec![
         segment(0, "none"),
-        segment(1, "Wire part 2 into the release script."),
-        segment(2, "none"),
+        segment(1, "Bump the version."),
+        segment(2, "Wire part 2 into the release script."),
         answer("done", &["e1"], "none", &[]),
     ]);
     let report = run(Some(&provider), &parts, &mut BTreeMap::new())
@@ -373,11 +373,80 @@ async fn long_sessions_map_per_request_then_reduce_and_keep_open_steps() {
     let fields = report.fields.expect("fields");
     assert!(
         report.next_action_from_segment,
-        "union rule kept the open step"
+        "the final segment's open step survives the reduce"
     );
     assert_eq!(
         fields.next_action.text,
         "Wire part 2 into the release script."
+    );
+}
+
+#[tokio::test]
+async fn a_step_a_later_segment_finished_is_not_restored() {
+    let parts = long_session();
+    let jobs = build_jobs(&parts.0, &parts.1, SummaryBudgets::default());
+    let segment = |n: usize, next: &str| {
+        let cite = format!("e{}", jobs[n].allowed.iter().next().copied().unwrap_or(1));
+        let next_cites = if next == "none" {
+            vec![]
+        } else {
+            vec![cite.clone()]
+        };
+        json!({
+            "outcome": {"status": "partial", "text": "Part built.", "cites": [cite]},
+            "decisions": [], "retractions": [],
+            "next_action": {"text": next, "cites": next_cites},
+        })
+    };
+    let provider = FakeProvider::new(vec![
+        segment(0, "none"),
+        segment(1, "Wire part 2 into the release script."),
+        segment(2, "none"),
+        answer("done", &["e1"], "none", &[]),
+    ]);
+    let report = run(Some(&provider), &parts, &mut BTreeMap::new())
+        .await
+        .expect("report");
+    assert!(!report.next_action_from_segment);
+    assert_eq!(report.fields.expect("fields").next_action.text, "none");
+}
+
+#[tokio::test]
+async fn the_reduce_prompt_fits_the_budget_with_every_segment_naming_a_step() {
+    let filler = "word ".repeat(400);
+    let mut events = Vec::new();
+    for n in 1..=30 {
+        events.push(user(&format!("Request number {n}: build part {n}")));
+        for _ in 0..3 {
+            events.push(assistant(&filler));
+        }
+    }
+    let parts = session(events);
+    let budgets = SummaryBudgets::default();
+    let jobs = build_jobs(&parts.0, &parts.1, budgets);
+    let step = "Follow up on this part: ".to_string() + &"detail ".repeat(300);
+    let mut answers: Vec<Value> = jobs
+        .iter()
+        .map(|job| {
+            let cite = format!("e{}", job.allowed.iter().next().copied().unwrap_or(1));
+            json!({
+                "outcome": {"status": "partial", "text": "Part built.", "cites": [cite]},
+                "decisions": [], "retractions": [],
+                "next_action": {"text": step, "cites": [cite]},
+            })
+        })
+        .collect();
+    answers.push(answer("partial", &["e1"], "none", &[]));
+    let provider = FakeProvider::new(answers);
+    run(Some(&provider), &parts, &mut BTreeMap::new())
+        .await
+        .expect("report");
+    let reduce_prompt = provider.prompts().last().cloned().expect("reduce prompt");
+    // The default segment budget: 20k tokens.
+    assert!(
+        reduce_prompt.len() / 4 <= 20_000,
+        "reduce prompt is {} tokens",
+        reduce_prompt.len() / 4
     );
 }
 
@@ -560,6 +629,74 @@ mod tick {
             "retractions": [],
             "next_action": {"text": "none", "cites": []},
         })
+    }
+
+    #[tokio::test]
+    async fn answers_accepted_before_a_provider_error_are_kept() {
+        let f = fixture().await;
+        let id = SessionId::new();
+        f.store
+            .writer
+            .begin_session(NewSession {
+                id,
+                workspace_id: f.ws,
+                project_id: f.proj,
+                agent_kind: AgentKind::Codex,
+                cwd: None,
+                actor_user: None,
+            })
+            .await
+            .unwrap();
+        let filler = "word ".repeat(400);
+        let mut rows = Vec::new();
+        for n in 1..=3 {
+            rows.push(ledger(
+                &format!("u{n}"),
+                "user",
+                &format!("Request {n}: build part {n}"),
+            ));
+            for k in 0..20 {
+                rows.push(ledger(
+                    &format!("a{n}-{k}"),
+                    "assistant",
+                    &format!("{k} {filler}"),
+                ));
+            }
+        }
+        f.store
+            .writer
+            .append_session_events(id, rows)
+            .await
+            .unwrap();
+        run_session_card_tick(&f.store.reader, &f.wiki, None, 50)
+            .await
+            .unwrap();
+        // Each segment opens with its request: e1, e22, e43.
+        let segment = |cite: &str| {
+            json!({
+                "outcome": {"status": "partial", "text": "Part built.", "cites": [cite]},
+                "decisions": [], "retractions": [],
+                "next_action": {"text": "none", "cites": []},
+            })
+        };
+        // Three segment answers, then nothing left for the reduce: an error.
+        let first = FakeProvider::new(vec![segment("e1"), segment("e22"), segment("e43")]);
+        let tick = f.tick(&first, 5).await;
+        assert_eq!((tick.failed, tick.calls), (1, 0), "{tick:?}");
+        assert_eq!(
+            first.prompts().len(),
+            4,
+            "three segments, then the failed reduce"
+        );
+        let reduce = json!({
+            "outcome": {"status": "done", "text": "All parts built.", "cites": ["e1"]},
+            "decisions": [], "retractions": [],
+            "next_action": {"text": "none", "cites": []},
+        });
+        let second = FakeProvider::new(vec![reduce]);
+        let tick = f.tick(&second, 5).await;
+        assert_eq!(tick.written, 1, "{tick:?}");
+        assert_eq!(second.prompts().len(), 1, "only the reduce is asked again");
     }
 
     #[tokio::test]
