@@ -500,8 +500,27 @@ pub(super) async fn process_authorized(
                 }
             }
         }
-        let new_page =
-            synthesize_session_page(ws, proj, session_id, admitted.agent_kind(), &observations);
+        // The card needs the event ledger (imported or managed transcripts);
+        // a hook-only session keeps the observation summary. A ledger read
+        // failure falls back too: SessionEnd must still close the session.
+        let card = match session_card_page(
+            &state.reader,
+            ws,
+            proj,
+            session_id,
+            admitted.agent_kind(),
+        )
+        .await
+        {
+            Ok(card) => card,
+            Err(e) => {
+                warn!(session = %session_id, error = %e, "session card unavailable; using observation summary");
+                None
+            }
+        };
+        let new_page = card.unwrap_or_else(|| {
+            synthesize_session_page(ws, proj, session_id, admitted.agent_kind(), &observations)
+        });
         let page_id = state
             .wiki
             .write_page(sessionmunch_wiki::WritePageRequest {

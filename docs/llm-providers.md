@@ -8,7 +8,8 @@ rule-based output. Add an LLM provider
 when you want LLM consolidation (on PreCompact, on demand via
 `memory_consolidate`, or opt-in at session end with
 `SESSIONMUNCH_CONSOLIDATE_ON_SESSION_END`), richer linting, and bootstrap.
-Substantive session ends always write a rule-based summary page + handoff either
+Substantive session ends always write a deterministic summary page (the session
+card when transcript events exist, else the rule-based summary) + handoff either
 way. A session containing only `SessionStart` / `SessionEnd` boundaries is
 closed without a page, handoff, or provider job. When that empty session had
 accepted startup context, its session-bound handoff is returned to the open

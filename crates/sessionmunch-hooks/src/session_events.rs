@@ -63,6 +63,9 @@ pub struct SessionEventState {
     pub reader: ReaderPool,
     /// Privacy scrubber applied before any raw or indexed persistence.
     pub sanitizer: Sanitizer,
+    /// Wiki for refreshing session cards after a batch lands. `None` stores
+    /// events only (ingest-only test harnesses).
+    pub wiki: Option<sessionmunch_wiki::Wiki>,
 }
 
 /// Build the batch-ingest router. Mounted beside `/hook` and `/workstream/*`,
@@ -249,6 +252,13 @@ async fn ingest_batch(
         Err(failure) => return error(StatusCode::INTERNAL_SERVER_ERROR, failure.to_string()),
     };
     debug!(session_id = %session_id, accepted, "session event batch ingested");
+    // The events are committed; the card follows them (bounded, never fails
+    // the batch). Only new events can change a card.
+    if accepted > 0
+        && let Some(wiki) = &state.wiki
+    {
+        crate::session_card::refresh_cards_after_ingest(wiki, &state.reader, session_id).await;
+    }
     (
         StatusCode::ACCEPTED,
         Json(IngestSessionEventsResponse {
@@ -341,6 +351,7 @@ mod tests {
             writer: store.writer.clone(),
             reader: store.reader.clone(),
             sanitizer: Sanitizer::default(),
+            wiki: None,
         }
     }
 
@@ -520,5 +531,274 @@ mod tests {
         );
         let resp = ingest_batch(State(state), None, Json(body)).await;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // --- session cards -------------------------------------------------
+
+    fn event(
+        id: &str,
+        kind: WorkstreamEventKind,
+        role: &str,
+        content: &str,
+        meta: serde_json::Value,
+    ) -> NewSessionEvent {
+        NewSessionEvent {
+            event_id: id.to_string(),
+            kind,
+            role: Some(role.into()),
+            content: content.to_string(),
+            occurred_at: None,
+            source: sessionmunch_core::SessionSource::Import,
+            metadata: meta,
+        }
+    }
+
+    fn work_session() -> Vec<NewSessionEvent> {
+        vec![
+            event(
+                "u1",
+                WorkstreamEventKind::Message,
+                "user",
+                "Fix the upload bug",
+                serde_json::json!({}),
+            ),
+            event(
+                "c1",
+                WorkstreamEventKind::ToolCall,
+                "assistant",
+                "Bash: {\"command\":\"cargo t -p uploader\"}",
+                serde_json::json!({"tool": "Bash"}),
+            ),
+            event(
+                "r1",
+                WorkstreamEventKind::ToolResult,
+                "tool",
+                "Summary 3 passed",
+                serde_json::json!({"is_error": false}),
+            ),
+            event(
+                "a1",
+                WorkstreamEventKind::Message,
+                "assistant",
+                "Fixed: uploads retry now.",
+                serde_json::json!({}),
+            ),
+        ]
+    }
+
+    fn card_state(store: &Store, temp: &TempDir) -> SessionEventState {
+        SessionEventState {
+            wiki: Some(sessionmunch_wiki::Wiki::new(temp.path(), store.writer.clone()).unwrap()),
+            ..test_state(store)
+        }
+    }
+
+    async fn session_page(
+        store: &Store,
+        session_id: SessionId,
+    ) -> Option<sessionmunch_store::StoredPageBody> {
+        let (ws, proj, _) = store.reader.find_session_scope(session_id).await.unwrap()?;
+        store
+            .reader
+            .page_body_by_ids(ws, proj, &format!("sessions/{session_id}.md"))
+            .await
+            .unwrap()
+    }
+
+    fn frontmatter(page: &sessionmunch_store::StoredPageBody) -> serde_json::Value {
+        serde_json::from_str(&page.frontmatter_json).unwrap()
+    }
+
+    #[tokio::test]
+    async fn an_ingested_batch_writes_the_session_card() {
+        let temp = TempDir::new().unwrap();
+        let store = Store::open(temp.path()).unwrap();
+        let state = card_state(&store, &temp);
+        let session_id = SessionId::new();
+        let body = request_body(
+            "acme",
+            "app",
+            &session_id.to_string(),
+            "claude-code",
+            work_session(),
+        );
+        let response = ingest_batch(State(state), None, Json(body)).await;
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+        let page = session_page(&store, session_id).await.expect("card page");
+        let fm = frontmatter(&page);
+        assert_eq!(fm["generator"], "session-card");
+        assert_eq!(
+            fm["card"]["builder_version"],
+            sessionmunch_workstream::CARD_BUILDER_VERSION
+        );
+        assert_eq!(fm["card"]["events"], 4);
+        assert_eq!(
+            fm["card"]["last_sequence"], 4,
+            "refs are ledger sequence numbers"
+        );
+        assert_eq!(page.title, "Fix the upload bug");
+        assert!(
+            page.body
+                .contains("**Final assistant message (verbatim, e4):**")
+        );
+        assert!(page.body.contains("> Fixed: uploads retry now."));
+        assert!(page.body.contains("- Fix the upload bug (e1)"));
+        assert!(
+            page.body
+                .contains("test passed: `cargo t -p uploader` (e2, e3)")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_later_batch_refreshes_the_card_and_keeps_stable_refs() {
+        let temp = TempDir::new().unwrap();
+        let store = Store::open(temp.path()).unwrap();
+        let state = card_state(&store, &temp);
+        let session_id = SessionId::new();
+        let sid = session_id.to_string();
+        let mut events = work_session();
+        let later = events.split_off(2);
+        ingest_batch(
+            State(state.clone()),
+            None,
+            Json(request_body("acme", "app", &sid, "codex", events)),
+        )
+        .await;
+        let first = session_page(&store, session_id).await.expect("card");
+        assert_eq!(frontmatter(&first)["card"]["last_sequence"], 2);
+        ingest_batch(
+            State(state),
+            None,
+            Json(request_body("acme", "app", &sid, "codex", later)),
+        )
+        .await;
+        let second = session_page(&store, session_id).await.expect("card");
+        assert_eq!(frontmatter(&second)["card"]["last_sequence"], 4);
+        assert!(second.body.contains("(verbatim, e4)"));
+        assert!(
+            second.body.contains("- Fix the upload bug (e1)"),
+            "earlier refs do not move"
+        );
+    }
+
+    #[tokio::test]
+    async fn ingest_never_replaces_a_consolidated_or_annotated_page() {
+        let temp = TempDir::new().unwrap();
+        let store = Store::open(temp.path()).unwrap();
+        let state = card_state(&store, &temp);
+        let wiki = state.wiki.clone().unwrap();
+        let session_id = SessionId::new();
+        let sid = session_id.to_string();
+        let mut events = work_session();
+        let later = events.split_off(2);
+        ingest_batch(
+            State(state.clone()),
+            None,
+            Json(request_body("acme", "app", &sid, "claude", events)),
+        )
+        .await;
+        let (ws, proj, _) = store
+            .reader
+            .find_session_scope(session_id)
+            .await
+            .unwrap()
+            .unwrap();
+        wiki.write_page(sessionmunch_wiki::WritePageRequest {
+            workspace_id: ws,
+            project_id: proj,
+            path: sessionmunch_core::PagePath::new(format!("sessions/{sid}.md")).unwrap(),
+            frontmatter: serde_json::json!({"title": "Upload fix", "tier": "episodic", "consolidated": true}),
+            body: "A consolidated narrative.".into(),
+            tier: sessionmunch_core::Tier::Episodic,
+            pinned: false,
+            title: None,
+            admission_ctx: None,
+            author_id: None,
+            actor: sessionmunch_core::ActorContext::default(),
+            evidence: Vec::new(),
+        })
+        .await
+        .unwrap();
+        ingest_batch(
+            State(state),
+            None,
+            Json(request_body("acme", "app", &sid, "claude", later)),
+        )
+        .await;
+        let page = session_page(&store, session_id).await.unwrap();
+        assert_eq!(page.body.trim(), "A consolidated narrative.");
+    }
+
+    #[tokio::test]
+    async fn stale_cards_are_refreshed_in_bounded_batches_during_import() {
+        let temp = TempDir::new().unwrap();
+        let store = Store::open(temp.path()).unwrap();
+        // Ledger rows land without cards (no wiki), as for data that predates them.
+        let plain = test_state(&store);
+        let total = crate::session_card::STALE_CARDS_PER_BATCH + 2;
+        let mut stale = Vec::new();
+        for _ in 0..total {
+            let id = SessionId::new();
+            ingest_batch(
+                State(plain.clone()),
+                None,
+                Json(request_body(
+                    "acme",
+                    "app",
+                    &id.to_string(),
+                    "codex",
+                    work_session(),
+                )),
+            )
+            .await;
+            stale.push(id);
+        }
+        let cards = card_state(&store, &temp);
+        let trigger = SessionId::new();
+        ingest_batch(
+            State(cards.clone()),
+            None,
+            Json(request_body(
+                "acme",
+                "app",
+                &trigger.to_string(),
+                "codex",
+                work_session(),
+            )),
+        )
+        .await;
+        assert!(
+            session_page(&store, trigger).await.is_some(),
+            "the batch's own session first"
+        );
+        let mut refreshed = 0;
+        for id in &stale {
+            refreshed += usize::from(session_page(&store, *id).await.is_some());
+        }
+        assert_eq!(
+            refreshed,
+            crate::session_card::STALE_CARDS_PER_BATCH,
+            "one bounded batch"
+        );
+        let again = SessionId::new();
+        ingest_batch(
+            State(cards),
+            None,
+            Json(request_body(
+                "acme",
+                "app",
+                &again.to_string(),
+                "codex",
+                work_session(),
+            )),
+        )
+        .await;
+        for id in &stale {
+            assert!(
+                session_page(&store, *id).await.is_some(),
+                "the next batch finishes the backlog"
+            );
+        }
     }
 }

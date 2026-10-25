@@ -4483,6 +4483,143 @@ async fn session_end_writes_heuristic_page_even_with_consolidate_flag_on() {
     );
 }
 
+async fn end_session_with_prompt(
+    state: &HookState,
+    sid: &str,
+    ledger: Vec<sessionmunch_core::NewSessionEvent>,
+) -> SessionId {
+    let session_id = SessionId::from_str(sid).unwrap();
+    for event in ["session-start", "user-prompt-submit"] {
+        let env = HookEnvelope::from_query_and_body(
+            HookQuery {
+                event: event.into(),
+                agent: Some("claude-code".into()),
+                ..Default::default()
+            },
+            serde_json::json!({ "session_id": sid, "prompt": "Fix the upload bug" }),
+        );
+        process(state, env, None, Vec::new()).await.unwrap();
+    }
+    if !ledger.is_empty() {
+        state
+            .writer
+            .append_session_events(session_id, ledger)
+            .await
+            .unwrap();
+    }
+    let env = HookEnvelope::from_query_and_body(
+        HookQuery {
+            event: "session-end".into(),
+            agent: Some("claude-code".into()),
+            ..Default::default()
+        },
+        serde_json::json!({ "session_id": sid }),
+    );
+    process(state, env, None, Vec::new()).await.unwrap();
+    session_id
+}
+
+async fn ended_session_page(
+    state: &HookState,
+    session_id: SessionId,
+) -> sessionmunch_store::StoredPageBody {
+    let (ws, proj, _) = state
+        .reader
+        .find_session_scope(session_id)
+        .await
+        .unwrap()
+        .unwrap();
+    state
+        .reader
+        .page_body_by_ids(ws, proj, &format!("sessions/{session_id}.md"))
+        .await
+        .unwrap()
+        .expect("SessionEnd writes the session page")
+}
+
+fn ledger_event(
+    id: &str,
+    kind: sessionmunch_core::WorkstreamEventKind,
+    role: &str,
+    content: &str,
+) -> sessionmunch_core::NewSessionEvent {
+    sessionmunch_core::NewSessionEvent {
+        event_id: id.into(),
+        kind,
+        role: Some(role.into()),
+        content: content.into(),
+        occurred_at: None,
+        source: sessionmunch_core::SessionSource::Import,
+        metadata: serde_json::json!({}),
+    }
+}
+
+/// With transcript rows in the ledger, SessionEnd writes the deterministic
+/// card, every line citing ledger sequence numbers.
+#[tokio::test]
+async fn session_end_writes_the_card_when_ledger_events_exist() {
+    use sessionmunch_core::WorkstreamEventKind as K;
+    let tmp = TempDir::new().unwrap();
+    let state = make_state(&tmp).await;
+    let session_id = end_session_with_prompt(
+        &state,
+        "22222222-2222-4222-8222-222222222222",
+        vec![
+            ledger_event("u1", K::Message, "user", "Fix the upload bug"),
+            ledger_event("a1", K::Message, "assistant", "Fixed: uploads retry now."),
+        ],
+    )
+    .await;
+    let page = ended_session_page(&state, session_id).await;
+    let fm: serde_json::Value = serde_json::from_str(&page.frontmatter_json).unwrap();
+    assert_eq!(fm["generator"], "session-card");
+    // Built from the two transcript rows only; the hook mirrors of the same
+    // prompt hold earlier sequence numbers and are left out.
+    assert_eq!(fm["card"]["events"], 2);
+    let last = fm["card"]["last_sequence"].as_u64().unwrap();
+    assert!(
+        page.body
+            .contains(&format!("**Final assistant message (verbatim, e{last}):**"))
+    );
+    assert!(
+        page.body
+            .contains(&format!("- Fix the upload bug (e{})", last - 1))
+    );
+    assert!(
+        page.body.contains("## Requests (1)"),
+        "the hook mirror is not counted twice"
+    );
+    assert!(page.body.contains("- ended: **clean**"));
+}
+
+/// A hook-only session (its ledger holds only hook mirrors) keeps the
+/// observation-based summary.
+#[tokio::test]
+async fn session_end_falls_back_to_the_observation_summary_without_ledger_events() {
+    let tmp = TempDir::new().unwrap();
+    let state = make_state(&tmp).await;
+    let session_id =
+        end_session_with_prompt(&state, "33333333-3333-4333-8333-333333333333", Vec::new()).await;
+    let page = ended_session_page(&state, session_id).await;
+    let fm: serde_json::Value = serde_json::from_str(&page.frontmatter_json).unwrap();
+    assert!(
+        fm.get("generator").is_none(),
+        "rule-based summary, not a card: {fm}"
+    );
+    assert!(!page.body.contains("Session card"));
+    // Its hook mirrors never make it due for a card on a later ingest sweep.
+    let due = state
+        .reader
+        .session_cards_due(
+            sessionmunch_workstream::CARD_BUILDER_VERSION,
+            Some(session_id),
+            1,
+        )
+        .await
+        .unwrap();
+    assert!(due.is_empty());
+}
+
 #[tokio::test]
 async fn lifecycle_only_session_ends_without_page_handoff_or_consolidation() {
     let tmp = TempDir::new().unwrap();

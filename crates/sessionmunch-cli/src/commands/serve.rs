@@ -1191,6 +1191,7 @@ pub async fn run(config: &Config, host: &HostEnv, args: ServeArgs) -> Result<()>
                 writer: store.writer.clone(),
                 reader: store.reader.clone(),
                 sanitizer: sanitizer.clone(),
+                wiki: Some(wiki.clone()),
             });
             // The server owns the content-addressed artifact store under its
             // data dir and exposes it beside `/session-events`, so importers

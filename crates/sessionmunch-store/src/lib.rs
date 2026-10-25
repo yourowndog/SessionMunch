@@ -61,6 +61,7 @@ pub use ops::{
 };
 pub use passage_index::{PagePassage, PageSection};
 pub use reader::PassageEmbedCandidate;
+pub use reader::SESSION_CARD_REPLACEABLE_KEYS;
 pub use reader::{
     ActivityWindow, AgentSessionCount, AuditEvent, AuditLogFilter, AutoImproveCandidateSession,
     BriefPageBody, BriefingPage, BriefingSnapshot, ClientActivity, ContaminationFinding,
@@ -80,6 +81,7 @@ pub use scope::{
     lookup_global_scope, resolve_many_existing_scopes,
 };
 pub use session_consolidation::{SESSION_CONSOLIDATION_MAX_ATTEMPTS, SessionConsolidationJob};
+pub use session_events::MAX_TRANSCRIPT_EVENTS;
 pub use sessionmunch_core::session_events::SessionEventHit;
 pub use users::{
     LoginUser, TOKEN_HASH_LEN, TOKEN_RAW_LEN, TokenPepper, generate_token, hash_token,

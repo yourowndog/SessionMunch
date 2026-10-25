@@ -49,6 +49,23 @@ impl ReaderPool {
         .await
     }
 
+    /// The session's transcript events (imported or managed, never hook
+    /// mirrors), newest first, at most `limit` capped at
+    /// [`crate::MAX_TRANSCRIPT_EVENTS`].
+    ///
+    /// # Errors
+    /// Propagates any SQL or pool error.
+    pub async fn session_transcript_events(
+        &self,
+        session_id: SessionId,
+        limit: usize,
+    ) -> StoreResult<Vec<SessionEvent>> {
+        self.with_conn(move |conn| {
+            crate::session_events::list_transcript_events(conn, &session_id, limit)
+        })
+        .await
+    }
+
     /// Search the session event ledger with optional scope, machine,
     /// harness, and time filters.
     ///
@@ -1152,6 +1169,91 @@ impl ReaderPool {
                 )))
             })?;
             Ok(Some((ws, proj)))
+        })
+        .await
+    }
+}
+
+/// Frontmatter keys a generated session page may carry: the rule-based
+/// summary's, the session card's, and those every wiki write stamps on disk
+/// (`type`, `description`, `sources`, `generated`, `pinned`,
+/// `last_modified_by`). A `sessions/<id>.md` page with any other key (an LLM
+/// consolidation's `consolidated`, tags, relations, or anything a person
+/// added) is not replaced by a card.
+pub const SESSION_CARD_REPLACEABLE_KEYS: &[&str] = &[
+    "title",
+    "session_id",
+    "agent",
+    "tier",
+    "summary",
+    "generator",
+    "card",
+    "type",
+    "description",
+    "sources",
+    "generated",
+    "pinned",
+    "last_modified_by",
+];
+
+impl ReaderPool {
+    /// Sessions whose deterministic card is due, at most `limit`, oldest id
+    /// first: the session has transcript (non-hook) ledger rows, and its latest
+    /// `sessions/<id>.md` page is missing, or is a generated page (only
+    /// [`SESSION_CARD_REPLACEABLE_KEYS`] in its frontmatter) whose
+    /// `card.builder_version` is older than `builder_version` or whose
+    /// `card.last_sequence` is behind its transcript rows. `only` restricts the check
+    /// to one session.
+    ///
+    /// # Errors
+    /// Propagates any SQL or pool error.
+    pub async fn session_cards_due(
+        &self,
+        builder_version: u32,
+        only: Option<SessionId>,
+        limit: usize,
+    ) -> StoreResult<Vec<SessionId>> {
+        self.with_conn(move |conn| {
+            let keys = SESSION_CARD_REPLACEABLE_KEYS
+                .iter()
+                .map(|k| format!("'{k}'"))
+                .collect::<Vec<_>>()
+                .join(",");
+            // The page path is `sessions/<hyphenated lowercase uuid>.md`,
+            // rebuilt from the session's 16-byte id.
+            let sql = format!(
+                "SELECT s.id FROM sessions s \
+                 WHERE EXISTS (SELECT 1 FROM session_events e \
+                               WHERE e.session_id = s.id AND e.source != 'hook') \
+                   AND (?3 IS NULL OR s.id = ?3) \
+                   AND NOT EXISTS ( \
+                     SELECT 1 FROM pages pg \
+                     WHERE pg.workspace_id = s.workspace_id AND pg.project_id = s.project_id \
+                       AND pg.is_latest = 1 \
+                       AND pg.path = 'sessions/' || lower( \
+                             substr(hex(s.id), 1, 8) || '-' || substr(hex(s.id), 9, 4) || '-' || \
+                             substr(hex(s.id), 13, 4) || '-' || substr(hex(s.id), 17, 4) || '-' || \
+                             substr(hex(s.id), 21, 12)) || '.md' \
+                       AND ( \
+                         (json_extract(pg.frontmatter_json, '$.card.builder_version') >= ?1 \
+                          AND json_extract(pg.frontmatter_json, '$.card.last_sequence') >= \
+                              (SELECT MAX(e2.sequence) FROM session_events e2 \
+                               WHERE e2.session_id = s.id AND e2.source != 'hook')) \
+                         OR EXISTS (SELECT 1 FROM json_each(pg.frontmatter_json) j \
+                                    WHERE j.key NOT IN ({keys})))) \
+                 ORDER BY s.id LIMIT ?2"
+            );
+            let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+            let only = only.map(|id| id.as_bytes().to_vec());
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(params![builder_version, limit, only], |row| {
+                row.get::<_, Vec<u8>>(0)
+            })?;
+            let mut due = Vec::new();
+            for row in rows {
+                due.push(SessionId::from_slice(&row?)?);
+            }
+            Ok(due)
         })
         .await
     }
