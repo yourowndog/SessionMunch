@@ -1008,6 +1008,13 @@ pub async fn run(config: &Config, host: &HostEnv, args: ServeArgs) -> Result<()>
         embedder.clone(),
         admin_llm.clone(),
         config.decay,
+        config
+            .session_cards
+            .ai_summary
+            .then_some(sessionmunch_consolidate::SummaryBudgets {
+                max_input_tokens: config.consolidation.max_input_tokens,
+                max_output_tokens: config.consolidation.max_output_tokens,
+            }),
     )
     .await;
 
@@ -1521,6 +1528,9 @@ async fn start_maintenance_scheduler(
     embedder: Option<Arc<dyn Embedder>>,
     llm: Option<Arc<dyn LlmProvider>>,
     decay: crate::config::DecaySettings,
+    // `Some` when `[session_cards] ai_summary` is on: the budgets the
+    // optional AI summary tick sizes its prompts with.
+    ai_summary: Option<sessionmunch_consolidate::SummaryBudgets>,
 ) -> Vec<tokio::task::JoinHandle<()>> {
     let maintenance_enabled = settings.enabled;
     if !maintenance_enabled {
@@ -1724,6 +1734,46 @@ async fn start_maintenance_scheduler(
                     Err(e) => tracing::warn!(error = %e, "session card tick failed"),
                 }
                 tokio::time::sleep(sessionmunch_consolidate::SESSION_CARD_TICK_INTERVAL).await;
+            }
+        }));
+    }
+
+    // Optional AI summary of current cards: only with a provider and
+    // `[session_cards] ai_summary` on (zero-LLM default otherwise). A couple
+    // of sessions per tick; cached job answers make unchanged sessions free.
+    if maintenance_enabled && let (Some(budgets), Some(llm)) = (ai_summary, llm.clone()) {
+        let reader = reader.clone();
+        let writer = writer.clone();
+        let wiki = wiki.clone();
+        tasks.push(tokio::spawn(async move {
+            let mut after = None;
+            loop {
+                tokio::time::sleep(sessionmunch_consolidate::SESSION_SUMMARY_TICK_INTERVAL).await;
+                match sessionmunch_consolidate::run_session_summary_tick(
+                    &reader,
+                    &writer,
+                    &wiki,
+                    llm.as_ref(),
+                    budgets,
+                    after,
+                    sessionmunch_consolidate::SUMMARIES_PER_TICK,
+                )
+                .await
+                {
+                    Ok(tick) => {
+                        if tick.written > 0 || tick.failed > 0 {
+                            info!(
+                                due = tick.due,
+                                written = tick.written,
+                                failed = tick.failed,
+                                calls = tick.calls,
+                                "session AI summary tick completed"
+                            );
+                        }
+                        after = tick.next_after;
+                    }
+                    Err(e) => tracing::warn!(error = %e, "session AI summary tick failed"),
+                }
             }
         }));
     }
@@ -3122,6 +3172,7 @@ mod tests {
             None,
             None,
             crate::config::DecaySettings::default(),
+            None,
         )
         .await;
         assert!(tasks.is_empty());
@@ -3138,6 +3189,50 @@ mod tests {
                 None
             );
         }
+    }
+
+    /// The AI summary job needs both a provider and `[session_cards]
+    /// ai_summary`: without a provider (zero-LLM) or with the opt-out there is
+    /// no summary job at all.
+    #[tokio::test]
+    async fn ai_summary_job_runs_only_with_a_provider_and_the_setting() {
+        async fn count(
+            llm: Option<Arc<dyn LlmProvider>>,
+            ai_summary: Option<sessionmunch_consolidate::SummaryBudgets>,
+        ) -> usize {
+            let (_tmp, store, wiki, _ws, _first, _second) = two_project_wiki().await;
+            let tasks = start_maintenance_scheduler(
+                MaintenanceSettings {
+                    enabled: true,
+                    forget_sweep_interval_secs: 0,
+                    lint_interval_secs: 0,
+                    embedding_backfill_interval_secs: 0,
+                },
+                AutoImproveSettings::default(),
+                store.reader.clone(),
+                store.writer.clone(),
+                wiki,
+                None,
+                llm,
+                crate::config::DecaySettings::default(),
+                ai_summary,
+            )
+            .await;
+            let n = tasks.len();
+            for task in tasks {
+                task.abort();
+            }
+            n
+        }
+        let budgets = Some(sessionmunch_consolidate::SummaryBudgets::default());
+        let provider = || -> Option<Arc<dyn LlmProvider>> { Some(Arc::new(PanicLlm)) };
+        // Zero-LLM: the setting changes nothing.
+        assert_eq!(count(None, budgets).await, count(None, None).await);
+        // With a provider, the setting adds exactly the summary job.
+        assert_eq!(
+            count(provider(), budgets).await,
+            count(provider(), None).await + 1
+        );
     }
 
     #[tokio::test]
@@ -3166,6 +3261,7 @@ mod tests {
                 None,
                 None,
                 crate::config::DecaySettings::default(),
+                None,
             )
             .await;
             // One enabled lint/sweep job plus the independent hollow-project

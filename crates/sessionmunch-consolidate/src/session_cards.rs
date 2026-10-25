@@ -50,6 +50,28 @@ pub async fn session_card_page(
     session_id: SessionId,
     agent_kind: AgentKind,
 ) -> StoreResult<Option<NewPage>> {
+    Ok(
+        card_parts(reader, workspace_id, project_id, session_id, agent_kind)
+            .await?
+            .map(|card| card.page),
+    )
+}
+
+/// A card page with the events and digest it was rendered from.
+pub(crate) struct CardParts {
+    pub(crate) page: NewPage,
+    pub(crate) events: Vec<sessionmunch_core::SessionEvent>,
+    pub(crate) digest: SessionDigest,
+    pub(crate) last_sequence: i64,
+}
+
+pub(crate) async fn card_parts(
+    reader: &ReaderPool,
+    workspace_id: WorkspaceId,
+    project_id: ProjectId,
+    session_id: SessionId,
+    agent_kind: AgentKind,
+) -> StoreResult<Option<CardParts>> {
     let mut events = reader
         .session_transcript_events(session_id, MAX_CARD_EVENTS)
         .await?;
@@ -91,7 +113,7 @@ pub async fn session_card_page(
     }
     let path = PagePath::new(format!("sessions/{session_id}.md"))
         .expect("hard-coded sessions/<uuid>.md is always valid");
-    Ok(Some(NewPage {
+    let page = NewPage {
         workspace_id,
         project_id,
         path,
@@ -105,6 +127,12 @@ pub async fn session_card_page(
         expires_at: None,
         entities: Vec::new(),
         evidence: Vec::new(),
+    };
+    Ok(Some(CardParts {
+        page,
+        events,
+        digest,
+        last_sequence,
     }))
 }
 
@@ -198,15 +226,22 @@ async fn refresh_one(
     else {
         return Ok(false);
     };
-    // Attribute to the session's owner, as the SessionEnd page is.
-    let actor = reader
+    write_card(wiki, page, session_actor(reader, session_id).await?).await?;
+    Ok(true)
+}
+
+/// The session's owner, to attribute generated pages to, as the SessionEnd
+/// page is.
+pub(crate) async fn session_actor(
+    reader: &ReaderPool,
+    session_id: SessionId,
+) -> StoreResult<ActorContext> {
+    Ok(reader
         .session_actor_user(session_id)
         .await?
         .and_then(|owner| IdentityKey::from_storage_key(&owner))
         .map(|owner| owner.to_actor_context())
-        .unwrap_or_default();
-    write_card(wiki, page, actor).await?;
-    Ok(true)
+        .unwrap_or_default())
 }
 
 /// What one card tick did.

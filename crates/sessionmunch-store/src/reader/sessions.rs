@@ -66,6 +66,19 @@ impl ReaderPool {
         .await
     }
 
+    /// A session's cached AI summary-job answers as
+    /// `(job_id, model, fields_json)`.
+    ///
+    /// # Errors
+    /// Propagates any SQL or pool error.
+    pub async fn session_summary_jobs(
+        &self,
+        session_id: SessionId,
+    ) -> StoreResult<Vec<(String, String, String)>> {
+        self.with_conn(move |conn| crate::session_events::summary_jobs(conn, &session_id))
+            .await
+    }
+
     /// Search the session event ledger with optional scope, machine,
     /// harness, and time filters.
     ///
@@ -1177,7 +1190,8 @@ impl ReaderPool {
 /// Frontmatter keys a generated session page may carry: the rule-based
 /// summary's, the session card's, and those every wiki write stamps on disk
 /// (`type`, `description`, `sources`, `generated`, `pinned`,
-/// `last_modified_by`). A `sessions/<id>.md` page with any other key (an LLM
+/// `last_modified_by`), and the optional AI summary's `ai_summary`. A
+/// `sessions/<id>.md` page with any other key (an LLM
 /// consolidation's `consolidated`, tags, relations, or anything a person
 /// added) is not replaced by a card.
 pub const SESSION_CARD_REPLACEABLE_KEYS: &[&str] = &[
@@ -1194,6 +1208,7 @@ pub const SESSION_CARD_REPLACEABLE_KEYS: &[&str] = &[
     "generated",
     "pinned",
     "last_modified_by",
+    "ai_summary",
 ];
 
 impl ReaderPool {
@@ -1253,6 +1268,74 @@ impl ReaderPool {
             let rows = stmt.query_map(params![builder_version, limit, only, after], |row| {
                 row.get::<_, Vec<u8>>(0)
             })?;
+            let mut due = Vec::new();
+            for row in rows {
+                due.push(SessionId::from_slice(&row?)?);
+            }
+            Ok(due)
+        })
+        .await
+    }
+
+    /// Sessions whose optional AI summary is due, at most `limit`, after
+    /// `after` in id order: the latest `sessions/<id>.md` page is a current
+    /// generated card (built by at least `card_builder_version` and not behind
+    /// the transcript rows, with no frontmatter key outside
+    /// [`SESSION_CARD_REPLACEABLE_KEYS`]), and its `ai_summary` is missing,
+    /// older than the card, or built by an older summary prompt or builder.
+    ///
+    /// # Errors
+    /// Propagates any SQL or pool error.
+    pub async fn session_summaries_due(
+        &self,
+        card_builder_version: u32,
+        summary_prompt_version: u32,
+        summary_builder_version: u32,
+        after: Option<SessionId>,
+        limit: usize,
+    ) -> StoreResult<Vec<SessionId>> {
+        self.with_conn(move |conn| {
+            let keys = SESSION_CARD_REPLACEABLE_KEYS
+                .iter()
+                .map(|k| format!("'{k}'"))
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!(
+                "SELECT s.id FROM sessions s \
+                 JOIN pages pg ON pg.workspace_id = s.workspace_id AND pg.project_id = s.project_id \
+                   AND pg.is_latest = 1 \
+                   AND pg.path = 'sessions/' || lower( \
+                         substr(hex(s.id), 1, 8) || '-' || substr(hex(s.id), 9, 4) || '-' || \
+                         substr(hex(s.id), 13, 4) || '-' || substr(hex(s.id), 17, 4) || '-' || \
+                         substr(hex(s.id), 21, 12)) || '.md' \
+                 WHERE (?5 IS NULL OR s.id > ?5) \
+                   AND json_extract(pg.frontmatter_json, '$.generator') = 'session-card' \
+                   AND json_extract(pg.frontmatter_json, '$.card.builder_version') >= ?1 \
+                   AND json_extract(pg.frontmatter_json, '$.card.last_sequence') >= \
+                       (SELECT MAX(e.sequence) FROM session_events e \
+                        WHERE e.session_id = s.id AND e.source != 'hook') \
+                   AND NOT EXISTS (SELECT 1 FROM json_each(pg.frontmatter_json) j \
+                                   WHERE j.key NOT IN ({keys})) \
+                   AND (json_extract(pg.frontmatter_json, '$.ai_summary') IS NULL \
+                        OR COALESCE(json_extract(pg.frontmatter_json, '$.ai_summary.last_sequence'), -1) \
+                           < json_extract(pg.frontmatter_json, '$.card.last_sequence') \
+                        OR COALESCE(json_extract(pg.frontmatter_json, '$.ai_summary.prompt_version'), 0) < ?2 \
+                        OR COALESCE(json_extract(pg.frontmatter_json, '$.ai_summary.builder_version'), 0) < ?3) \
+                 ORDER BY s.id LIMIT ?4"
+            );
+            let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+            let after = after.map(|id| id.as_bytes().to_vec());
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(
+                params![
+                    card_builder_version,
+                    summary_prompt_version,
+                    summary_builder_version,
+                    limit,
+                    after
+                ],
+                |row| row.get::<_, Vec<u8>>(0),
+            )?;
             let mut due = Vec::new();
             for row in rows {
                 due.push(SessionId::from_slice(&row?)?);

@@ -92,6 +92,27 @@ max_input_tokens = 100000
 max_output_tokens = 32000
 ```
 
+### Session cards
+
+Sessions with imported or managed transcript events get a deterministic card
+as their `sessions/<id>.md` page; no LLM is involved. With an LLM provider
+configured, a bounded maintenance tick also appends a labelled "AI summary"
+section to each current card: outcome, decisions, retractions and next step,
+every item citing the ledger events (`eN`) it rests on and naming the model.
+Items a deterministic validator rejects are listed as not summarized. The card
+itself is never changed, and consolidated or annotated pages are left alone.
+Prompt sizes follow `[consolidation]`. Answers are cached, so an unchanged
+session makes no further calls.
+
+```toml
+[session_cards]
+# On by default when a provider is configured; has no effect without one.
+ai_summary = true
+```
+
+Set `SESSIONMUNCH_SESSION_CARDS__AI_SUMMARY=false` (or `ai_summary = false`)
+to keep cards deterministic-only while still using a provider elsewhere.
+
 ---
 
 ## Reranking

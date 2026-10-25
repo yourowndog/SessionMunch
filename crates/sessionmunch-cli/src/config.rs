@@ -321,6 +321,8 @@ pub struct Config {
     /// LLM consolidation prompt limits. Defaults are sized for a model with a
     /// 200k-token context window.
     pub consolidation: ConsolidationSettings,
+    /// Deterministic session cards and their optional AI summary.
+    pub session_cards: SessionCardsSettings,
     /// Auto-improvement reviewer. The scheduler launches background review for
     /// newly completed sessions; manual CLI/admin/MCP runs remain available.
     /// Both approve validated proposals by default unless `require_approval` is
@@ -793,6 +795,7 @@ impl Default for Config {
             retrieval: RetrievalSettings::default(),
             slots: SlotSettings::default(),
             consolidation: ConsolidationSettings::default(),
+            session_cards: SessionCardsSettings::default(),
             auto_improve: AutoImproveSettings::default(),
             sanitize: sessionmunch_core::SanitizeConfig::default(),
             auth: AuthSettings::default(),
@@ -831,6 +834,23 @@ impl Default for ConsolidationSettings {
             max_input_tokens: sessionmunch_consolidate::DEFAULT_CONSOLIDATION_MAX_INPUT_TOKENS,
             max_output_tokens: sessionmunch_consolidate::DEFAULT_CONSOLIDATION_MAX_OUTPUT_TOKENS,
         }
+    }
+}
+
+/// `[session_cards]` settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SessionCardsSettings {
+    /// Add a cited "AI summary" section (outcome, decisions, retractions, next
+    /// step) to session cards when an LLM provider is configured. It runs in
+    /// a bounded maintenance tick and never changes the deterministic card.
+    /// Has no effect without a provider; set `false` to opt out with one.
+    pub ai_summary: bool,
+}
+
+impl Default for SessionCardsSettings {
+    fn default() -> Self {
+        Self { ai_summary: true }
     }
 }
 
@@ -2477,6 +2497,17 @@ mod tests {
             err.to_string()
                 .contains("SESSIONMUNCH_RERANKER=cross-encoder")
         );
+    }
+
+    #[test]
+    fn session_card_ai_summary_defaults_on_and_can_be_turned_off() {
+        let tmp = TempDir::new().unwrap();
+        let defaults = Config::load(None, Some(tmp.path().to_path_buf())).unwrap();
+        assert!(defaults.session_cards.ai_summary);
+        let cfg_path = tmp.path().join("config.toml");
+        std::fs::write(&cfg_path, "[session_cards]\nai_summary = false\n").unwrap();
+        let cfg = Config::load(Some(&cfg_path), Some(tmp.path().to_path_buf())).unwrap();
+        assert!(!cfg.session_cards.ai_summary);
     }
 
     #[test]

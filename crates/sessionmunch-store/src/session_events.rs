@@ -486,3 +486,43 @@ struct RawHit {
     cwd: Option<String>,
     created_at: i64,
 }
+
+/// Replace a session's cached summary-job answers with `jobs`
+/// (`(job_id, model, fields_json)`): rows for jobs the session no longer
+/// uses go, in the same transaction.
+pub(crate) fn replace_summary_jobs(
+    conn: &mut Connection,
+    session_id: &SessionId,
+    jobs: &[(String, String, String)],
+) -> StoreResult<()> {
+    let tx = conn.transaction()?;
+    tx.execute(
+        "DELETE FROM session_summary_jobs WHERE session_id = ?1",
+        params![session_id.as_bytes()],
+    )?;
+    let now = Timestamp::now().as_microsecond();
+    for (job_id, model, fields_json) in jobs {
+        tx.execute(
+            "INSERT INTO session_summary_jobs (session_id, job_id, model, fields_json, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![session_id.as_bytes(), job_id, model, fields_json, now],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// A session's cached summary-job answers as `(job_id, model, fields_json)`.
+pub(crate) fn summary_jobs(
+    conn: &Connection,
+    session_id: &SessionId,
+) -> StoreResult<Vec<(String, String, String)>> {
+    let mut statement = conn.prepare(
+        "SELECT job_id, model, fields_json FROM session_summary_jobs \
+         WHERE session_id = ?1 ORDER BY job_id",
+    )?;
+    let rows = statement.query_map(params![session_id.as_bytes()], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}

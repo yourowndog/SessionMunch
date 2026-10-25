@@ -141,6 +141,11 @@ pub(crate) enum WriteCmd {
         events: Vec<NewSessionEvent>,
         reply: oneshot::Sender<StoreResult<usize>>,
     },
+    ReplaceSummaryJobs {
+        session_id: SessionId,
+        jobs: Vec<(String, String, String)>,
+        reply: oneshot::Sender<StoreResult<()>>,
+    },
     UpdateSessionProvenance {
         session_id: SessionId,
         provenance: SessionProvenance,
@@ -918,6 +923,26 @@ impl WriterHandle {
         self.send(WriteCmd::BeginSessionWithProvenance {
             session,
             provenance,
+            reply: tx,
+        })
+        .await?;
+        rx.await.map_err(|_| StoreError::WriterClosed)?
+    }
+
+    /// Replace the cached AI summary-job answers of one session with `jobs`
+    /// (`(job_id, model, fields_json)`), in one transaction.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WriterClosed`] or propagates SQL errors.
+    pub async fn replace_session_summary_jobs(
+        &self,
+        session_id: SessionId,
+        jobs: Vec<(String, String, String)>,
+    ) -> StoreResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.send(WriteCmd::ReplaceSummaryJobs {
+            session_id,
+            jobs,
             reply: tx,
         })
         .await?;
@@ -2848,6 +2873,15 @@ fn worker_loop(mut conn: Connection, mut rx: mpsc::Receiver<WriteCmd>) {
                 let result =
                     crate::session_events::append_session_events(&mut conn, &session_id, &events);
                 send_or_warn(reply, result, "append_session_events");
+            }
+            WriteCmd::ReplaceSummaryJobs {
+                session_id,
+                jobs,
+                reply,
+            } => {
+                let result =
+                    crate::session_events::replace_summary_jobs(&mut conn, &session_id, &jobs);
+                send_or_warn(reply, result, "replace_session_summary_jobs");
             }
             WriteCmd::UpdateSessionProvenance {
                 session_id,
