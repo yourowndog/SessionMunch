@@ -174,6 +174,7 @@ impl MultiUserHarness {
             ingest_semaphore: ingest_semaphore.clone(),
             ingest_gates: sessionmunch_hooks::IngestGates::default(),
             consolidate_on_session_end: false,
+            consolidate_on_compact: true,
             session_consolidation_notify: None,
             capture_assistant_enabled: false,
             per_user_slots: false,

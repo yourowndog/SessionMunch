@@ -1168,6 +1168,7 @@ pub async fn run(config: &Config, host: &HostEnv, args: ServeArgs) -> Result<()>
                 )),
                 ingest_gates: sessionmunch_hooks::IngestGates::default(),
                 consolidate_on_session_end: config.consolidate_on_session_end,
+                consolidate_on_compact: config.consolidate_on_compact,
                 session_consolidation_notify,
                 capture_assistant_enabled: config.capture_assistant,
                 per_user_slots: config.slots.per_user,

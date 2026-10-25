@@ -255,6 +255,12 @@ pub struct Config {
     /// happens on PreCompact and via manual `memory_consolidate`. Set with
     /// `SESSIONMUNCH_CONSOLIDATE_ON_SESSION_END=true`.
     pub consolidate_on_session_end: bool,
+    /// Run LLM consolidation at PreCompact / PostCompaction when an LLM
+    /// provider is configured. On by default. Turn it off to keep a provider
+    /// for session-card AI summaries without rewriting session pages at every
+    /// compaction; the checkpoint then stays rule-based. Set with
+    /// `SESSIONMUNCH_CONSOLIDATE_ON_COMPACT=false`.
+    pub consolidate_on_compact: bool,
     /// Server-side opt-in for assistant/Stop capture (#196). When true, the
     /// server honors a client's sanitized `_sessionmunch_assistant` marker on a
     /// `Stop` event and persists the excerpt as the Stop body. Off by default;
@@ -782,6 +788,7 @@ impl Default for Config {
             llm_fallbacks: Vec::new(),
             llm_fallback_configs: Vec::new(),
             consolidate_on_session_end: false,
+            consolidate_on_compact: true,
             capture_assistant: false,
             strip_root_combinators: false,
             gemini_safe_schemas: false,
