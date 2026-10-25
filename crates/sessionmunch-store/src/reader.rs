@@ -1715,6 +1715,7 @@ mod pages;
 mod scopes;
 mod search;
 mod sessions;
+pub use sessions::SESSION_CARD_REPLACEABLE_KEYS;
 mod status;
 mod workstream;
 

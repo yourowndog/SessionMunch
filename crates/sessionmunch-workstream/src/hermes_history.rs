@@ -37,6 +37,14 @@ pub struct HermesSession {
     db: PathBuf,
 }
 
+#[cfg(test)]
+impl HermesSession {
+    /// Profile store holding this session.
+    pub(crate) fn db_path(&self) -> &Path {
+        &self.db
+    }
+}
+
 /// Discovery over every Hermes profile store under one Hermes home.
 #[derive(Clone, Debug)]
 pub struct HermesDiscovery {

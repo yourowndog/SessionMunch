@@ -18,6 +18,7 @@ pub mod embed;
 pub mod experience;
 pub mod lint;
 pub mod projection;
+pub mod session_cards;
 pub mod sweep;
 pub mod types;
 
@@ -67,6 +68,10 @@ pub use embed::{
 };
 pub use experience::{EXPERIENCE_SYSTEM_PROMPT, ExperienceConfig, run_experience_review};
 pub use lint::{LintError, LintFinding, LintOptions, LintReport, run_lint, stale_days_for};
+pub use session_cards::{
+    CARDS_PER_TICK, SESSION_CARD_TICK_INTERVAL, SessionCardTick, run_session_card_tick,
+    session_card_page,
+};
 pub use sweep::{
     DEFAULT_OBSERVATION_PRUNE_BATCH, EvictedPage, ObservationRetention, SweepError, SweepReport,
     run_sweep, run_sweep_with_breadth, run_sweep_with_options,

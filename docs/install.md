@@ -1593,7 +1593,7 @@ sessionmunch works in three intensity tiers:
 
 | Tier | What you get | Env vars | Cost |
 |---|---|---|---|
-| **Zero-LLM** (default) | FTS5 + manually declared entity + graph search, rule-based session summaries, auto-handoffs from prompt + tool-call history | (none) | $0 |
+| **Zero-LLM** (default) | FTS5 + manually declared entity + graph search, deterministic session cards and rule-based session summaries, auto-handoffs from prompt + tool-call history | (none) | $0 |
 | **+ LLM consolidation** | LLM rewrites session pages as coherent narratives; PreCompact checkpoints; LLM-driven contradiction lint | `SESSIONMUNCH_LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` | ~$0.01–0.05 / session |
 | **+ Anthropic via subscription** | Same LLM features using a Claude Pro/Max subscription instead of an API key | `SESSIONMUNCH_LLM_PROVIDER=anthropic-oauth` + `ANTHROPIC_OAUTH_TOKEN` | Uses your Claude subscription |
 | **+ ChatGPT/Codex OAuth** | Same LLM features using a ChatGPT Pro/Plus login instead of an OpenAI Platform key | `SESSIONMUNCH_LLM_PROVIDER=openai-oauth` + `sessionmunch auth login openai-oauth` | Uses your ChatGPT subscription |
@@ -2073,7 +2073,11 @@ latency across every existing workspace/project. Embedding backfill is
 supported but defaults to off because it can call a paid provider; if you
 enable `embedding_backfill_interval_secs` after configuring an embedder,
 each scheduled tick backfills every existing workspace/project and may
-increase provider usage accordingly.
+increase provider usage accordingly. While maintenance is enabled, a
+session-card tick also runs every minute: it writes at most 25 due
+`sessions/<id>.md` cards for imported or managed transcripts (sessions
+that never saw a SessionEnd, or whose card is older than the ledger) and
+makes one wiki commit. It calls no provider.
 
 Forget sweep and rule-based lint persist their last successful completion. On
 restart, a job that is not due waits only its remaining interval; a never-run

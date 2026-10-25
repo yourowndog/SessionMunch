@@ -3,3 +3,5 @@
 //! extra binary. A new file must be declared below.
 
 mod artifact_storage;
+mod digest;
+mod digest_eval;

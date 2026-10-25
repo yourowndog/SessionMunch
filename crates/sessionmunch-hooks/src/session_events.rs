@@ -521,4 +521,46 @@ mod tests {
         let resp = ingest_batch(State(state), None, Json(body)).await;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
+
+    /// Ingest stores events and nothing else: the card for an imported
+    /// session is the maintenance tick's job, never the request path's.
+    #[tokio::test]
+    async fn ingest_writes_no_session_page() {
+        let temp = TempDir::new().unwrap();
+        let store = Store::open(temp.path()).unwrap();
+        let state = test_state(&store);
+        let session_id = SessionId::new();
+        let mut events = vec![sample_event("evt-1", "Fix the upload bug")];
+        events[0].source = sessionmunch_core::SessionSource::Import;
+        let body = request_body("acme", "app", &session_id.to_string(), "codex", events);
+        let response = ingest_batch(State(state), None, Json(body)).await;
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let (ws, proj, _) = store
+            .reader
+            .find_session_scope(session_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let page = store
+            .reader
+            .page_body_by_ids(ws, proj, &format!("sessions/{session_id}.md"))
+            .await
+            .unwrap();
+        assert!(page.is_none());
+        let due = store
+            .reader
+            .session_cards_due(
+                sessionmunch_workstream::CARD_BUILDER_VERSION,
+                Some(session_id),
+                None,
+                1,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            due,
+            vec![session_id],
+            "the session is left due for the tick"
+        );
+    }
 }

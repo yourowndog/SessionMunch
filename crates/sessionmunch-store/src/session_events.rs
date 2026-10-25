@@ -196,12 +196,46 @@ pub(crate) fn list_session_events(
     session_id: &SessionId,
     limit: usize,
 ) -> StoreResult<Vec<SessionEvent>> {
-    let limit = limit.clamp(1, 1000) as i64;
-    let mut statement = conn.prepare(
+    query_session_events(conn, session_id, limit.clamp(1, 1000), false)
+}
+
+/// Most transcript events (imported or managed, not hook mirrors) one read
+/// returns. Content is bounded per event, so this bounds the read.
+pub const MAX_TRANSCRIPT_EVENTS: usize = 5_000;
+
+/// The session's transcript events, newest first, at most `limit` (capped at
+/// [`MAX_TRANSCRIPT_EVENTS`]). Hook mirrors are excluded: they repeat what an
+/// imported transcript of the same session already holds.
+pub(crate) fn list_transcript_events(
+    conn: &Connection,
+    session_id: &SessionId,
+    limit: usize,
+) -> StoreResult<Vec<SessionEvent>> {
+    query_session_events(
+        conn,
+        session_id,
+        limit.clamp(1, MAX_TRANSCRIPT_EVENTS),
+        true,
+    )
+}
+
+fn query_session_events(
+    conn: &Connection,
+    session_id: &SessionId,
+    limit: usize,
+    transcript_only: bool,
+) -> StoreResult<Vec<SessionEvent>> {
+    let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+    let filter = if transcript_only {
+        "AND source != 'hook' "
+    } else {
+        ""
+    };
+    let mut statement = conn.prepare(&format!(
         "SELECT sequence, event_id, kind, role, content, occurred_at, metadata_json \
-         FROM session_events WHERE session_id = ?1 \
-         ORDER BY sequence DESC LIMIT ?2",
-    )?;
+         FROM session_events WHERE session_id = ?1 {filter}\
+         ORDER BY sequence DESC LIMIT ?2"
+    ))?;
     let rows = statement.query_map(params![session_id.as_bytes(), limit], |row| {
         Ok((
             row.get::<_, i64>(0)?,

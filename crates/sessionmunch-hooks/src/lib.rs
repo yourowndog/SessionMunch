@@ -12,8 +12,9 @@
 //! 3. The server parses the body as JSON, runs it through bounded ingest and
 //!    the [`sessionmunch_core::Sanitizer`] redaction layer, then forwards a
 //!    [`sessionmunch_core::Sanitized<NewObservation>`] to the store writer. On
-//!    `SessionEnd` it also synthesises a wiki page summarising the session via
-//!    [`synth`].
+//!    `SessionEnd` it also writes the session's wiki page: the deterministic
+//!    card ([`sessionmunch_consolidate::session_card_page`]) when the session has event-ledger rows, else the
+//!    rule-based summary ([`synth`]).
 //!
 //! Privacy strip is a *typed* boundary: there is no way to write an
 //! observation without first passing through `Sanitized::new`.

@@ -6,6 +6,7 @@
 
 mod artifact;
 mod artifact_client;
+mod digest;
 mod drain;
 mod harness;
 mod hermes_history;
@@ -20,6 +21,10 @@ pub use artifact::{
     ArtifactStore, ArtifactUpload,
 };
 pub use artifact_client::{ARTIFACT_UPLOAD_BYTE_CAP, ArtifactClient, ArtifactClientError};
+pub use digest::{
+    CARD_BUILDER_VERSION, DigestEvent, EndState, EventRef, Fact, FactKind, NativeSignals,
+    SessionDigest, TerminalSignal, extract_facts, render_card,
+};
 
 pub use crate::drain::{
     DeliveryReceipt, DrainReport, EventSink, HttpEventSink, SESSION_EVENTS_PATH, SinkError,

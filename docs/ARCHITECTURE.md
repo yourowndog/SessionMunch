@@ -72,9 +72,21 @@ from hook paths.
    wiki commit, durable provider job, and pending key without appending another
    observation. `log.md` gets an appended
    `## [YYYY-MM-DDTHH:MM:SSZ] <event> | <title>` line.
-3. On true `SessionEnd` events, the server synthesises a
-   `sessions/<id>.md` summary page (rule-based, no LLM) and opens a
-   `Handoff` row for the next agent. One SQLite transaction inserts that
+3. On true `SessionEnd` events, the server writes the
+   `sessions/<id>.md` summary page (no LLM) and opens a
+   `Handoff` row for the next agent. When the session has transcript rows in
+   the session event ledger (imported or managed; hook mirrors are left out),
+   the page is the deterministic session card: the final assistant message
+   verbatim, the requests, observed tool work, checks, commits and files
+   touched, and what the events cannot show, each line citing the ledger
+   sequence numbers it came from (`eN`). Otherwise it is the rule-based
+   summary of the session's observations. Ingest stores events only; a
+   scheduled maintenance tick (every 60 s while `[maintenance] enabled`, at
+   most 25 cards per tick, one wiki commit per tick) writes the cards that are
+   due: imported sessions that never see a SessionEnd, cards from an older
+   builder, and cards behind the ledger. The tick walks the due set like a
+   ring, so a card that keeps failing cannot starve the rest, and it replaces
+   only a missing or generated page, never a consolidated or annotated one. One SQLite transaction inserts that
    automatic handoff, stamps the session ended, and records the covered
    observation count, so recovery never sees only half of those DB effects. A
    later SessionEnd re-runs the path only when that generation advances, so
@@ -279,7 +291,7 @@ separately gated Claude Code assistant/Stop excerpt remains capped at 2 KB.
 | `sessions`, `observations` | Sanitized, bounded lifecycle-hook projections. `sessions.ended_observation_count` is the stable generation watermark for resumed-session re-end eligibility; wall clocks are not used for that decision. Since V65 the `sessions.agent_kind` CHECK enum is gone (free-text harness) and `sessions` carries provenance (`native_session_id`, `machine_id`, `project_id` nullable for global rows, `git_root`/`git_branch`/`commit_at_start`, `source`, `import_cursor`). `observations` is retained as the compatibility capture path and operational audit trail, not the authoritative transcript. |
 | `session_consolidation_jobs` | Durable, observation-generation-idempotent queue for opt-in SessionEnd LLM consolidation. One bounded server worker leases jobs, retries provider failures with backoff, and recovers expired leases after restart. |
 | `observations_fts` | FTS5 virtual table over raw observation `(title, body)`, used only as bounded fallback. |
-| `session_events`, `session_events_fts` | Promoted session-owned event ledger (V65, North Star §4): the portable workstream-event concept generalized so hook, import, and managed events converge on one `sessions` row. Idempotent insert on `UNIQUE(session_id, event_id)`; per-event best-effort `model`/`provider` in `metadata_json`. Authoritative history going forward. |
+| `session_events`, `session_events_fts` | Promoted session-owned event ledger (V65, North Star §4): the portable workstream-event concept generalized so hook, import, and managed events converge on one `sessions` row. Idempotent insert on `UNIQUE(session_id, event_id)`; per-event best-effort `model`/`provider` in `metadata_json`. Authoritative history going forward. Its transcript rows (`source` import or managed) are what the deterministic session card in `sessions/<id>.md` is built from and cites by `sequence`. |
 | `workstreams`, `managed_runs`, `workstream_native_sessions` | Optional lease state plus per-harness native source and delivery cursors for `sessionmunch run`. |
 | `workstream_events`, `workstream_events_fts` | Append-only normalized visible transcript events and full-text search; immutable sanitized source batches also live under `raw/workstreams/`. |
 | `links` | Wikilink / markdown cross-references. `to_page_id` (a global PageId) is nullable for unresolved forward links. `to_workspace` / `to_project` carry a cross-project scope (NULL = the source page's own project). |
