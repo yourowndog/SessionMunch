@@ -17,4 +17,5 @@ mod multi_machine;
 mod observation_retention;
 mod recall_eval;
 mod search_quality;
+mod session_cards;
 mod typed_edges;

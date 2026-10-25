@@ -43,8 +43,8 @@ use crate::payload::{
     HookEnvelope, HookEvent, HookQuery, ProjectSource, ProjectStrategy, body_is_subagent,
     parse_agent,
 };
-use crate::session_card::session_card_page;
 use crate::synth::synthesize_session_page;
+use sessionmunch_consolidate::session_card_page;
 
 /// Default maximum number of hook events allowed to be processing at once.
 ///

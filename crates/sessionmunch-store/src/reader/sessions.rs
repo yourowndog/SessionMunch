@@ -1203,7 +1203,8 @@ impl ReaderPool {
     /// [`SESSION_CARD_REPLACEABLE_KEYS`] in its frontmatter) whose
     /// `card.builder_version` is older than `builder_version` or whose
     /// `card.last_sequence` is behind its transcript rows. `only` restricts the check
-    /// to one session.
+    /// to one session; `after` returns only ids greater than it, so callers
+    /// can walk the due set in bounded pages.
     ///
     /// # Errors
     /// Propagates any SQL or pool error.
@@ -1211,6 +1212,7 @@ impl ReaderPool {
         &self,
         builder_version: u32,
         only: Option<SessionId>,
+        after: Option<SessionId>,
         limit: usize,
     ) -> StoreResult<Vec<SessionId>> {
         self.with_conn(move |conn| {
@@ -1226,6 +1228,7 @@ impl ReaderPool {
                  WHERE EXISTS (SELECT 1 FROM session_events e \
                                WHERE e.session_id = s.id AND e.source != 'hook') \
                    AND (?3 IS NULL OR s.id = ?3) \
+                   AND (?4 IS NULL OR s.id > ?4) \
                    AND NOT EXISTS ( \
                      SELECT 1 FROM pages pg \
                      WHERE pg.workspace_id = s.workspace_id AND pg.project_id = s.project_id \
@@ -1245,8 +1248,9 @@ impl ReaderPool {
             );
             let limit = i64::try_from(limit).unwrap_or(i64::MAX);
             let only = only.map(|id| id.as_bytes().to_vec());
+            let after = after.map(|id| id.as_bytes().to_vec());
             let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map(params![builder_version, limit, only], |row| {
+            let rows = stmt.query_map(params![builder_version, limit, only, after], |row| {
                 row.get::<_, Vec<u8>>(0)
             })?;
             let mut due = Vec::new();

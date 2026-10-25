@@ -16,6 +16,8 @@ sessionmunch-core.workspace = true
 sessionmunch-store.workspace = true
 sessionmunch-wiki.workspace = true
 sessionmunch-llm.workspace = true
+# The deterministic session digest the session-card tick renders.
+sessionmunch-workstream.workspace = true
 git2.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true

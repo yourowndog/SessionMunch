@@ -2073,7 +2073,11 @@ latency across every existing workspace/project. Embedding backfill is
 supported but defaults to off because it can call a paid provider; if you
 enable `embedding_backfill_interval_secs` after configuring an embedder,
 each scheduled tick backfills every existing workspace/project and may
-increase provider usage accordingly.
+increase provider usage accordingly. While maintenance is enabled, a
+session-card tick also runs every minute: it writes at most 25 due
+`sessions/<id>.md` cards for imported or managed transcripts (sessions
+that never saw a SessionEnd, or whose card is older than the ledger) and
+makes one wiki commit. It calls no provider.
 
 Forget sweep and rule-based lint persist their last successful completion. On
 restart, a job that is not due waits only its remaining interval; a never-run

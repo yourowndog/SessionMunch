@@ -1191,7 +1191,6 @@ pub async fn run(config: &Config, host: &HostEnv, args: ServeArgs) -> Result<()>
                 writer: store.writer.clone(),
                 reader: store.reader.clone(),
                 sanitizer: sanitizer.clone(),
-                wiki: Some(wiki.clone()),
             });
             // The server owns the content-addressed artifact store under its
             // data dir and exposes it beside `/session-events`, so importers
@@ -1689,6 +1688,43 @@ async fn start_maintenance_scheduler(
                 },
             )
             .await;
+        }));
+    }
+
+    // Session cards for imported and managed transcripts: one bounded batch
+    // per tick, off the ingest path. SessionEnd writes its own card; this
+    // catches imported sessions that never see one, cards from an older
+    // builder, and cards behind the ledger. The cursor walks the due set like
+    // a ring so a card that keeps failing cannot starve the rest.
+    if maintenance_enabled {
+        let reader = reader.clone();
+        let wiki = wiki.clone();
+        tasks.push(tokio::spawn(async move {
+            let mut after = None;
+            loop {
+                match sessionmunch_consolidate::run_session_card_tick(
+                    &reader,
+                    &wiki,
+                    after,
+                    sessionmunch_consolidate::CARDS_PER_TICK,
+                )
+                .await
+                {
+                    Ok(tick) => {
+                        if tick.written > 0 || tick.failed > 0 {
+                            info!(
+                                due = tick.due,
+                                written = tick.written,
+                                failed = tick.failed,
+                                "session card tick completed"
+                            );
+                        }
+                        after = tick.next_after;
+                    }
+                    Err(e) => tracing::warn!(error = %e, "session card tick failed"),
+                }
+                tokio::time::sleep(sessionmunch_consolidate::SESSION_CARD_TICK_INTERVAL).await;
+            }
         }));
     }
 
@@ -3132,8 +3168,9 @@ mod tests {
                 crate::config::DecaySettings::default(),
             )
             .await;
-            // One enabled lint/sweep job plus the independent hollow-project job.
-            assert_eq!(tasks.len(), 2);
+            // One enabled lint/sweep job plus the independent hollow-project
+            // and session-card jobs.
+            assert_eq!(tasks.len(), 3);
             for task in tasks {
                 task.abort();
             }

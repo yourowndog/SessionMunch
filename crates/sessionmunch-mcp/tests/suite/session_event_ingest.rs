@@ -32,7 +32,6 @@ fn make_router(store: &Store, token: Option<&str>) -> Router {
         writer: store.writer.clone(),
         reader: store.reader.clone(),
         sanitizer: sessionmunch_core::Sanitizer::default(),
-        wiki: None,
     };
     let auth = Arc::new(AuthState::new(token.map(str::to_string)));
     Router::new()

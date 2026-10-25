@@ -9,11 +9,12 @@
 //! (`eN`). A session with no transcript events keeps the rule-based
 //! observation summary ([`crate::synthesize_session_page`]).
 //!
-//! The card is rewritten when SessionEnd arrives and after each ingested
-//! event batch, and a bounded batch of stale cards (older builder version,
-//! or fewer events than the ledger now holds) is refreshed with each batch.
-//! Outside SessionEnd, only a missing page or a generated one is replaced:
-//! a consolidated or hand-annotated page is left alone (see
+//! SessionEnd writes the card itself. Everything else is maintenance: the
+//! scheduled card tick ([`run_session_card_tick`]) rewrites, in bounded
+//! batches, the cards that are due: missing (an imported session that never
+//! saw a SessionEnd), built by an older builder, or behind the ledger. The
+//! ingest path does no wiki work. The tick replaces only a missing page or a
+//! generated one; a consolidated or hand-annotated page is left alone (see
 //! [`sessionmunch_store::SESSION_CARD_REPLACEABLE_KEYS`]).
 
 use sessionmunch_core::{
@@ -27,11 +28,14 @@ use sessionmunch_workstream::{
 };
 use tracing::{debug, warn};
 
+/// Cards one maintenance tick rewrites at most.
+pub const CARDS_PER_TICK: usize = 25;
+/// How often the server runs the card tick while maintenance is enabled.
+pub const SESSION_CARD_TICK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// Most transcript events one card reads. A longer session's card is built
 /// from its latest events and says so.
 pub const MAX_CARD_EVENTS: usize = sessionmunch_store::MAX_TRANSCRIPT_EVENTS;
-/// Stale cards refreshed alongside each ingested batch.
-pub const STALE_CARDS_PER_BATCH: usize = 4;
 const TITLE_CHARS: usize = 100;
 const SUMMARY_CHARS: usize = 240;
 
@@ -176,8 +180,7 @@ pub(crate) async fn write_card(
         .await?)
 }
 
-/// Refresh one session's card when it is due. Returns whether a card was
-/// written.
+/// Rewrite one session's card. Returns whether a card was written.
 async fn refresh_one(
     wiki: &Wiki,
     reader: &ReaderPool,
@@ -206,45 +209,58 @@ async fn refresh_one(
     Ok(true)
 }
 
-/// After an event batch for `session_id` is stored: refresh its card if it
-/// is due, then up to [`STALE_CARDS_PER_BATCH`] other due cards. Failures
-/// are logged, never returned: the events are already committed, and the
-/// next batch retries anything left due.
-pub async fn refresh_cards_after_ingest(wiki: &Wiki, reader: &ReaderPool, session_id: SessionId) {
-    let mut due = match reader
-        .session_cards_due(CARD_BUILDER_VERSION, Some(session_id), 1)
-        .await
-    {
-        Ok(due) => due,
-        Err(error) => {
-            warn!(session = %session_id, error = %error, "session card check failed");
-            return;
-        }
+/// What one card tick did.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SessionCardTick {
+    /// Due sessions this tick looked at.
+    pub due: usize,
+    /// Cards written.
+    pub written: usize,
+    /// Cards that failed (logged; retried on a later pass).
+    pub failed: usize,
+    /// Where the next tick continues: the last session looked at, or `None`
+    /// when this pass reached the end and the next one starts over.
+    pub next_after: Option<SessionId>,
+}
+
+/// One maintenance tick: rewrite at most `limit` due cards (see
+/// [`ReaderPool::session_cards_due`]) after `after` in session-id order, then
+/// make one wiki commit. Ticks walk the due set like a ring, so a session
+/// whose card keeps failing cannot hold up the rest. Imported sessions get
+/// their page here, off the ingest path; SessionEnd writes its own card.
+///
+/// # Errors
+/// Propagates a failure of the due-set query; per-card failures are logged
+/// and counted instead.
+pub async fn run_session_card_tick(
+    reader: &ReaderPool,
+    wiki: &Wiki,
+    after: Option<SessionId>,
+    limit: usize,
+) -> StoreResult<SessionCardTick> {
+    let due = reader
+        .session_cards_due(CARD_BUILDER_VERSION, None, after, limit)
+        .await?;
+    let mut tick = SessionCardTick {
+        due: due.len(),
+        next_after: (due.len() == limit).then(|| due.last().copied()).flatten(),
+        ..SessionCardTick::default()
     };
-    match reader
-        .session_cards_due(CARD_BUILDER_VERSION, None, STALE_CARDS_PER_BATCH + 1)
-        .await
-    {
-        Ok(stale) => due.extend(
-            stale
-                .into_iter()
-                .filter(|id| *id != session_id)
-                .take(STALE_CARDS_PER_BATCH),
-        ),
-        Err(error) => warn!(error = %error, "stale session card scan failed"),
-    }
-    let mut written = 0;
     for id in due {
         match refresh_one(wiki, reader, id).await {
-            Ok(true) => written += 1,
+            Ok(true) => tick.written += 1,
             Ok(false) => {}
-            Err(error) => warn!(session = %id, error = %error, "session card refresh failed"),
+            Err(error) => {
+                tick.failed += 1;
+                warn!(session = %id, error = %error, "session card refresh failed");
+            }
         }
     }
-    if written > 0 {
-        match wiki.commit_all(&format!("session cards: {written} refreshed")) {
-            Ok(oid) => debug!(commit = ?oid, written, "session cards committed"),
+    if tick.written > 0 {
+        match wiki.commit_all(&format!("session cards: {} refreshed", tick.written)) {
+            Ok(oid) => debug!(commit = ?oid, written = tick.written, "session cards committed"),
             Err(error) => warn!(error = %error, "session card auto-commit failed"),
         }
     }
+    Ok(tick)
 }

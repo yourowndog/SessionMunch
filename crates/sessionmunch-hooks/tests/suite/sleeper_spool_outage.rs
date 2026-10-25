@@ -57,7 +57,6 @@ impl Sleeper {
             writer: store.writer.clone(),
             reader: store.reader.clone(),
             sanitizer: Sanitizer::default(),
-            wiki: None,
         };
         let app = session_events_router(state);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -408,7 +407,6 @@ async fn spool_survives_process_restart_mid_drain() {
         writer: store.writer.clone(),
         reader: store.reader.clone(),
         sanitizer: Sanitizer::default(),
-        wiki: None,
     };
     let app = session_events_router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -445,7 +443,6 @@ async fn spool_survives_process_restart_mid_drain() {
         writer: store.writer.clone(),
         reader: store.reader.clone(),
         sanitizer: Sanitizer::default(),
-        wiki: None,
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base_url = format!("http://{}", listener.local_addr().unwrap());

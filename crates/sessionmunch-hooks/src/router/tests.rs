@@ -4613,6 +4613,7 @@ async fn session_end_falls_back_to_the_observation_summary_without_ledger_events
         .session_cards_due(
             sessionmunch_workstream::CARD_BUILDER_VERSION,
             Some(session_id),
+            None,
             1,
         )
         .await

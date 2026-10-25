@@ -80,12 +80,13 @@ from hook paths.
    verbatim, the requests, observed tool work, checks, commits and files
    touched, and what the events cannot show, each line citing the ledger
    sequence numbers it came from (`eN`). Otherwise it is the rule-based
-   summary of the session's observations. Cards also follow ingest: each
-   accepted event batch rewrites that session's card and refreshes up to four
-   other stale cards (older builder version, or behind the ledger), so an
-   imported session gets its page without a SessionEnd. Outside SessionEnd a
-   card replaces only a missing or generated page, never a consolidated or
-   annotated one. One SQLite transaction inserts that
+   summary of the session's observations. Ingest stores events only; a
+   scheduled maintenance tick (every 60 s while `[maintenance] enabled`, at
+   most 25 cards per tick, one wiki commit per tick) writes the cards that are
+   due: imported sessions that never see a SessionEnd, cards from an older
+   builder, and cards behind the ledger. The tick walks the due set like a
+   ring, so a card that keeps failing cannot starve the rest, and it replaces
+   only a missing or generated page, never a consolidated or annotated one. One SQLite transaction inserts that
    automatic handoff, stamps the session ended, and records the covered
    observation count, so recovery never sees only half of those DB effects. A
    later SessionEnd re-runs the path only when that generation advances, so
