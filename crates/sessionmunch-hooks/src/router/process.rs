@@ -295,6 +295,7 @@ pub(super) async fn process_authorized(
                 owner_filter.clone(),
                 ingest_key.clone(),
                 env.machine.clone(),
+                env.captured_at,
             )
             .await;
         match result {

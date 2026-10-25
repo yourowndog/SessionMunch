@@ -5653,6 +5653,55 @@ fn hook_admission_records_the_first_machine_and_keeps_it() {
 }
 
 #[test]
+fn hook_admission_dates_ledger_events_by_capture_time() {
+    let (_tmp, mut conn, ws, proj) = fresh_db();
+    let session = hook_session(SessionId::new(), ws, proj, None);
+    let event = hook_observation(&session);
+    let now = Timestamp::now().as_microsecond();
+    let minute = 60 * 1_000_000;
+    let admit = |conn: &mut Connection, captured_at: Option<i64>| {
+        admit_hook_session_event_at(
+            conn,
+            &session,
+            &event,
+            &OwnerFilter::Any,
+            None,
+            None,
+            captured_at,
+        )
+        .unwrap();
+    };
+    let newest_event_time = |conn: &Connection| -> i64 {
+        let at: String = conn
+            .query_row(
+                "SELECT occurred_at FROM session_events WHERE session_id = ?1 \
+                 ORDER BY sequence DESC LIMIT 1",
+                params![session.id.as_bytes()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        at.parse::<Timestamp>().unwrap().as_microsecond()
+    };
+
+    // A batch drained a minute late keeps the time the event happened.
+    admit(&mut conn, Some(now - minute));
+    assert_eq!(newest_event_time(&conn), now - minute);
+
+    // An implausible client clock (far past or future) falls back to arrival.
+    for skewed in [now - 30 * 24 * 60 * minute, now + 60 * minute] {
+        admit(&mut conn, Some(skewed));
+        assert!(
+            newest_event_time(&conn) >= now,
+            "untrusted capture time kept"
+        );
+    }
+
+    // Older clients send nothing and get arrival time, as before.
+    admit(&mut conn, None);
+    assert!(newest_event_time(&conn) >= now);
+}
+
+#[test]
 fn hook_admission_rejects_cross_owner_fresh_key_without_claiming_it() {
     let (_tmp, mut conn, ws, proj) = fresh_db();
     let alice = "user:alice";

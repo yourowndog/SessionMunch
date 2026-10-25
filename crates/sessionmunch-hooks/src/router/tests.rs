@@ -1992,6 +1992,50 @@ fn any_file_contains(dir: &std::path::Path, needle: &[u8]) -> bool {
     false
 }
 
+/// A drained batch reaches the server after the events happened. The ledger
+/// must date each event by its `captured_ms`, not by when the batch arrived.
+#[tokio::test]
+async fn handle_hook_batch_dates_events_by_capture_time() {
+    let tmp = TempDir::new().unwrap();
+    let state = Arc::new(make_state(&tmp).await);
+    let captured_ms = jiff::Timestamp::now().as_millisecond() - 90_000;
+    let body = serde_json::json!({ "session_id": "late-batch", "prompt": "hello" });
+    let items = vec![HookBatchItem {
+        url: format!(
+            "http://h/hook?event=user-prompt-submit&agent=claude-code&captured_ms={captured_ms}"
+        ),
+        body: body.clone(),
+    }];
+    let response = handle_hook_batch(
+        State(state.clone()),
+        None,
+        None,
+        HeaderMap::new(),
+        Json(items),
+    )
+    .await
+    .into_response();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let sid = resolve_session_id(&HookEnvelope::from_query_and_body(
+        HookQuery {
+            event: "user-prompt-submit".into(),
+            agent: Some("claude-code".into()),
+            session_id: Some("late-batch".into()),
+            ..Default::default()
+        },
+        body,
+    ))
+    .unwrap();
+    let events = state.reader.session_events(sid, 10).await.unwrap();
+    let prompt = events
+        .iter()
+        .find(|e| e.content.contains("hello"))
+        .expect("prompt mirrored into the ledger");
+    let occurred: jiff::Timestamp = prompt.occurred_at.as_deref().unwrap().parse().unwrap();
+    assert_eq!(occurred.as_millisecond(), captured_ms);
+}
+
 #[tokio::test]
 async fn handle_hook_batch_strips_assistant_message_before_persist() {
     let tmp = TempDir::new().unwrap();

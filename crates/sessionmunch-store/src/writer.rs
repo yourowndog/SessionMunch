@@ -185,6 +185,7 @@ pub(crate) enum WriteCmd {
         owner_filter: OwnerFilter,
         ingest_key: Option<String>,
         machine_id: Option<String>,
+        captured_at: Option<i64>,
         reply: oneshot::Sender<StoreResult<HookSessionAdmission>>,
     },
     EndAdmittedSession {
@@ -1111,6 +1112,8 @@ impl WriterHandle {
     }
 
     /// Atomically validate/admit a hook session and insert its observation.
+    /// `captured_at` (Unix µs) is when the client captured the event; the
+    /// ledger records it as the event time when plausible, else arrival time.
     pub async fn admit_hook_session_event(
         &self,
         session: NewSession,
@@ -1118,6 +1121,7 @@ impl WriterHandle {
         owner_filter: OwnerFilter,
         ingest_key: Option<String>,
         machine_id: Option<String>,
+        captured_at: Option<i64>,
     ) -> StoreResult<HookSessionAdmission> {
         let (tx, rx) = oneshot::channel();
         self.send(WriteCmd::AdmitHookSessionEvent {
@@ -1126,6 +1130,7 @@ impl WriterHandle {
             owner_filter,
             ingest_key,
             machine_id,
+            captured_at,
             reply: tx,
         })
         .await?;
@@ -2946,15 +2951,17 @@ fn worker_loop(mut conn: Connection, mut rx: mpsc::Receiver<WriteCmd>) {
                 owner_filter,
                 ingest_key,
                 machine_id,
+                captured_at,
                 reply,
             } => {
-                let result = ops::admit_hook_session_event(
+                let result = ops::admit_hook_session_event_at(
                     &mut conn,
                     &session,
                     &obs,
                     &owner_filter,
                     ingest_key.as_deref(),
                     machine_id.as_deref(),
+                    captured_at,
                 );
                 send_or_warn(reply, result, "admit_hook_session_event");
             }

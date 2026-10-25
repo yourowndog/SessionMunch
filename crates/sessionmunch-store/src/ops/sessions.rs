@@ -203,7 +203,7 @@ pub fn insert_observation(
     obs: &NewObservation,
 ) -> StoreResult<ObservationId> {
     let tx = conn.transaction()?;
-    let id = insert_observation_row(&tx, obs)?;
+    let id = insert_observation_row(&tx, obs, None)?;
     tx.commit()?;
     Ok(id)
 }
@@ -283,7 +283,7 @@ pub fn insert_observation_keyed(
          VALUES (?1, ?2, ?3, NULL)",
         params![obs.project_id.as_bytes(), ingest_key, now],
     )?;
-    let id = insert_observation_row(&tx, obs)?;
+    let id = insert_observation_row(&tx, obs, None)?;
     tx.commit()?;
     Ok(IngestObservationOutcome::Inserted(id))
 }
@@ -298,6 +298,29 @@ pub fn admit_hook_session_event(
     owner_filter: &OwnerFilter,
     ingest_key: Option<&str>,
     machine_id: Option<&str>,
+) -> StoreResult<HookSessionAdmission> {
+    admit_hook_session_event_at(
+        conn,
+        session,
+        obs,
+        owner_filter,
+        ingest_key,
+        machine_id,
+        None,
+    )
+}
+
+/// [`admit_hook_session_event`] with the client's capture time (Unix µs).
+/// The ledger event takes that time when it is plausible (see
+/// [`capture_time_or_now`]); the observation row keeps its arrival time.
+pub fn admit_hook_session_event_at(
+    conn: &mut Connection,
+    session: &NewSession,
+    obs: &NewObservation,
+    owner_filter: &OwnerFilter,
+    ingest_key: Option<&str>,
+    machine_id: Option<&str>,
+    captured_at: Option<i64>,
 ) -> StoreResult<HookSessionAdmission> {
     if obs.session_id != session.id
         || obs.workspace_id != session.workspace_id
@@ -414,11 +437,11 @@ pub fn admit_hook_session_event(
             }
             None => {
                 tx.execute("INSERT INTO ingest_keys (project_id, key, seen_at, completed_at) VALUES (?1, ?2, ?3, NULL)", params![obs.project_id.as_bytes(), key, now])?;
-                IngestObservationOutcome::Inserted(insert_observation_row(&tx, obs)?)
+                IngestObservationOutcome::Inserted(insert_observation_row(&tx, obs, captured_at)?)
             }
         }
     } else {
-        IngestObservationOutcome::Inserted(insert_observation_row(&tx, obs)?)
+        IngestObservationOutcome::Inserted(insert_observation_row(&tx, obs, captured_at)?)
     };
     tx.commit()?;
     if !session_end {
@@ -547,6 +570,7 @@ pub fn complete_observation_ingest_if_claimed(
 pub(super) fn insert_observation_row(
     conn: &Connection,
     obs: &NewObservation,
+    captured_at: Option<i64>,
 ) -> StoreResult<ObservationId> {
     let id = ObservationId::new();
     let now = Timestamp::now().as_microsecond();
@@ -577,6 +601,27 @@ pub(super) fn insert_observation_row(
             now,
         ],
     )?;
-    crate::session_events::mirror_observation(conn, &id, obs, now)?;
+    let occurred_at = capture_time_or_now(captured_at, now);
+    crate::session_events::mirror_observation(conn, &id, obs, occurred_at, now)?;
     Ok(id)
+}
+
+/// Oldest capture time accepted: the client spool keeps events up to 7 days,
+/// plus a day of retry and clock margin.
+const MAX_CAPTURE_AGE_MICROS: i64 = 8 * 24 * 60 * 60 * 1_000_000;
+
+/// Furthest a capture time may sit ahead of this server's clock.
+const MAX_CAPTURE_SKEW_MICROS: i64 = 5 * 60 * 1_000_000;
+
+/// The client's capture time when it is plausible, else `now`. Spooled hook
+/// events are delivered in batches, so arrival time can trail the event by
+/// seconds (or by days after an outage). A client clock outside the window is
+/// not trusted.
+pub(crate) fn capture_time_or_now(captured_at: Option<i64>, now: i64) -> i64 {
+    captured_at
+        .filter(|at| {
+            *at >= now.saturating_sub(MAX_CAPTURE_AGE_MICROS)
+                && *at <= now.saturating_add(MAX_CAPTURE_SKEW_MICROS)
+        })
+        .unwrap_or(now)
 }
