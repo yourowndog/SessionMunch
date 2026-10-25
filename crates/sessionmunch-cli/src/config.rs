@@ -853,11 +853,21 @@ pub struct SessionCardsSettings {
     /// a bounded maintenance tick and never changes the deterministic card.
     /// Has no effect without a provider; set `false` to opt out with one.
     pub ai_summary: bool,
+    /// Session cards the maintenance tick builds at once. Cards are
+    /// deterministic, so this only trades CPU and disk for backfill speed.
+    pub card_lanes: usize,
+    /// Sessions the AI summary tick sends to the provider at once. Match it to
+    /// the slots the provider serves in parallel (llama.cpp `--parallel`).
+    pub summary_lanes: usize,
 }
 
 impl Default for SessionCardsSettings {
     fn default() -> Self {
-        Self { ai_summary: true }
+        Self {
+            ai_summary: true,
+            card_lanes: 4,
+            summary_lanes: 1,
+        }
     }
 }
 
@@ -2511,6 +2521,13 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let defaults = Config::load(None, Some(tmp.path().to_path_buf())).unwrap();
         assert!(defaults.session_cards.ai_summary);
+        assert_eq!(
+            (
+                defaults.session_cards.card_lanes,
+                defaults.session_cards.summary_lanes
+            ),
+            (4, 1)
+        );
         let cfg_path = tmp.path().join("config.toml");
         std::fs::write(&cfg_path, "[session_cards]\nai_summary = false\n").unwrap();
         let cfg = Config::load(Some(&cfg_path), Some(tmp.path().to_path_buf())).unwrap();

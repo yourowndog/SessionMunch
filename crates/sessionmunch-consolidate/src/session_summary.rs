@@ -1026,9 +1026,11 @@ fn reduce_job(
 
 // ------------------------------------------------------------ the card tick
 
-/// AI summaries one tick writes at most. Each can take several provider
-/// calls, so this stays small.
+/// AI summaries one tick writes at most per lane. Each can take several
+/// provider calls, so this stays small.
 pub const SUMMARIES_PER_TICK: usize = 2;
+/// Pause between summary ticks while a backlog remains.
+pub const SESSION_SUMMARY_CATCH_UP_PAUSE: std::time::Duration = std::time::Duration::from_secs(1);
 /// How often the server runs the summary tick (provider configured,
 /// `[session_cards] ai_summary` on, maintenance enabled).
 pub const SESSION_SUMMARY_TICK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
@@ -1141,11 +1143,14 @@ pub fn render_ai_section(report: &SummaryReport) -> String {
 /// jobs, append the "AI summary" section to the card, and make one wiki
 /// commit. Accepted job answers are cached in the store by job id, so a
 /// session whose events did not change makes no provider calls, even after
-/// its card was rewritten.
+/// its card was rewritten. Up to `lanes` sessions run at once, each against
+/// the same provider (a local server with several slots serves them in
+/// parallel).
 ///
 /// # Errors
 /// Propagates a failure of the due-set query; per-session failures are
 /// logged and counted instead.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_session_summary_tick(
     reader: &sessionmunch_store::ReaderPool,
     writer: &sessionmunch_store::WriterHandle,
@@ -1154,7 +1159,10 @@ pub async fn run_session_summary_tick(
     budgets: SummaryBudgets,
     after: Option<sessionmunch_core::SessionId>,
     limit: usize,
+    lanes: usize,
 ) -> sessionmunch_store::StoreResult<SessionSummaryTick> {
+    use futures_util::StreamExt as _;
+
     let due = reader
         .session_summaries_due(
             sessionmunch_workstream::CARD_BUILDER_VERSION,
@@ -1169,8 +1177,16 @@ pub async fn run_session_summary_tick(
         next_after: (due.len() == limit).then(|| due.last().copied()).flatten(),
         ..SessionSummaryTick::default()
     };
-    for id in due {
-        match summarize_one(reader, writer, wiki, provider, budgets, id).await {
+    let mut results = futures_util::stream::iter(due)
+        .map(|id| async move {
+            (
+                id,
+                summarize_one(reader, writer, wiki, provider, budgets, id).await,
+            )
+        })
+        .buffer_unordered(lanes.max(1));
+    while let Some((id, result)) = results.next().await {
+        match result {
             Ok(calls) => {
                 tick.written += 1;
                 tick.calls += calls;

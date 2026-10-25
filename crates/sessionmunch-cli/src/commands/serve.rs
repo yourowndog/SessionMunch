@@ -1015,6 +1015,10 @@ pub async fn run(config: &Config, host: &HostEnv, args: ServeArgs) -> Result<()>
                 max_input_tokens: config.consolidation.max_input_tokens,
                 max_output_tokens: config.consolidation.max_output_tokens,
             }),
+        (
+            config.session_cards.card_lanes,
+            config.session_cards.summary_lanes,
+        ),
     )
     .await;
 
@@ -1532,7 +1536,10 @@ async fn start_maintenance_scheduler(
     // `Some` when `[session_cards] ai_summary` is on: the budgets the
     // optional AI summary tick sizes its prompts with.
     ai_summary: Option<sessionmunch_consolidate::SummaryBudgets>,
+    // `[session_cards] card_lanes` / `summary_lanes`.
+    lanes: (usize, usize),
 ) -> Vec<tokio::task::JoinHandle<()>> {
+    let (card_lanes, summary_lanes) = lanes;
     let maintenance_enabled = settings.enabled;
     if !maintenance_enabled {
         info!("scheduled retention/lint/embed maintenance disabled");
@@ -1707,9 +1714,14 @@ async fn start_maintenance_scheduler(
     // catches imported sessions that never see one, cards from an older
     // builder, and cards behind the ledger. The cursor walks the due set like
     // a ring so a card that keeps failing cannot starve the rest.
+    //
+    // AI summaries wait for the card backlog to drain: a summary sits on a
+    // current card, and the cards are what the reader wants first.
+    let cards_backlog = Arc::new(std::sync::atomic::AtomicBool::new(true));
     if maintenance_enabled {
         let reader = reader.clone();
         let wiki = wiki.clone();
+        let cards_backlog = cards_backlog.clone();
         tasks.push(tokio::spawn(async move {
             let mut after = None;
             loop {
@@ -1717,7 +1729,8 @@ async fn start_maintenance_scheduler(
                     &reader,
                     &wiki,
                     after,
-                    sessionmunch_consolidate::CARDS_PER_TICK,
+                    sessionmunch_consolidate::CARDS_PER_TICK * card_lanes.max(1),
+                    card_lanes,
                 )
                 .await
                 {
@@ -1731,10 +1744,20 @@ async fn start_maintenance_scheduler(
                             );
                         }
                         after = tick.next_after;
+                        cards_backlog.store(after.is_some(), std::sync::atomic::Ordering::Relaxed);
                     }
-                    Err(e) => tracing::warn!(error = %e, "session card tick failed"),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "session card tick failed");
+                        after = None;
+                    }
                 }
-                tokio::time::sleep(sessionmunch_consolidate::SESSION_CARD_TICK_INTERVAL).await;
+                // A full batch means more are due: keep draining.
+                tokio::time::sleep(if after.is_some() {
+                    sessionmunch_consolidate::SESSION_CARD_CATCH_UP_PAUSE
+                } else {
+                    sessionmunch_consolidate::SESSION_CARD_TICK_INTERVAL
+                })
+                .await;
             }
         }));
     }
@@ -1743,13 +1766,23 @@ async fn start_maintenance_scheduler(
     // `[session_cards] ai_summary` on (zero-LLM default otherwise). A couple
     // of sessions per tick; cached job answers make unchanged sessions free.
     if maintenance_enabled && let (Some(budgets), Some(llm)) = (ai_summary, llm.clone()) {
+        let cards_backlog = cards_backlog.clone();
         let reader = reader.clone();
         let writer = writer.clone();
         let wiki = wiki.clone();
         tasks.push(tokio::spawn(async move {
             let mut after = None;
             loop {
-                tokio::time::sleep(sessionmunch_consolidate::SESSION_SUMMARY_TICK_INTERVAL).await;
+                // A full batch means more are due: keep draining.
+                tokio::time::sleep(if after.is_some() {
+                    sessionmunch_consolidate::SESSION_SUMMARY_CATCH_UP_PAUSE
+                } else {
+                    sessionmunch_consolidate::SESSION_SUMMARY_TICK_INTERVAL
+                })
+                .await;
+                if cards_backlog.load(std::sync::atomic::Ordering::Relaxed) {
+                    continue;
+                }
                 match sessionmunch_consolidate::run_session_summary_tick(
                     &reader,
                     &writer,
@@ -1757,7 +1790,8 @@ async fn start_maintenance_scheduler(
                     llm.as_ref(),
                     budgets,
                     after,
-                    sessionmunch_consolidate::SUMMARIES_PER_TICK,
+                    sessionmunch_consolidate::SUMMARIES_PER_TICK * summary_lanes.max(1),
+                    summary_lanes,
                 )
                 .await
                 {
@@ -3174,6 +3208,7 @@ mod tests {
             None,
             crate::config::DecaySettings::default(),
             None,
+            (1, 1),
         )
         .await;
         assert!(tasks.is_empty());
@@ -3217,6 +3252,7 @@ mod tests {
                 llm,
                 crate::config::DecaySettings::default(),
                 ai_summary,
+                (1, 1),
             )
             .await;
             let n = tasks.len();
@@ -3263,6 +3299,7 @@ mod tests {
                 None,
                 crate::config::DecaySettings::default(),
                 None,
+                (1, 1),
             )
             .await;
             // One enabled lint/sweep job plus the independent hollow-project

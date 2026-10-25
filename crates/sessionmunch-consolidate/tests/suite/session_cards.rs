@@ -111,13 +111,34 @@ fn frontmatter(page: &StoredPageBody) -> serde_json::Value {
 }
 
 #[tokio::test]
+async fn parallel_lanes_write_every_due_card_once() {
+    let f = fixture().await;
+    let mut ids = Vec::new();
+    for n in 0..9 {
+        ids.push(f.session(transcript(&format!("p{n}"))).await);
+    }
+    let tick = run_session_card_tick(&f.store.reader, &f.wiki, None, 20, 4)
+        .await
+        .unwrap();
+    assert_eq!((tick.due, tick.written, tick.failed), (9, 9, 0));
+    for id in &ids {
+        let page = f.page(*id).await.expect("every session got its card");
+        assert_eq!(frontmatter(&page)["generator"], "session-card");
+    }
+    let settled = run_session_card_tick(&f.store.reader, &f.wiki, None, 20, 4)
+        .await
+        .unwrap();
+    assert_eq!(settled.due, 0);
+}
+
+#[tokio::test]
 async fn ticks_write_due_cards_in_bounded_batches_and_converge() {
     let f = fixture().await;
     let mut ids = Vec::new();
     for n in 0..7 {
         ids.push(f.session(transcript(&format!("s{n}"))).await);
     }
-    let first = run_session_card_tick(&f.store.reader, &f.wiki, None, 3)
+    let first = run_session_card_tick(&f.store.reader, &f.wiki, None, 3, 1)
         .await
         .unwrap();
     assert_eq!((first.due, first.written, first.failed), (3, 3, 0));
@@ -125,11 +146,11 @@ async fn ticks_write_due_cards_in_bounded_batches_and_converge() {
         first.next_after.is_some(),
         "a full batch continues next tick"
     );
-    let second = run_session_card_tick(&f.store.reader, &f.wiki, first.next_after, 3)
+    let second = run_session_card_tick(&f.store.reader, &f.wiki, first.next_after, 3, 1)
         .await
         .unwrap();
     assert_eq!(second.written, 3);
-    let third = run_session_card_tick(&f.store.reader, &f.wiki, second.next_after, 3)
+    let third = run_session_card_tick(&f.store.reader, &f.wiki, second.next_after, 3, 1)
         .await
         .unwrap();
     assert_eq!(third.written, 1);
@@ -138,7 +159,7 @@ async fn ticks_write_due_cards_in_bounded_batches_and_converge() {
         let page = f.page(*id).await.expect("every session got its card");
         assert_eq!(frontmatter(&page)["generator"], "session-card");
     }
-    let settled = run_session_card_tick(&f.store.reader, &f.wiki, None, 3)
+    let settled = run_session_card_tick(&f.store.reader, &f.wiki, None, 3, 1)
         .await
         .unwrap();
     assert_eq!(
@@ -151,7 +172,7 @@ async fn ticks_write_due_cards_in_bounded_batches_and_converge() {
 async fn a_card_behind_the_ledger_is_refreshed_with_stable_refs() {
     let f = fixture().await;
     let id = f.session(transcript("a")).await;
-    run_session_card_tick(&f.store.reader, &f.wiki, None, 10)
+    run_session_card_tick(&f.store.reader, &f.wiki, None, 10, 1)
         .await
         .unwrap();
     assert_eq!(
@@ -172,7 +193,7 @@ async fn a_card_behind_the_ledger_is_refreshed_with_stable_refs() {
         )
         .await
         .unwrap();
-    let tick = run_session_card_tick(&f.store.reader, &f.wiki, None, 10)
+    let tick = run_session_card_tick(&f.store.reader, &f.wiki, None, 10, 1)
         .await
         .unwrap();
     assert_eq!(tick.written, 1);
@@ -206,7 +227,7 @@ async fn the_tick_never_replaces_a_consolidated_or_annotated_page() {
         })
         .await
         .unwrap();
-    let tick = run_session_card_tick(&f.store.reader, &f.wiki, None, 10)
+    let tick = run_session_card_tick(&f.store.reader, &f.wiki, None, 10, 1)
         .await
         .unwrap();
     assert_eq!(tick.due, 0);
@@ -228,7 +249,7 @@ async fn hook_mirrors_alone_never_make_a_card_due() {
             SessionSource::Hook,
         )])
         .await;
-    let tick = run_session_card_tick(&f.store.reader, &f.wiki, None, 10)
+    let tick = run_session_card_tick(&f.store.reader, &f.wiki, None, 10, 1)
         .await
         .unwrap();
     assert_eq!(tick.due, 0);

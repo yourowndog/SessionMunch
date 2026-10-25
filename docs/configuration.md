@@ -108,7 +108,17 @@ session makes no further calls.
 [session_cards]
 # On by default when a provider is configured; has no effect without one.
 ai_summary = true
+# Cards built at once by the maintenance tick (deterministic; CPU and disk only).
+card_lanes = 4
+# Sessions sent to the provider at once. Match the provider's parallel slots
+# (llama.cpp `--parallel N`); 1 keeps one request in flight.
+summary_lanes = 1
 ```
+
+While a backlog remains (a tick filled its batch), the card and summary ticks
+run again after one second instead of a minute, so a large import or backfill
+drains quickly. AI summaries wait until the card backlog is drained, since each
+summary sits on a current card.
 
 Set `SESSIONMUNCH_SESSION_CARDS__AI_SUMMARY=false` (or `ai_summary = false`)
 to keep cards deterministic-only while still using a provider elsewhere.

@@ -588,7 +588,7 @@ mod tick {
                 )
                 .await
                 .unwrap();
-            run_session_card_tick(&self.store.reader, &self.wiki, None, 50)
+            run_session_card_tick(&self.store.reader, &self.wiki, None, 50, 1)
                 .await
                 .unwrap();
             id
@@ -616,6 +616,7 @@ mod tick {
                 SummaryBudgets::default(),
                 None,
                 limit,
+                1,
             )
             .await
             .unwrap()
@@ -668,7 +669,7 @@ mod tick {
             .append_session_events(id, rows)
             .await
             .unwrap();
-        run_session_card_tick(&f.store.reader, &f.wiki, None, 50)
+        run_session_card_tick(&f.store.reader, &f.wiki, None, 50, 1)
             .await
             .unwrap();
         // Each segment opens with its request: e1, e22, e43.
@@ -802,6 +803,29 @@ mod tick {
     }
 
     #[tokio::test]
+    async fn parallel_lanes_summarize_every_due_session() {
+        let f = fixture().await;
+        for tag in ["d", "e", "g", "h"] {
+            f.carded_session(tag).await;
+        }
+        let provider = FakeProvider::new(vec![good(), good(), good(), good()]);
+        let tick = run_session_summary_tick(
+            &f.store.reader,
+            &f.store.writer,
+            &f.wiki,
+            &provider,
+            SummaryBudgets::default(),
+            None,
+            10,
+            3,
+        )
+        .await
+        .unwrap();
+        assert_eq!((tick.due, tick.written, tick.failed), (4, 4, 0));
+        assert_eq!(tick.calls, 4);
+    }
+
+    #[tokio::test]
     async fn the_tick_is_bounded() {
         let f = fixture().await;
         for tag in ["d", "e", "g"] {
@@ -819,6 +843,7 @@ mod tick {
             SummaryBudgets::default(),
             first.next_after,
             2,
+            1,
         )
         .await
         .unwrap();
