@@ -623,11 +623,17 @@ fn parse_codex(
                 Some("assistant"),
                 &format!("{name}: {body}"),
                 timestamp(value),
-                json!({"tool": name}),
+                json!({"tool": name, "call_id": payload.get("call_id").and_then(Value::as_str)}),
             );
         }
         "function_call_output" | "custom_tool_call_output" | "tool_result" => {
-            let body = first_string(payload, &["output", "content", "text"]).unwrap_or("");
+            let body = match payload.get("output") {
+                // Code-mode tools return content parts, not a string.
+                Some(Value::Array(parts)) => codex_output_parts(parts, losses),
+                _ => first_string(payload, &["output", "content", "text"])
+                    .unwrap_or("")
+                    .to_string(),
+            };
             push_event(
                 events,
                 AgentKind::Codex,
@@ -636,9 +642,9 @@ fn parse_codex(
                 0,
                 WorkstreamEventKind::ToolResult,
                 Some("tool"),
-                body,
+                &body,
                 timestamp(value),
-                json!({}),
+                json!({"call_id": payload.get("call_id").and_then(Value::as_str)}),
             );
         }
         "web_search_call" => {
@@ -674,6 +680,23 @@ fn parse_codex(
         "reasoning" => losses.push("Codex hidden reasoning was intentionally excluded".into()),
         _ => {}
     }
+}
+
+/// Text of a Codex code-mode tool output. Image parts carry inline data
+/// URLs, so they are recorded as a loss instead of being stringified.
+fn codex_output_parts(parts: &[Value], losses: &mut Vec<String>) -> String {
+    let mut texts = Vec::new();
+    for part in parts {
+        match part.get("type").and_then(Value::as_str) {
+            Some("input_text" | "output_text" | "text") => {
+                if let Some(text) = part.get("text").and_then(Value::as_str) {
+                    texts.push(text);
+                }
+            }
+            _ => losses.push("Codex non-text tool output parts were intentionally excluded".into()),
+        }
+    }
+    texts.join("\n")
 }
 
 fn parse_pi_family(
@@ -3986,6 +4009,34 @@ mod tests {
         parse_codex(&value, "session", "record", &mut events, &mut losses);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].content, "actual request");
+    }
+
+    #[test]
+    fn codex_adapter_keeps_code_mode_output_parts_and_call_ids() {
+        let call = json!({"type":"response_item","payload":{
+            "type":"custom_tool_call","name":"exec","call_id":"call_1","input":"text(1)"
+        }});
+        let output = json!({"type":"response_item","payload":{
+            "type":"custom_tool_call_output","call_id":"call_1","output":[
+                {"type":"input_text","text":"Script completed"},
+                {"type":"input_image","image_url":"data:image/png;base64,AAAA"},
+                {"type":"input_text","text":"[main 1a2b3c4] done"}
+            ]
+        }});
+        let mut events = Vec::new();
+        let mut losses = Vec::new();
+        parse_codex(&call, "session", "r1", &mut events, &mut losses);
+        parse_codex(&output, "session", "r2", &mut events, &mut losses);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].metadata["call_id"], "call_1");
+        assert_eq!(events[1].kind, WorkstreamEventKind::ToolResult);
+        assert_eq!(events[1].content, "Script completed\n[main 1a2b3c4] done");
+        assert_eq!(events[1].metadata["call_id"], "call_1");
+        assert!(!events[1].content.contains("base64"));
+        assert_eq!(
+            losses,
+            vec!["Codex non-text tool output parts were intentionally excluded".to_string()]
+        );
     }
 
     #[test]

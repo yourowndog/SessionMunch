@@ -135,6 +135,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#t_c51f1a51).
 
 ### Fixed
+- Codex history import now keeps code-mode tool output. Codex records it as a list of content parts, which the importer read as empty and dropped without a loss note. Text parts are imported; image parts are excluded and noted. Codex tool calls and results also keep their `call_id`, so a result can be matched to its call. (#20)
 - `snapshot-harness-history --json` printed a plain-text summary line after
   the JSON report, so its output could not be parsed. (#18)
 - Patched new certificate-validation advisories RUSTSEC-2026-0382 (rustls-webpki 0.103.16) and RUSTSEC-2026-0383 (webpki-root-certs 1.0.10). The web UI now uses askama 0.16 without its config feature, which drops the unmaintained basic-toml (RUSTSEC-2026-0374). (#11)
