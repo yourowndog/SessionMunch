@@ -446,7 +446,10 @@ pub fn extract_facts<E: DigestEvent>(
                             push_file(&mut facts, &mut files, &path, "shell", verb, call_ref);
                         }
                         let found = scan_git_output(&mut facts, &mut commits, event.content(), at);
-                        if found == 0 && is_git_commit(command) {
+                        // A quiet commit is only evidence once the command is
+                        // known to have exited cleanly; a still-running or
+                        // unreported process proves nothing.
+                        if found == 0 && exit == Some(0) && is_git_commit(command) {
                             let message = commit_message(command);
                             let key = format!("cmd:{}", call.at.0);
                             if commits.insert(key, call.at.0).is_none() {
@@ -542,7 +545,7 @@ pub fn extract_facts<E: DigestEvent>(
 
 /// Native id that links a tool result to its call, when the reader kept one.
 fn pairing_id(event: &impl DigestEvent) -> Option<&str> {
-    ["tool_use_id", "call_id"]
+    ["tool_use_id", "call_id", "tool_call_id"]
         .iter()
         .find_map(|key| event.metadata().get(key).and_then(Value::as_str))
 }
@@ -924,7 +927,9 @@ fn exit_of(event: &impl DigestEvent, class: ToolClass) -> (Option<i64>, &'static
     if event.metadata().get("is_error").and_then(Value::as_bool) == Some(true) {
         return (None, "is_error");
     }
-    if class == ToolClass::Shell && event.metadata().get("is_error").is_some() {
+    if class == ToolClass::Shell
+        && event.metadata().get("is_error").and_then(Value::as_bool) == Some(false)
+    {
         // Claude marks failing Bash results is_error and prints no code on
         // success, so a clean flag is the success signal.
         return (Some(0), "inferred_from_is_error_false");

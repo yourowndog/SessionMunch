@@ -473,6 +473,58 @@ fn commits_come_from_git_output_quiet_commits_and_push_ranges() {
 }
 
 #[test]
+fn unknown_exits_claim_neither_a_quiet_commit_nor_a_pass() {
+    // A result with no exit and no error flag proves nothing about a commit.
+    let mut events = vec![call(
+        "Bash",
+        &json!({"command": "git commit -q -m 'wip: maybe'"}),
+    )];
+    events.push(result("", None));
+    // Kimi/Kiro emit a null error flag when the harness reported none.
+    events.push(call("Bash", &json!({"command": "cargo build"})));
+    let mut unknown = result("BUILD FAILED", None);
+    unknown.metadata = json!({"is_error": null});
+    events.push(unknown);
+    let digest = claude(events);
+    assert_eq!(digest.of(FactKind::Commit).count(), 0);
+    let exits: Vec<Value> = digest
+        .of(FactKind::Command)
+        .map(|f| f.payload["exit"].clone())
+        .collect();
+    assert!(!exits.contains(&json!(0)), "{exits:?}");
+}
+
+#[test]
+fn results_pair_by_tool_call_id_out_of_order() {
+    let mut first = call("Bash", &json!({"command": "cargo test -p a"}));
+    first.metadata = json!({"tool": "Bash", "tool_call_id": "a"});
+    let mut second = call("Bash", &json!({"command": "cargo test -p b"}));
+    second.metadata = json!({"tool": "Bash", "tool_call_id": "b"});
+    let mut late = result("Exit code 1\n1 failed", Some(true));
+    late.metadata["tool_call_id"] = json!("b");
+    let mut early = result("Summary 3 passed", Some(false));
+    early.metadata["tool_call_id"] = json!("a");
+    let digest = claude(vec![first, second, late, early]);
+    let mut checks: Vec<(String, String)> = digest
+        .of(FactKind::Check)
+        .map(|f| {
+            (
+                f.payload["command"].as_str().unwrap_or_default().into(),
+                f.payload["outcome"].as_str().unwrap_or_default().into(),
+            )
+        })
+        .collect();
+    checks.sort();
+    assert_eq!(
+        checks,
+        vec![
+            ("cargo test -p a".into(), "passed".into()),
+            ("cargo test -p b".into(), "failed".into()),
+        ]
+    );
+}
+
+#[test]
 fn subagents_are_facts() {
     let digest = claude(vec![
         call(
