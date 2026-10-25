@@ -144,11 +144,14 @@ pub(crate) fn observation_event_kind(
 /// Mirror one just-inserted hook observation into its session's event
 /// ledger, so hook capture is searchable history and not only consolidation
 /// input. Runs on the caller's transaction (index-with-data), and is
-/// idempotent on `obs:<id>` like every other ledger append.
+/// idempotent on `obs:<id>` like every other ledger append. `occurred_at`
+/// is when the event happened (the client's capture time when known);
+/// `created_at` is when this server stored it.
 pub(crate) fn mirror_observation(
     conn: &Connection,
     id: &ObservationId,
     obs: &NewObservation,
+    occurred_at_micros: i64,
     created_at_micros: i64,
 ) -> StoreResult<()> {
     let (kind, role) = observation_event_kind(obs.kind);
@@ -159,7 +162,7 @@ pub(crate) fn mirror_observation(
         (title, body) => format!("{title}\n{body}"),
     };
     let content = sessionmunch_core::truncate_utf8_bytes(&content, SESSION_EVENT_CONTENT_MAX_BYTES);
-    let occurred_at = Timestamp::from_microsecond(created_at_micros)
+    let occurred_at = Timestamp::from_microsecond(occurred_at_micros)
         .ok()
         .map(|at| at.to_string());
     let metadata = serde_json::json!({

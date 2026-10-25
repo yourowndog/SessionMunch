@@ -1151,9 +1151,10 @@ fn batch_endpoint(url: &str) -> String {
 }
 
 /// Rough wire size of one event inside a batch body (`{"url":…,"body":…}` plus
-/// framing) — used only to keep a chunk under [`MAX_BATCH_BYTES`].
+/// framing and the `captured_ms` param) — used only to keep a chunk under
+/// [`MAX_BATCH_BYTES`].
 fn entry_wire_len(entry: &SpoolEntry) -> usize {
-    entry.url.len() + entry.body.len() + 32
+    entry.url.len() + entry.body.len() + 64
 }
 
 /// Serialize a chunk of entries into the `/hook/batch` request body — a JSON
@@ -1164,10 +1165,21 @@ fn batch_payload(items: &[(PathBuf, SpoolEntry)]) -> Option<String> {
         .iter()
         .map(|(_, e)| {
             let body = serde_json::from_str::<serde_json::Value>(&e.body)?;
-            Ok(serde_json::json!({ "url": e.url, "body": body }))
+            Ok(serde_json::json!({ "url": captured_url(&e.url, e.created_ms), "body": body }))
         })
         .collect();
     serde_json::to_string(&arr.ok()?).ok()
+}
+
+/// The spooled URL plus its enqueue time as `captured_ms`. The drain runs
+/// after the fact, so the server dates the event by this rather than by
+/// arrival. Servers that predate the param ignore it.
+fn captured_url(url: &str, created_ms: u64) -> String {
+    if url.contains("captured_ms=") {
+        return url.to_owned();
+    }
+    let sep = if url.contains('?') { '&' } else { '?' };
+    format!("{url}{sep}captured_ms={created_ms}")
 }
 
 /// Charge a spooled entry a failed delivery attempt: drop it once it reaches
@@ -1502,6 +1514,20 @@ mod tests {
         assert!(
             batch.contains("_sessionmunch_assistant"),
             "batch lost the protocol: {batch}"
+        );
+    }
+
+    /// Batches drain after the fact, so each item carries its enqueue time and
+    /// the server can record when the event happened, not when it arrived.
+    #[test]
+    fn batch_payload_carries_enqueue_time() {
+        let entry = entry_for("http://h/hook?event=stop".into(), "{}".into(), None, false);
+        let created_ms = entry.created_ms;
+        let batch = batch_payload(&[(PathBuf::from("e.json"), entry)]).expect("batch built");
+        let items: serde_json::Value = serde_json::from_str(&batch).unwrap();
+        assert_eq!(
+            items[0]["url"],
+            serde_json::json!(format!("http://h/hook?event=stop&captured_ms={created_ms}"))
         );
     }
 

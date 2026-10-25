@@ -94,6 +94,9 @@ pub struct HookQuery {
     /// Machine identity of the node that captured the event (the cluster
     /// `node_id`, else the host name). Absent on older clients.
     pub machine: Option<String>,
+    /// Unix ms at which the client captured the event (its spool enqueue
+    /// time). Absent on older clients; the server then stamps arrival time.
+    pub captured_ms: Option<u64>,
 }
 
 /// Coalesced view of an incoming hook event after light parsing of the
@@ -152,6 +155,9 @@ pub struct HookEnvelope {
     /// Validated machine identity forwarded by the host hook (`machine`
     /// query param, [`sessionmunch_core::NodeId`] rules), else `None`.
     pub machine: Option<String>,
+    /// When the client captured the event (Unix µs), from the `captured_ms`
+    /// query param. Unvalidated: the store bounds it.
+    pub captured_at: Option<i64>,
     /// Optional title hint extracted from the body.
     pub title_hint: Option<String>,
     /// Optional body excerpt extracted from the agent's raw payload.
@@ -184,6 +190,7 @@ impl std::fmt::Debug for HookEnvelope {
             )
             .field("extension", &self.extension)
             .field("source_event", &self.source_event)
+            .field("captured_at", &self.captured_at)
             .field(
                 "title_hint",
                 &self.title_hint.as_ref().map(|_| "<redacted>"),
@@ -567,6 +574,10 @@ impl HookEnvelope {
             .as_deref()
             .and_then(|raw| sessionmunch_core::NodeId::new(raw).ok())
             .map(|node| node.as_str().to_owned());
+        let captured_at = query
+            .captured_ms
+            .and_then(|ms| i64::try_from(ms).ok())
+            .and_then(|ms| ms.checked_mul(1_000));
         Self {
             event,
             agent,
@@ -583,6 +594,7 @@ impl HookEnvelope {
             capture_assistant_requested,
             ingest_key,
             machine,
+            captured_at,
             extension,
             source_event,
             title_hint,
