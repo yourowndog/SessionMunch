@@ -290,7 +290,9 @@ pub fn insert_observation_keyed(
 
 /// Find or create the hook session, validate its immutable tuple and owner,
 /// optionally claim an ingest key, and append the observation in one writer
-/// transaction. Validation always precedes key mutation.
+/// transaction. Validation always precedes key mutation. Test shorthand for
+/// [`admit_hook_session_event_at`] without a capture time.
+#[cfg(test)]
 pub fn admit_hook_session_event(
     conn: &mut Connection,
     session: &NewSession,
@@ -310,9 +312,11 @@ pub fn admit_hook_session_event(
     )
 }
 
-/// [`admit_hook_session_event`] with the client's capture time (Unix µs).
-/// The ledger event takes that time when it is plausible (see
-/// [`capture_time_or_now`]); the observation row keeps its arrival time.
+/// Find or create the hook session, validate its immutable tuple and owner,
+/// optionally claim an ingest key, and append the observation in one writer
+/// transaction. Validation always precedes key mutation. `captured_at` is the
+/// client's capture time (Unix µs): the ledger event takes it when plausible
+/// (see [`capture_time_or_now`]); the observation row keeps arrival time.
 pub fn admit_hook_session_event_at(
     conn: &mut Connection,
     session: &NewSession,
