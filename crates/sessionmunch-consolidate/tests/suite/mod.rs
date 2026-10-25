@@ -18,4 +18,5 @@ mod observation_retention;
 mod recall_eval;
 mod search_quality;
 mod session_cards;
+mod session_summary;
 mod typed_edges;

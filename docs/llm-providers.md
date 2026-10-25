@@ -14,6 +14,11 @@ way. A session containing only `SessionStart` / `SessionEnd` boundaries is
 closed without a page, handoff, or provider job. When that empty session had
 accepted startup context, its session-bound handoff is returned to the open
 pool for the next receiver instead of being lost.
+With a provider, session cards also gain a cited "AI summary" section
+(outcome, decisions, retractions, next step) from a bounded background tick;
+set `[session_cards] ai_summary = false` to opt out. Unchanged sessions are
+served from a job cache and make no provider calls. See
+[configuration.md](configuration.md#session-cards).
 When the session-end opt-in is enabled, provider work is durably queued after
 those deterministic writes and handled by one bounded server worker, so hook
 drain latency does not cancel it. Failed jobs retry with backoff and survive a

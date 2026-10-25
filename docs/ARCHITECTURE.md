@@ -86,7 +86,17 @@ from hook paths.
    due: imported sessions that never see a SessionEnd, cards from an older
    builder, and cards behind the ledger. The tick walks the due set like a
    ring, so a card that keeps failing cannot starve the rest, and it replaces
-   only a missing or generated page, never a consolidated or annotated one. One SQLite transaction inserts that
+   only a missing or generated page, never a consolidated or annotated one.
+   With an LLM provider configured and `[session_cards] ai_summary` on (the
+   default), a second bounded tick (two sessions per minute, one wiki commit)
+   appends a labelled "AI summary" section to current cards: outcome,
+   decisions, retractions and next step, each citing `eN` events and naming
+   the model. A deterministic validator rejects cites outside the job's input
+   and claims the card's facts contradict; one retry, then the item is listed
+   as not summarized. The card above the section is unchanged. Accepted job
+   answers are cached by job id (`session_summary_jobs`), so an unchanged
+   session makes no provider calls even after its card is rewritten. Prompts
+   stay within the `[consolidation]` token budgets. One SQLite transaction inserts that
    automatic handoff, stamps the session ended, and records the covered
    observation count, so recovery never sees only half of those DB effects. A
    later SessionEnd re-runs the path only when that generation advances, so
@@ -292,6 +302,7 @@ separately gated Claude Code assistant/Stop excerpt remains capped at 2 KB.
 | `session_consolidation_jobs` | Durable, observation-generation-idempotent queue for opt-in SessionEnd LLM consolidation. One bounded server worker leases jobs, retries provider failures with backoff, and recovers expired leases after restart. |
 | `observations_fts` | FTS5 virtual table over raw observation `(title, body)`, used only as bounded fallback. |
 | `session_events`, `session_events_fts` | Promoted session-owned event ledger (V65, North Star §4): the portable workstream-event concept generalized so hook, import, and managed events converge on one `sessions` row. Idempotent insert on `UNIQUE(session_id, event_id)`; per-event best-effort `model`/`provider` in `metadata_json`. Authoritative history going forward. Its transcript rows (`source` import or managed) are what the deterministic session card in `sessions/<id>.md` is built from and cites by `sequence`. |
+| `session_summary_jobs` | Cache of accepted AI session-summary job answers (V67), keyed by `(session_id, job_id)`; the job id hashes session, scope, builder and prompt versions and the job's input. Derived data: it goes with its session. |
 | `workstreams`, `managed_runs`, `workstream_native_sessions` | Optional lease state plus per-harness native source and delivery cursors for `sessionmunch run`. |
 | `workstream_events`, `workstream_events_fts` | Append-only normalized visible transcript events and full-text search; immutable sanitized source batches also live under `raw/workstreams/`. |
 | `links` | Wikilink / markdown cross-references. `to_page_id` (a global PageId) is nullable for unresolved forward links. `to_workspace` / `to_project` carry a cross-project scope (NULL = the source page's own project). |
