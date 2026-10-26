@@ -508,6 +508,13 @@ where
         write_success_response(stdout, agent_kind, hook_event)?;
         return Ok(());
     }
+    // A one-shot Claude run used as a model call (Hermes, Agent SDK callers)
+    // is not a session: record nothing and inject no handoff, so the caller's
+    // prompt cache stays warm. See `hook_ephemeral`.
+    if super::hook_ephemeral::is_ephemeral_claude_run(host, agent_kind, hook_event, &json) {
+        write_success_response(stdout, agent_kind, hook_event)?;
+        return Ok(());
+    }
     // Assistant/Stop capture (#196). On an opted-in install
     // (`install-hooks --capture-assistant`), extract the assistant message,
     // sanitize + cap it, and splice the versioned `_sessionmunch_assistant` marker
