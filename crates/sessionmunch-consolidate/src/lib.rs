@@ -75,7 +75,7 @@ pub use session_cards::{
 };
 pub use session_summary::{
     SESSION_SUMMARY_CATCH_UP_PAUSE, SESSION_SUMMARY_TICK_INTERVAL, SUMMARIES_PER_TICK,
-    SessionSummaryTick, SummaryBudgets, run_session_summary_tick,
+    SessionSummaryTick, SummaryBudgets, SummaryLane, run_session_summary_tick,
 };
 pub use sweep::{
     DEFAULT_OBSERVATION_PRUNE_BATCH, EvictedPage, ObservationRetention, SweepError, SweepReport,

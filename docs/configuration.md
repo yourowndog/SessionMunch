@@ -111,9 +111,25 @@ ai_summary = true
 # Cards built at once by the maintenance tick (deterministic; CPU and disk only).
 card_lanes = 4
 # Sessions sent to the provider at once. Match the provider's parallel slots
-# (llama.cpp `--parallel N`); 1 keeps one request in flight.
+# (llama.cpp `--parallel N`); 1 keeps one request in flight. 0 leaves the
+# summaries to the extra endpoints below.
 summary_lanes = 1
+
+# Optional: more endpoints share the summary backlog, each with its own lanes.
+# Same fields as [[llm_fallbacks]]; the key is read from `api_key_env`.
+[[session_cards.summary_endpoints]]
+provider = "openai-compat"
+model = "qwen3.8-flash-free"
+base_url = "https://aihubmix.com/v1"
+api_key_env = "AIHUBMIX_API_KEY"
+lanes = 3
 ```
+
+Every lane pulls the next due session from one shared queue, so faster
+endpoints do more of the work. A lane that answers 429 hands its session to
+another lane and rests until the next tick. Hosted endpoints receive the
+session's transcript excerpts, so list only providers whose data terms you
+accept.
 
 While a backlog remains (a tick filled its batch), the card and summary ticks
 run again after one second instead of a minute, so a large import or backfill

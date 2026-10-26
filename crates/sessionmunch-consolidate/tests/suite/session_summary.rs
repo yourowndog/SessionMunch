@@ -31,6 +31,38 @@ impl FakeProvider {
     }
 }
 
+/// Always answers 429, like a hosted free tier over its limit.
+pub(crate) struct RateLimitedProvider;
+
+#[async_trait::async_trait]
+impl LlmProvider for RateLimitedProvider {
+    fn name(&self) -> &'static str {
+        "rate-limited"
+    }
+
+    fn model(&self) -> &str {
+        "rate-limited-model"
+    }
+
+    async fn complete(&self, _request: ChatRequest) -> LlmResult<ChatResponse> {
+        Err(LlmError::Provider {
+            status: 429,
+            body: "rate limited".into(),
+        })
+    }
+
+    async fn complete_structured_raw(
+        &self,
+        _request: ChatRequest,
+        _schema: Value,
+    ) -> LlmResult<Value> {
+        Err(LlmError::Provider {
+            status: 429,
+            body: "rate limited".into(),
+        })
+    }
+}
+
 #[async_trait::async_trait]
 impl LlmProvider for FakeProvider {
     fn name(&self) -> &'static str {
@@ -516,7 +548,7 @@ mod tick {
     use sessionmunch_wiki::{Wiki, WritePageRequest};
     use tempfile::TempDir;
 
-    use super::FakeProvider;
+    use super::{FakeProvider, RateLimitedProvider};
 
     struct Fixture {
         _dir: TempDir,
@@ -612,11 +644,10 @@ mod tick {
                 &self.store.reader,
                 &self.store.writer,
                 &self.wiki,
-                provider,
+                &[sessionmunch_consolidate::SummaryLane { provider, slots: 1 }],
                 SummaryBudgets::default(),
                 None,
                 limit,
-                1,
             )
             .await
             .unwrap()
@@ -813,16 +844,52 @@ mod tick {
             &f.store.reader,
             &f.store.writer,
             &f.wiki,
-            &provider,
+            &[sessionmunch_consolidate::SummaryLane {
+                provider: &provider,
+                slots: 3,
+            }],
             SummaryBudgets::default(),
             None,
             10,
-            3,
         )
         .await
         .unwrap();
         assert_eq!((tick.due, tick.written, tick.failed), (4, 4, 0));
         assert_eq!(tick.calls, 4);
+    }
+
+    #[tokio::test]
+    async fn a_rate_limited_lane_hands_its_sessions_to_the_others() {
+        let f = fixture().await;
+        for tag in ["d", "e", "g"] {
+            f.carded_session(tag).await;
+        }
+        let good_lane = FakeProvider::new(vec![good(), good(), good()]);
+        let tick = run_session_summary_tick(
+            &f.store.reader,
+            &f.store.writer,
+            &f.wiki,
+            &[
+                sessionmunch_consolidate::SummaryLane {
+                    provider: &RateLimitedProvider,
+                    slots: 2,
+                },
+                sessionmunch_consolidate::SummaryLane {
+                    provider: &good_lane,
+                    slots: 1,
+                },
+            ],
+            SummaryBudgets::default(),
+            None,
+            10,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            (tick.due, tick.written, tick.failed),
+            (3, 3, 0),
+            "a 429 is not a failure; another lane takes the session"
+        );
     }
 
     #[tokio::test]
@@ -839,11 +906,13 @@ mod tick {
             &f.store.reader,
             &f.store.writer,
             &f.wiki,
-            &provider,
+            &[sessionmunch_consolidate::SummaryLane {
+                provider: &provider,
+                slots: 1,
+            }],
             SummaryBudgets::default(),
             first.next_after,
             2,
-            1,
         )
         .await
         .unwrap();
