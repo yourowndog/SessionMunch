@@ -888,11 +888,34 @@ pub async fn summarize(
     budgets: SummaryBudgets,
     cache: &mut BTreeMap<String, SummaryFields>,
 ) -> LlmResult<Option<SummaryReport>> {
-    summarize_saving(provider, digest, events, budgets, cache, async |_, _| {}).await
+    summarize_saving(provider, digest, events, budgets, cache, None).await
 }
 
-/// [`summarize`], handing each newly accepted job answer to `save` as soon as
-/// it arrives, so a long session interrupted by a restart keeps its finished
+/// Where [`summarize_saving`] stores each answer as it is accepted.
+struct JobSaver<'a> {
+    writer: &'a sessionmunch_store::WriterHandle,
+    session_id: sessionmunch_core::SessionId,
+    model: &'a str,
+}
+
+impl JobSaver<'_> {
+    async fn save(&self, job_id: &str, fields: &SummaryFields) {
+        let Ok(fields_json) = serde_json::to_string(fields) else {
+            return;
+        };
+        let row = (job_id.to_string(), self.model.to_string(), fields_json);
+        if let Err(error) = self
+            .writer
+            .save_session_summary_job(self.session_id, row)
+            .await
+        {
+            tracing::warn!(session = %self.session_id, error = %error, "saving a summary job failed");
+        }
+    }
+}
+
+/// [`summarize`], storing each newly accepted job answer through `saver` as
+/// soon as it arrives, so a long session interrupted by a restart keeps its finished
 /// segments.
 async fn summarize_saving(
     provider: Option<&dyn LlmProvider>,
@@ -900,7 +923,7 @@ async fn summarize_saving(
     events: &[SessionEvent],
     budgets: SummaryBudgets,
     cache: &mut BTreeMap<String, SummaryFields>,
-    mut save: impl AsyncFnMut(&str, &SummaryFields),
+    saver: Option<&JobSaver<'_>>,
 ) -> LlmResult<Option<SummaryReport>> {
     let Some(provider) = provider else {
         return Ok(None);
@@ -924,7 +947,7 @@ async fn summarize_saving(
     let mut answers = Vec::new();
     for job in &jobs {
         run.report.job_ids.push(job.key.id());
-        if let Some(found) = cached(cache, &job.key, || run.job(job), &mut save).await? {
+        if let Some(found) = cached(cache, &job.key, || run.job(job), saver).await? {
             answers.push(found);
         }
     }
@@ -934,7 +957,7 @@ async fn summarize_saving(
     }
     let reduce = reduce_job(digest, &run.ctx, &answers, budgets);
     run.report.job_ids.push(reduce.key.id());
-    let mut final_fields = cached(cache, &reduce.key, || run.job(&reduce), &mut save).await?;
+    let mut final_fields = cached(cache, &reduce.key, || run.job(&reduce), saver).await?;
     // A reduce that drops the final segment's open step keeps it, so pending
     // work cannot vanish in the merge. An earlier segment's step is not
     // restored: the final segment is the latest state and may have finished it.
@@ -955,7 +978,7 @@ async fn cached<F, Fut>(
     cache: &mut BTreeMap<String, SummaryFields>,
     key: &JobKey,
     ask: F,
-    save: &mut impl AsyncFnMut(&str, &SummaryFields),
+    saver: Option<&JobSaver<'_>>,
 ) -> LlmResult<Option<SummaryFields>>
 where
     F: FnOnce() -> Fut,
@@ -967,7 +990,9 @@ where
     }
     let answer = ask().await?;
     if let Some(fields) = &answer {
-        save(&id, fields).await;
+        if let Some(saver) = saver {
+            saver.save(&id, fields).await;
+        }
         cache.insert(id, fields.clone());
     }
     Ok(answer)
@@ -1321,18 +1346,10 @@ async fn summarize_one(
     }
     // Each answer is stored the moment it is accepted: a long session takes
     // many calls, and a restart before the last one must not discard them.
-    let save = async |job_id: &str, fields: &SummaryFields| {
-        let Ok(fields_json) = serde_json::to_string(fields) else {
-            return;
-        };
-        let row = (
-            job_id.to_string(),
-            provider.model().to_string(),
-            fields_json,
-        );
-        if let Err(error) = writer.save_session_summary_job(session_id, row).await {
-            tracing::warn!(session = %session_id, error = %error, "saving a summary job failed");
-        }
+    let saver = JobSaver {
+        writer,
+        session_id,
+        model: provider.model(),
     };
     let report = match summarize_saving(
         Some(provider),
@@ -1340,7 +1357,7 @@ async fn summarize_one(
         &card.events,
         budgets,
         &mut cache,
-        save,
+        Some(&saver),
     )
     .await
     {
