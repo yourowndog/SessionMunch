@@ -146,6 +146,11 @@ pub(crate) enum WriteCmd {
         jobs: Vec<(String, String, String)>,
         reply: oneshot::Sender<StoreResult<()>>,
     },
+    SaveSummaryJob {
+        session_id: SessionId,
+        job: (String, String, String),
+        reply: oneshot::Sender<StoreResult<()>>,
+    },
     UpdateSessionProvenance {
         session_id: SessionId,
         provenance: SessionProvenance,
@@ -944,6 +949,27 @@ impl WriterHandle {
         self.send(WriteCmd::ReplaceSummaryJobs {
             session_id,
             jobs,
+            reply: tx,
+        })
+        .await?;
+        rx.await.map_err(|_| StoreError::WriterClosed)?
+    }
+
+    /// Save one accepted AI summary-job answer (`(job_id, model,
+    /// fields_json)`) for a session, replacing any earlier answer to the same
+    /// job, so a restart resumes a long session instead of re-asking it.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WriterClosed`] or propagates SQL errors.
+    pub async fn save_session_summary_job(
+        &self,
+        session_id: SessionId,
+        job: (String, String, String),
+    ) -> StoreResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.send(WriteCmd::SaveSummaryJob {
+            session_id,
+            job,
             reply: tx,
         })
         .await?;
@@ -2887,6 +2913,14 @@ fn worker_loop(mut conn: Connection, mut rx: mpsc::Receiver<WriteCmd>) {
                 let result =
                     crate::session_events::replace_summary_jobs(&mut conn, &session_id, &jobs);
                 send_or_warn(reply, result, "replace_session_summary_jobs");
+            }
+            WriteCmd::SaveSummaryJob {
+                session_id,
+                job,
+                reply,
+            } => {
+                let result = crate::session_events::save_summary_job(&conn, &session_id, &job);
+                send_or_warn(reply, result, "save_session_summary_job");
             }
             WriteCmd::UpdateSessionProvenance {
                 session_id,

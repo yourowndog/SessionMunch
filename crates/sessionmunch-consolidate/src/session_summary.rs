@@ -81,7 +81,7 @@ impl SummaryBudgets {
 }
 
 /// Version of how job inputs are built (segmentation and compression).
-pub const BUILDER_VERSION: u32 = 1;
+pub const BUILDER_VERSION: u32 = 2;
 /// Version of the system prompt and schema.
 pub const PROMPT_VERSION: u32 = 1;
 
@@ -572,6 +572,28 @@ fn segments(digest: &SessionDigest, lines: Vec<(usize, String)>) -> Vec<Vec<(usi
     segments
 }
 
+/// Join consecutive request segments while together they fit `budget`. A
+/// session of many short requests is then a few calls instead of one per
+/// request; a segment over `budget` stays alone.
+fn pack(segments: Vec<Vec<(usize, String)>>, budget: usize) -> Vec<Vec<(usize, String)>> {
+    let mut packed: Vec<Vec<(usize, String)>> = Vec::new();
+    let mut used = 0;
+    for segment in segments {
+        let size: usize = segment.iter().map(|(_, l)| tokens(l)).sum();
+        match packed.last_mut() {
+            Some(last) if used + size <= budget => {
+                last.extend(segment);
+                used += size;
+            }
+            _ => {
+                packed.push(segment);
+                used = size;
+            }
+        }
+    }
+    packed
+}
+
 /// Keep a segment's head (40%) and tail within budget.
 fn fit(segment: Vec<(usize, String)>, budget: usize) -> Vec<(Option<usize>, String)> {
     let total: usize = segment.iter().map(|(_, l)| tokens(l)).sum();
@@ -626,7 +648,7 @@ pub fn build_jobs(
             allowed,
         }];
     }
-    segments(digest, lines)
+    pack(segments(digest, lines), budgets.one_shot_tokens())
         .into_iter()
         .enumerate()
         .map(|(index, segment)| {
@@ -888,6 +910,43 @@ pub async fn summarize(
     budgets: SummaryBudgets,
     cache: &mut BTreeMap<String, SummaryFields>,
 ) -> LlmResult<Option<SummaryReport>> {
+    summarize_saving(provider, digest, events, budgets, cache, None).await
+}
+
+/// Where [`summarize_saving`] stores each answer as it is accepted.
+struct JobSaver<'a> {
+    writer: &'a sessionmunch_store::WriterHandle,
+    session_id: sessionmunch_core::SessionId,
+    model: &'a str,
+}
+
+impl JobSaver<'_> {
+    async fn save(&self, job_id: &str, fields: &SummaryFields) {
+        let Ok(fields_json) = serde_json::to_string(fields) else {
+            return;
+        };
+        let row = (job_id.to_string(), self.model.to_string(), fields_json);
+        if let Err(error) = self
+            .writer
+            .save_session_summary_job(self.session_id, row)
+            .await
+        {
+            tracing::warn!(session = %self.session_id, error = %error, "saving a summary job failed");
+        }
+    }
+}
+
+/// [`summarize`], storing each newly accepted job answer through `saver` as
+/// soon as it arrives, so a long session interrupted by a restart keeps its finished
+/// segments.
+async fn summarize_saving(
+    provider: Option<&dyn LlmProvider>,
+    digest: &SessionDigest,
+    events: &[SessionEvent],
+    budgets: SummaryBudgets,
+    cache: &mut BTreeMap<String, SummaryFields>,
+    saver: Option<&JobSaver<'_>>,
+) -> LlmResult<Option<SummaryReport>> {
     let Some(provider) = provider else {
         return Ok(None);
     };
@@ -910,7 +969,7 @@ pub async fn summarize(
     let mut answers = Vec::new();
     for job in &jobs {
         run.report.job_ids.push(job.key.id());
-        if let Some(found) = cached(cache, &job.key, || run.job(job)).await? {
+        if let Some(found) = cached(cache, &job.key, || run.job(job), saver).await? {
             answers.push(found);
         }
     }
@@ -920,7 +979,7 @@ pub async fn summarize(
     }
     let reduce = reduce_job(digest, &run.ctx, &answers, budgets);
     run.report.job_ids.push(reduce.key.id());
-    let mut final_fields = cached(cache, &reduce.key, || run.job(&reduce)).await?;
+    let mut final_fields = cached(cache, &reduce.key, || run.job(&reduce), saver).await?;
     // A reduce that drops the final segment's open step keeps it, so pending
     // work cannot vanish in the merge. An earlier segment's step is not
     // restored: the final segment is the latest state and may have finished it.
@@ -941,6 +1000,7 @@ async fn cached<F, Fut>(
     cache: &mut BTreeMap<String, SummaryFields>,
     key: &JobKey,
     ask: F,
+    saver: Option<&JobSaver<'_>>,
 ) -> LlmResult<Option<SummaryFields>>
 where
     F: FnOnce() -> Fut,
@@ -952,6 +1012,9 @@ where
     }
     let answer = ask().await?;
     if let Some(fields) = &answer {
+        if let Some(saver) = saver {
+            saver.save(&id, fields).await;
+        }
         cache.insert(id, fields.clone());
     }
     Ok(answer)
@@ -1303,12 +1366,20 @@ async fn summarize_one(
             cache.insert(job_id, fields);
         }
     }
-    let report = match summarize(
+    // Each answer is stored the moment it is accepted: a long session takes
+    // many calls, and a restart before the last one must not discard them.
+    let saver = JobSaver {
+        writer,
+        session_id,
+        model: provider.model(),
+    };
+    let report = match summarize_saving(
         Some(provider),
         &card.digest,
         &card.events,
         budgets,
         &mut cache,
+        Some(&saver),
     )
     .await
     {

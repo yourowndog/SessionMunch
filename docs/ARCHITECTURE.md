@@ -95,7 +95,11 @@ from hook paths.
    and claims the card's facts contradict; one retry, then the item is listed
    as not summarized. The card above the section is unchanged. Accepted job
    answers are cached by job id (`session_summary_jobs`), so an unchanged
-   session makes no provider calls even after its card is rewritten. Prompts
+   session makes no provider calls even after its card is rewritten. Each
+   answer is stored the moment it is accepted, so a long session interrupted
+   by a restart resumes from its finished segments. A session too big for one
+   job is split at requests, and consecutive requests share a segment while
+   they fit the one-job budget, then a reduce job merges the segments. Prompts
    stay within the `[consolidation]` token budgets. One SQLite transaction inserts that
    automatic handoff, stamps the session ended, and records the covered
    observation count, so recovery never sees only half of those DB effects. A

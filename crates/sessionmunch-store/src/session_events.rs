@@ -515,6 +515,27 @@ pub(crate) fn replace_summary_jobs(
     Ok(())
 }
 
+/// Save one summary-job answer (`(job_id, model, fields_json)`), replacing
+/// an earlier answer to the same job.
+pub(crate) fn save_summary_job(
+    conn: &Connection,
+    session_id: &SessionId,
+    (job_id, model, fields_json): &(String, String, String),
+) -> StoreResult<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO session_summary_jobs \
+         (session_id, job_id, model, fields_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            session_id.as_bytes(),
+            job_id,
+            model,
+            fields_json,
+            Timestamp::now().as_microsecond()
+        ],
+    )?;
+    Ok(())
+}
+
 /// A session's cached summary-job answers as `(job_id, model, fields_json)`.
 pub(crate) fn summary_jobs(
     conn: &Connection,
