@@ -1019,6 +1019,10 @@ pub async fn run(config: &Config, host: &HostEnv, args: ServeArgs) -> Result<()>
             config.session_cards.card_lanes,
             config.session_cards.summary_lanes,
         ),
+        config.summary_endpoint_providers().unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "summary endpoints unavailable; using the main provider only");
+            Vec::new()
+        }),
     )
     .await;
 
@@ -1538,6 +1542,9 @@ async fn start_maintenance_scheduler(
     ai_summary: Option<sessionmunch_consolidate::SummaryBudgets>,
     // `[session_cards] card_lanes` / `summary_lanes`.
     lanes: (usize, usize),
+    // `[[session_cards.summary_endpoints]]`: more providers sharing the
+    // summary backlog, each with its lane count.
+    summary_endpoints: Vec<(Arc<dyn LlmProvider>, usize)>,
 ) -> Vec<tokio::task::JoinHandle<()>> {
     let (card_lanes, summary_lanes) = lanes;
     let maintenance_enabled = settings.enabled;
@@ -1783,15 +1790,29 @@ async fn start_maintenance_scheduler(
                 if cards_backlog.load(std::sync::atomic::Ordering::Relaxed) {
                     continue;
                 }
+                // The main provider takes `summary_lanes` slots (0 leaves the
+                // summaries to the extra endpoints).
+                let lanes: Vec<sessionmunch_consolidate::SummaryLane<'_>> =
+                    std::iter::once((llm.as_ref(), summary_lanes))
+                        .chain(summary_endpoints.iter().map(|(p, n)| (p.as_ref(), *n)))
+                        .filter(|(_, slots)| *slots > 0)
+                        .map(|(provider, slots)| sessionmunch_consolidate::SummaryLane {
+                            provider,
+                            slots,
+                        })
+                        .collect();
+                if lanes.is_empty() {
+                    continue;
+                }
+                let slots: usize = lanes.iter().map(|lane| lane.slots).sum();
                 match sessionmunch_consolidate::run_session_summary_tick(
                     &reader,
                     &writer,
                     &wiki,
-                    llm.as_ref(),
+                    &lanes,
                     budgets,
                     after,
-                    sessionmunch_consolidate::SUMMARIES_PER_TICK * summary_lanes.max(1),
-                    summary_lanes,
+                    sessionmunch_consolidate::SUMMARIES_PER_TICK * slots,
                 )
                 .await
                 {
@@ -3209,6 +3230,7 @@ mod tests {
             crate::config::DecaySettings::default(),
             None,
             (1, 1),
+            Vec::new(),
         )
         .await;
         assert!(tasks.is_empty());
@@ -3253,6 +3275,7 @@ mod tests {
                 crate::config::DecaySettings::default(),
                 ai_summary,
                 (1, 1),
+                Vec::new(),
             )
             .await;
             let n = tasks.len();
@@ -3300,6 +3323,7 @@ mod tests {
                 crate::config::DecaySettings::default(),
                 None,
                 (1, 1),
+                Vec::new(),
             )
             .await;
             // One enabled lint/sweep job plus the independent hollow-project

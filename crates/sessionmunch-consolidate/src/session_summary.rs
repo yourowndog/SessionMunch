@@ -1138,31 +1138,40 @@ pub fn render_ai_section(report: &SummaryReport) -> String {
     out
 }
 
+/// One summary endpoint and how many requests it takes at once.
+#[derive(Clone, Copy)]
+pub struct SummaryLane<'a> {
+    /// The provider the lane's requests go to.
+    pub provider: &'a dyn LlmProvider,
+    /// Requests this provider serves at once (a local server's parallel
+    /// slots, or what a hosted free tier tolerates).
+    pub slots: usize,
+}
+
 /// One summary tick: for at most `limit` sessions with a current card and a
 /// due summary (see `ReaderPool::session_summaries_due`), run the summary
 /// jobs, append the "AI summary" section to the card, and make one wiki
 /// commit. Accepted job answers are cached in the store by job id, so a
 /// session whose events did not change makes no provider calls, even after
-/// its card was rewritten. Up to `lanes` sessions run at once, each against
-/// the same provider (a local server with several slots serves them in
-/// parallel).
+/// its card was rewritten.
+///
+/// Every slot of every lane pulls the next due session from one shared
+/// queue, so a fast endpoint does more of the work. A lane that answers 429
+/// (rate limited) hands its session back to the queue and stops for this
+/// tick; sessions no lane took stay due for the next tick.
 ///
 /// # Errors
 /// Propagates a failure of the due-set query; per-session failures are
 /// logged and counted instead.
-#[allow(clippy::too_many_arguments)]
 pub async fn run_session_summary_tick(
     reader: &sessionmunch_store::ReaderPool,
     writer: &sessionmunch_store::WriterHandle,
     wiki: &sessionmunch_wiki::Wiki,
-    provider: &dyn LlmProvider,
+    lanes: &[SummaryLane<'_>],
     budgets: SummaryBudgets,
     after: Option<sessionmunch_core::SessionId>,
     limit: usize,
-    lanes: usize,
 ) -> sessionmunch_store::StoreResult<SessionSummaryTick> {
-    use futures_util::StreamExt as _;
-
     let due = reader
         .session_summaries_due(
             sessionmunch_workstream::CARD_BUILDER_VERSION,
@@ -1177,15 +1186,63 @@ pub async fn run_session_summary_tick(
         next_after: (due.len() == limit).then(|| due.last().copied()).flatten(),
         ..SessionSummaryTick::default()
     };
-    let mut results = futures_util::stream::iter(due)
-        .map(|id| async move {
-            (
-                id,
-                summarize_one(reader, writer, wiki, provider, budgets, id).await,
-            )
-        })
-        .buffer_unordered(lanes.max(1));
-    while let Some((id, result)) = results.next().await {
+    // The queue and the number of sessions in flight, under one lock: a
+    // worker that finds the queue empty keeps waiting while another lane may
+    // still hand a rate-limited session back.
+    let queue = std::sync::Mutex::new((std::collections::VecDeque::from(due), 0_usize));
+    let workers = lanes
+        .iter()
+        .flat_map(|lane| std::iter::repeat_n(*lane, lane.slots.max(1)))
+        .map(|lane| {
+            let queue = &queue;
+            async move {
+                let mut done = Vec::new();
+                loop {
+                    let next = match queue.lock() {
+                        Ok(mut q) => match q.0.pop_front() {
+                            Some(id) => {
+                                q.1 += 1;
+                                Some(Some(id))
+                            }
+                            None if q.1 == 0 => None,
+                            None => Some(None),
+                        },
+                        Err(_) => None,
+                    };
+                    let id = match next {
+                        None => break,
+                        Some(None) => {
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                            continue;
+                        }
+                        Some(Some(id)) => id,
+                    };
+                    let result =
+                        summarize_one(reader, writer, wiki, lane.provider, budgets, id).await;
+                    let limited = matches!(&result, Err(error) if is_rate_limited(error));
+                    if let Ok(mut q) = queue.lock() {
+                        if limited {
+                            q.0.push_back(id);
+                        }
+                        q.1 -= 1;
+                    }
+                    if limited {
+                        tracing::info!(
+                            model = lane.provider.model(),
+                            "summary lane rate limited; resting until the next tick"
+                        );
+                        break;
+                    }
+                    done.push((id, result));
+                }
+                done
+            }
+        });
+    for (id, result) in futures_util::future::join_all(workers)
+        .await
+        .into_iter()
+        .flatten()
+    {
         match result {
             Ok(calls) => {
                 tick.written += 1;
@@ -1204,6 +1261,15 @@ pub async fn run_session_summary_tick(
         tracing::warn!(error = %error, "session AI summary auto-commit failed");
     }
     Ok(tick)
+}
+
+fn is_rate_limited(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<sessionmunch_llm::LlmError>()
+            .and_then(sessionmunch_llm::LlmError::http_status)
+            == Some(429)
+    })
 }
 
 async fn summarize_one(

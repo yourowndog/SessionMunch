@@ -140,6 +140,23 @@ pub struct FallbackProfile {
     pub api_key_env: Option<String>,
 }
 
+/// An extra endpoint for session-card AI summaries
+/// (`[[session_cards.summary_endpoints]]`). Same fields as a fallback
+/// profile, plus how many requests the endpoint takes at once.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SummaryEndpoint {
+    /// Provider, model, base URL and key, as for `[[llm_fallbacks]]`.
+    #[serde(flatten)]
+    pub profile: FallbackProfile,
+    /// Requests sent to this endpoint at once.
+    #[serde(default = "one_lane")]
+    pub lanes: usize,
+}
+
+const fn one_lane() -> usize {
+    1
+}
+
 /// Top-level runtime configuration.
 ///
 /// `deny_unknown_fields` is intentionally NOT set: figment's
@@ -247,6 +264,11 @@ pub struct Config {
     /// hand.
     #[serde(skip)]
     pub llm_fallback_configs: Vec<ProviderConfig>,
+    /// Validated [`ProviderConfig`] and lane count for each
+    /// `[[session_cards.summary_endpoints]]` entry, resolved once by
+    /// `Config::load` like `llm_fallback_configs`. Not a config-file key.
+    #[serde(skip)]
+    pub summary_endpoint_configs: Vec<(ProviderConfig, usize)>,
     /// Opt-in: run LLM consolidation on SessionEnd (in addition to the
     /// always-written heuristic session page), when an LLM provider is
     /// configured. Off by default. Provider work is durably queued after the
@@ -787,6 +809,7 @@ impl Default for Config {
             llm_headers: Vec::new(),
             llm_fallbacks: Vec::new(),
             llm_fallback_configs: Vec::new(),
+            summary_endpoint_configs: Vec::new(),
             consolidate_on_session_end: false,
             consolidate_on_compact: true,
             capture_assistant: false,
@@ -859,6 +882,10 @@ pub struct SessionCardsSettings {
     /// Sessions the AI summary tick sends to the provider at once. Match it to
     /// the slots the provider serves in parallel (llama.cpp `--parallel`).
     pub summary_lanes: usize,
+    /// More endpoints that share the summary backlog with the main provider,
+    /// each with its own lanes. A lane that answers 429 rests until the next
+    /// tick and its session goes to another lane.
+    pub summary_endpoints: Vec<SummaryEndpoint>,
 }
 
 impl Default for SessionCardsSettings {
@@ -867,6 +894,7 @@ impl Default for SessionCardsSettings {
             ai_summary: true,
             card_lanes: 4,
             summary_lanes: 1,
+            summary_endpoints: Vec::new(),
         }
     }
 }
@@ -1283,25 +1311,18 @@ impl Config {
         // `std::env::var` outside `load`).
         let mut fallback_configs = Vec::with_capacity(config.llm_fallbacks.len());
         for (i, profile) in config.llm_fallbacks.iter().enumerate() {
-            let resolved_key = match non_empty(profile.api_key_env.as_deref()) {
-                Some(name) => Some(SecretString::from(env_string(name).ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "llm_fallbacks[{i}].api_key_env={name} is set but the environment \
-                         variable is missing or empty"
-                    )
-                })?)),
-                None => None,
-            };
-            let provider_cfg = config
-                .fallback_provider_config(i, profile, resolved_key)
-                .with_context(|| format!("validating llm_fallbacks[{i}]"))?;
-            // Constructed and discarded so a malformed profile (missing
-            // base_url, bad credential shape) fails startup instead of
-            // silently sitting unused until the primary has an outage.
-            build_provider(provider_cfg.clone())
-                .with_context(|| format!("building llm_fallbacks[{i}]"))?;
-            fallback_configs.push(provider_cfg);
+            fallback_configs.push(config.resolve_profile("llm_fallbacks", i, profile)?);
         }
+        let mut summary_endpoint_configs =
+            Vec::with_capacity(config.session_cards.summary_endpoints.len());
+        for (i, endpoint) in config.session_cards.summary_endpoints.iter().enumerate() {
+            let label = "session_cards.summary_endpoints";
+            summary_endpoint_configs.push((
+                config.resolve_profile(label, i, &endpoint.profile)?,
+                endpoint.lanes,
+            ));
+        }
+        config.summary_endpoint_configs = summary_endpoint_configs;
         config.llm_fallback_configs = fallback_configs;
 
         Ok(config)
@@ -1383,24 +1404,52 @@ impl Config {
     /// Returns [`LlmError::NotConfigured`] for an empty provider/model, an
     /// unknown provider, or a `RequiredApiKey` provider with no resolved
     /// credential.
-    fn fallback_provider_config(
+    /// Resolve one `{label}[{index}]` profile: read its key from the
+    /// environment (only here, inside `load`, per invariant #1), validate
+    /// it, and build it once so a malformed profile (missing base_url, bad
+    /// credential shape) fails startup instead of sitting unused.
+    fn resolve_profile(
         &self,
+        label: &str,
+        index: usize,
+        profile: &FallbackProfile,
+    ) -> anyhow::Result<ProviderConfig> {
+        let resolved_key = match non_empty(profile.api_key_env.as_deref()) {
+            Some(name) => Some(SecretString::from(env_string(name).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "{label}[{index}].api_key_env={name} is set but the environment \
+                     variable is missing or empty"
+                )
+            })?)),
+            None => None,
+        };
+        let provider_cfg = self
+            .profile_provider_config(label, index, profile, resolved_key)
+            .with_context(|| format!("validating {label}[{index}]"))?;
+        build_provider(provider_cfg.clone())
+            .with_context(|| format!("building {label}[{index}]"))?;
+        Ok(provider_cfg)
+    }
+
+    fn profile_provider_config(
+        &self,
+        label: &str,
         index: usize,
         profile: &FallbackProfile,
         resolved_key: Option<SecretString>,
     ) -> LlmResult<ProviderConfig> {
         let provider_raw = non_empty(Some(profile.provider.as_str())).ok_or_else(|| {
-            LlmError::NotConfigured(format!("llm_fallbacks[{index}].provider must not be empty"))
+            LlmError::NotConfigured(format!("{label}[{index}].provider must not be empty"))
         })?;
         let provider = provider_choice_from_str(provider_raw).ok_or_else(|| {
             LlmError::NotConfigured(format!(
-                "llm_fallbacks[{index}].provider={provider_raw} is not one of \
+                "{label}[{index}].provider={provider_raw} is not one of \
                  anthropic|openai|gemini|openai-compat|openai-oauth|copilot|anthropic-oauth|opencode"
             ))
         })?;
         let model = non_empty(Some(profile.model.as_str()))
             .ok_or_else(|| {
-                LlmError::NotConfigured(format!("llm_fallbacks[{index}].model must not be empty"))
+                LlmError::NotConfigured(format!("{label}[{index}].model must not be empty"))
             })?
             .to_string();
         if resolved_key.is_none()
@@ -1410,7 +1459,7 @@ impl Config {
             )
         {
             return Err(LlmError::NotConfigured(format!(
-                "llm_fallbacks[{index}] provider={provider_raw} requires api_key_env \
+                "{label}[{index}] provider={provider_raw} requires api_key_env \
                  (no native credential source for this provider)"
             )));
         }
@@ -1432,7 +1481,7 @@ impl Config {
     /// (e.g. `ANTHROPIC_API_KEY`) when no override is given, which would let
     /// a fallback profile silently reuse the primary's credential even
     /// though it omitted `api_key_env` — defeating the "fails startup"
-    /// validation in [`Self::fallback_provider_config`]. Native credential
+    /// validation in [`Self::profile_provider_config`]. Native credential
     /// sources (OpenAI OAuth, Copilot, Anthropic OAuth) are process-wide by
     /// nature and are still shared with the primary provider.
     fn fallback_provider_auth(
@@ -1495,6 +1544,18 @@ impl Config {
             ));
         }
         Ok(Some(Arc::new(FallbackLlmProvider::new(candidates))))
+    }
+
+    /// Providers for `[[session_cards.summary_endpoints]]`, with their lane
+    /// counts, in declaration order.
+    ///
+    /// # Errors
+    /// Propagates a provider construction failure.
+    pub fn summary_endpoint_providers(&self) -> LlmResult<Vec<(Arc<dyn LlmProvider>, usize)>> {
+        self.summary_endpoint_configs
+            .iter()
+            .map(|(cfg, lanes)| Ok((build_provider(cfg.clone())?, *lanes)))
+            .collect()
     }
 
     /// OpenAI-compatible embedding key. `EMBEDDING_API_KEY` is checked first
@@ -3248,6 +3309,43 @@ mod tests {
         assert!(cfg.llm_provider_chain().unwrap().is_none());
     }
 
+    #[test]
+    fn load_resolves_summary_endpoints_with_their_lanes() {
+        let cfg = load_with_toml(
+            "[[session_cards.summary_endpoints]]\nprovider = \"openai-compat\"\n\
+             model = \"qwen-a\"\nbase_url = \"http://127.0.0.1:9\"\nlanes = 3\n\
+             [[session_cards.summary_endpoints]]\nprovider = \"openai-compat\"\n\
+             model = \"qwen-b\"\nbase_url = \"http://127.0.0.1:10\"\n",
+        )
+        .unwrap();
+        let endpoints = &cfg.summary_endpoint_configs;
+        assert_eq!(endpoints.len(), 2);
+        assert_eq!(
+            (endpoints[0].0.model.as_str(), endpoints[0].1),
+            ("qwen-a", 3)
+        );
+        assert_eq!(
+            (endpoints[1].0.model.as_str(), endpoints[1].1),
+            ("qwen-b", 1),
+            "lanes defaults to 1"
+        );
+        assert_eq!(cfg.summary_endpoint_providers().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_summary_endpoint_with_a_missing_key_fails_startup() {
+        let error = load_with_toml(
+            "[[session_cards.summary_endpoints]]\nprovider = \"openai-compat\"\n\
+             model = \"m\"\nbase_url = \"http://127.0.0.1:9\"\n\
+             api_key_env = \"SESSIONMUNCH_TEST_SUMMARY_UNSET_KEY_311\"\n",
+        )
+        .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("session_cards.summary_endpoints[0].api_key_env"),
+            "got: {error:#}"
+        );
+    }
+
     /// `fallback_provider_config` takes the resolved credential as a plain
     /// parameter (see its doc comment): the environment is read once, in
     /// `Config::load`, and passed down as data so the happy path stays
@@ -3262,7 +3360,12 @@ mod tests {
             api_key_env: Some("GEMINI_FALLBACK_KEY".into()),
         };
         let provider_cfg = cfg
-            .fallback_provider_config(0, &profile, Some(SecretString::from("sk-fallback-test")))
+            .profile_provider_config(
+                "llm_fallbacks",
+                0,
+                &profile,
+                Some(SecretString::from("sk-fallback-test")),
+            )
             .unwrap();
         assert_eq!(provider_cfg.provider, ProviderChoice::Gemini);
         assert_eq!(provider_cfg.model, "gemini-3.5-flash");
@@ -3284,7 +3387,9 @@ mod tests {
             base_url: None,
             api_key_env: None,
         };
-        let provider_cfg = cfg.fallback_provider_config(0, &profile, None).unwrap();
+        let provider_cfg = cfg
+            .profile_provider_config("llm_fallbacks", 0, &profile, None)
+            .unwrap();
         assert_eq!(provider_cfg.provider, ProviderChoice::AnthropicOAuth);
     }
 
