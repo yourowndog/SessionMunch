@@ -1,9 +1,9 @@
-"""Scope routing for the ai-memory MCP surface.
+"""Scope routing for the SessionMunch MCP surface.
 
 The live server is a *static* MCP client target: it has no session identity
 to resolve "the current project" from, so every project-scoped call must name
 its scope explicitly. What it actually accepts was measured against
-Weakling's shared ``ai-memory.service`` (v2.2.1) on 2026-09-30, and the
+Weakling's shared hub service (v2.2.1) on 2026-09-30, and the
 contract is asymmetric in a way that is easy to get wrong:
 
 ===================================  =======================================
@@ -42,11 +42,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
-# The adapter directory is named ``ai-memory``, which is not a valid Python
-# identifier, so it can never be imported as a package. The plugin is loaded
-# by file path (and Hermes discovers it by directory), which leaves its
-# siblings reachable only as top-level modules — hence the explicit sys.path
-# registration here rather than a relative import.
+# Hermes loads the plugin by file path (discovering it by directory), not as
+# an importable package, which leaves its siblings reachable only as
+# top-level modules — hence the explicit sys.path registration here rather
+# than a relative import.
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.append(str(Path(__file__).resolve().parent))
 
@@ -138,7 +137,7 @@ def resolve_scope(
         if conflicts:
             raise ScopeError(
                 "global=true cannot be combined with "
-                f"{'/'.join(conflicts)} on the ai-memory server; drop "
+                f"{'/'.join(conflicts)} on the SessionMunch server; drop "
                 f"{'/'.join(conflicts)} or drop global=true."
             )
         return ScopeResolution(arguments, MODE_GLOBAL)
@@ -149,7 +148,7 @@ def resolve_scope(
         if conflicts:
             raise ScopeError(
                 "scopes=[...] cannot be combined with "
-                f"{'/'.join(conflicts)} on the ai-memory server; pass the "
+                f"{'/'.join(conflicts)} on the SessionMunch server; pass the "
                 "multi-project list in scopes= and nothing else."
             )
         return ScopeResolution(arguments, MODE_SCOPES)
@@ -161,7 +160,7 @@ def resolve_scope(
         if not default_project:
             raise ScopeError(
                 f"workspace={workspace!r} was passed without a project. The "
-                "ai-memory server requires both, and no default_project is "
+                "SessionMunch server requires both, and no default_project is "
                 "configured; pass project= as well."
             )
         arguments["project"] = default_project
@@ -186,7 +185,7 @@ def resolve_scope(
 
     # -- 5. unscoped -------------------------------------------------------
     warnings.append(
-        "no project scope: the ai-memory server will auto-resolve this call "
+        "no project scope: the SessionMunch server will auto-resolve this call "
         "to the credential's active project, which on a shared deployment is "
         "often a throwaway project. Configure default_project and "
         "default_workspace, or pass project=."
@@ -213,7 +212,7 @@ def validate_pair(
     try:
         result = call_tool("memory_status", {"workspace": workspace, "project": project})
     except Exception as exc:  # network/HTTP failures are not "pair missing"
-        return False, f"could not reach the ai-memory server: {exc}"
+        return False, f"could not reach the SessionMunch server: {exc}"
 
     if not isinstance(result, dict):
         return False, "unexpected response shape from memory_status"
@@ -252,7 +251,7 @@ def discover_projects(
         try:
             result = call_tool("memory_query", arguments)
         except Exception as exc:
-            logger.warning("ai-memory scope discovery query %r failed: %s", query, exc)
+            logger.warning("sessionmunch scope discovery query %r failed: %s", query, exc)
             continue
         if not isinstance(result, dict) or result.get("isError"):
             continue
@@ -282,13 +281,13 @@ def _error_text(result: Dict[str, Any]) -> str:
     text = _first_text(result)
     if text:
         return text.strip()[:200]
-    return "ai-memory call failed"
+    return "sessionmunch call failed"
 
 
 def format_scope_hint(pairs: Iterable[Tuple[str, str]], limit: int = 12) -> str:
     """Render discovered pairs as a one-line, human-readable hint."""
     listed = [f"{ws}/{proj}" for ws, proj in list(pairs)[:limit]]
     if not listed:
-        return "no projects discovered on the ai-memory server"
+        return "no projects discovered on the SessionMunch server"
     suffix = " ..." if len(list(pairs)) > limit else ""
     return "known scopes: " + ", ".join(listed) + suffix

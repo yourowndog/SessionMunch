@@ -12,24 +12,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ai-memory-importer"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2",
- "tempfile",
- "tokio",
- "url",
- "walkdir",
-]
-
-[[package]]
 name = "anstream"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1085,6 +1067,24 @@ dependencies = [
  "ryu",
  "serde",
  "unsafe-libyaml",
+]
+
+[[package]]
+name = "sessionmunch-importer"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "url",
+ "walkdir",
 ]
 
 [[package]]

@@ -1,4 +1,4 @@
-//! LLM provider abstraction for ai-memory.
+//! LLM provider abstraction for SessionMunch.
 //!
 //! Each provider ships with a *native, typed*
 //! `reqwest`-based client — never a generic gateway. The cognee
@@ -34,31 +34,31 @@
 /// on first request. Once `OLLAMA_KEEP_ALIVE` keeps it warm, subsequent
 /// requests return in seconds — but the first one after the model unloaded
 /// needs the headroom. Slow hosted gateways that stream long completions
-/// may need more; operators override it with `AI_MEMORY_LLM_TIMEOUT_SECS`
+/// may need more; operators override it with `SESSIONMUNCH_LLM_TIMEOUT_SECS`
 /// (read once by `Config::load`, applied to every chat provider).
 pub const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 300;
 
-/// `User-Agent` ai-memory sends on provider requests.
+/// `User-Agent` SessionMunch sends on provider requests.
 ///
 /// `reqwest` sends no `User-Agent` at all unless one is configured, so every
-/// ai-memory provider request used to arrive anonymous. Gateways increasingly
+/// SessionMunch provider request used to arrive anonymous. Gateways increasingly
 /// require callers to identify themselves — OpenCode asks for a
 /// specific agent ("no broad user agents") and reports traffic without one as
 /// an unknown client — and an unattributable request is the one a rate
 /// limiter throttles first.
 ///
-/// Layered *under* `AI_MEMORY_LLM_HEADERS` by
+/// Layered *under* `SESSIONMUNCH_LLM_HEADERS` by
 /// [`factory::build_provider`], so an operator can still override it. The
 /// Copilot provider keeps [`copilot::COPILOT_USER_AGENT`] instead: GitHub's
 /// Copilot API expects the editor-plugin agent and rejects requests without
 /// it.
 pub const DEFAULT_USER_AGENT: &str = concat!("sessionmunch/", env!("CARGO_PKG_VERSION"));
 
-/// `HTTP-Referer` ai-memory sends to OpenRouter.
+/// `HTTP-Referer` SessionMunch sends to OpenRouter.
 ///
 /// OpenRouter attributes usage to an app on its public leaderboard by
-/// `HTTP-Referer` and [`OPENROUTER_X_TITLE`]; without them, ai-memory's
-/// requests show up unattributed. Layered under `AI_MEMORY_LLM_HEADERS` by
+/// `HTTP-Referer` and [`OPENROUTER_X_TITLE`]; without them, SessionMunch's
+/// requests show up unattributed. Layered under `SESSIONMUNCH_LLM_HEADERS` by
 /// [`factory::build_provider`] only when the `openai-compat` base URL points
 /// at `openrouter.ai`, so a non-OpenRouter compat endpoint (Ollama, vLLM,
 /// LM Studio) never receives these.

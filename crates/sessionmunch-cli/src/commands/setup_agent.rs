@@ -338,7 +338,7 @@ fn emit_claude_code(host: &HostEnv, emit_root: &Path, args: &SetupAgentArgs) -> 
     println!("# Claude Code — merge into {}", settings_path.display());
     println!("# Hook scripts (must be reachable from the host that runs Claude Code):");
     println!("#   {}", emit_root.display());
-    println!("# AI-memory server: {}", args.server_url);
+    println!("# SessionMunch server: {}", args.server_url);
     if args.auth_token.is_some() {
         println!("# Auth: SESSIONMUNCH_AUTH_TOKEN embedded in each hook's env block.");
         println!(
@@ -367,7 +367,7 @@ fn emit_grok(host: &HostEnv, emit_root: &Path, args: &SetupAgentArgs) -> Result<
     println!("# Grok Build CLI — write to {}", hooks_path.display());
     println!("# Hook scripts (must be reachable from the host that runs Grok):");
     println!("#   {}", emit_root.display());
-    println!("# AI-memory server: {}", args.server_url);
+    println!("# SessionMunch server: {}", args.server_url);
     if args.auth_token.is_some() {
         println!("# Auth: SESSIONMUNCH_AUTH_TOKEN embedded in each hook command below.");
         println!(
@@ -403,7 +403,7 @@ fn emit_pool(host: &HostEnv, emit_root: &Path, args: &SetupAgentArgs) {
     println!("# of each project Pool runs in; sessionmunch does not write project-local files.");
     println!("# Hook scripts (must be reachable from the host that runs Pool):");
     println!("#   {}", emit_root.display());
-    println!("# AI-memory server: {}", args.server_url);
+    println!("# SessionMunch server: {}", args.server_url);
     if args.auth_token.is_some() {
         println!("# Auth: SESSIONMUNCH_AUTH_TOKEN embedded in each hook command below.");
         println!("#       Treat .poolside/settings.yaml as sensitive (chmod 600).");
@@ -440,7 +440,7 @@ fn render_devin_setup_output(
     );
     out.push_str("# Hook scripts (must be reachable from the host that runs Devin):\n");
     out.push_str(&format!("#   {}\n", emit_root.display()));
-    out.push_str(&format!("# AI-memory server: {}\n", args.server_url));
+    out.push_str(&format!("# SessionMunch server: {}\n", args.server_url));
     if args.auth_token.is_some() {
         out.push_str("# Auth: SESSIONMUNCH_AUTH_TOKEN embedded in each hook command below.\n");
         out.push_str(

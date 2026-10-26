@@ -15,7 +15,6 @@ sessionmunch = "hermes_sessionmunch.plugin:register"
 only-include = [
     "__init__.py",
     "config_schema.py",
-    "legacy_reference.py",
     "schema.py",
     "scope.py",
 ]

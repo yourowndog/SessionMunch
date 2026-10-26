@@ -1,7 +1,7 @@
-"""Typed parsing of live ai-memory MCP retrieval payloads.
+"""Typed parsing of live SessionMunch MCP retrieval payloads.
 
 Every field name, encoding quirk, and array name in this module was read off
-the *deployed* server (Weakling's shared ``ai-memory.service``,
+the *deployed* server (Weakling's shared hub service,
 v2.2.1-retrieval-section-index) with a live ``tools/list`` + ``tools/call``
 probe, not from ``API_MAP.md`` — that map documents 17 tools (the server
 exposes 19) and predates the passage index entirely.
@@ -381,7 +381,7 @@ def parse_query_payload(payload: Union[str, bytes, Dict[str, Any]]) -> QueryResu
         try:
             payload = json.loads(text)
         except (TypeError, ValueError):
-            logger.debug("ai-memory payload was not JSON; treating as prose")
+            logger.debug("sessionmunch payload was not JSON; treating as prose")
             return QueryResult()
     if not isinstance(payload, dict):
         return QueryResult()
