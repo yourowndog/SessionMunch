@@ -3,7 +3,7 @@
 
 **Status:** Canonical architecture guide
 **Adopted:** 2026-10-02
-**Canonical host:** `sleeper`
+**Canonical host:** `weakling`
 **Canonical working tree:** `~/projects/sessionmunch`
 
 ## Purpose
@@ -71,16 +71,16 @@ Changing an invariant requires an explicit architecture decision, not an inciden
 
 ### Canonical deployment
 
-- `sleeper` is the canonical SessionMunch brain and database host.
-- Other machines send live capture/imported history to Sleeper.
-- Every machine keeps a local spool/queue so temporary network or Sleeper outages do not lose evidence.
+- `weakling`, the cluster's always-on server, is the canonical SessionMunch brain and database host (decided 2026-10-23, confirmed by Sam 2026-10-26). Sleeper is a client like the other workstations.
+- Other machines, Sleeper included, send live capture/imported history to Weakling.
+- Every machine keeps a local spool/queue so temporary network or hub outages do not lose evidence.
 - We are **not** building independent per-node databases plus distributed synchronization.
 
 ### Repository and runtime layout
 
-- Source working tree: `~/projects/sessionmunch`
-- Configuration: `~/.config/sessionmunch/`
-- Runtime/database/artifacts: `~/.local/share/sessionmunch/`
+- Source working tree: `~/projects/sessionmunch` (on Sleeper)
+- Hub (Weakling): system service `sessionmunch`, data dir `/var/lib/sessionmunch/` (config, database, artifacts)
+- Clients: data dir `~/.local/share/sessionmunch/` (`config.toml`, hook spool, import state)
 
 The former implementation path remains a compatibility symlink during transition.
 
@@ -334,7 +334,7 @@ Do not add telemetry to a remote service. These are local operational measuremen
 - implement global historical import by time range
 - make events lexically searchable
 - add Hermes reader/import support
-- keep local spools on non-Sleeper nodes and central canonical persistence on Sleeper
+- keep local spools on every client and central canonical persistence on the hub (Weakling)
 
 **Exit condition:** “When did we run X on Sleeper?” can be answered from preserved evidence without requiring an LLM summary to have mentioned it.
 ### P2 — One global engine
