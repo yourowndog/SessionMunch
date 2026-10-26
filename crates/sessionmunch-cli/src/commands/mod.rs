@@ -31,6 +31,7 @@ pub mod handoffs;
 pub mod hook;
 pub mod hook_capture;
 pub mod hook_drain_process;
+pub(crate) mod hook_ephemeral;
 pub mod hook_spool;
 pub mod import_sessions;
 pub mod init;
