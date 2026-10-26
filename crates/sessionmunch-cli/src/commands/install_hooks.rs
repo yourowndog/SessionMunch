@@ -3266,7 +3266,7 @@ fn render_agent_output(
         "# {label} hook scripts (manual install — wire each to the matching event)\n"
     ));
     out.push_str(&format!("# Hook scripts: {}\n", hooks_dir.display()));
-    out.push_str(&format!("# AI-memory server URL: {server_url}\n"));
+    out.push_str(&format!("# SessionMunch server URL: {server_url}\n"));
     if auth_token.is_some() {
         out.push_str("# Auth: set SESSIONMUNCH_AUTH_TOKEN in each hook's environment to the\n");
         out.push_str("#       value passed via --auth-token (omitted from this printout).\n");
@@ -3707,7 +3707,7 @@ fn render_claude_code(
         settings_path.display()
     );
     println!("# Hook scripts: {}", hooks_dir.display());
-    println!("# AI-memory server URL: {server_url}");
+    println!("# SessionMunch server URL: {server_url}");
     if auth_token.is_some() {
         println!("# Auth: SESSIONMUNCH_AUTH_TOKEN embedded in each hook command below.");
         println!(
@@ -3759,7 +3759,7 @@ fn render_grok(
         config_path.display()
     );
     println!("# Hook scripts: {}", hooks_dir.display());
-    println!("# AI-memory server URL: {server_url}");
+    println!("# SessionMunch server URL: {server_url}");
     if auth_token.is_some() {
         println!("# Auth: SESSIONMUNCH_AUTH_TOKEN embedded in each hook command below.");
         println!(
@@ -3858,7 +3858,7 @@ fn render_zero(
     println!("# Zero hook config — merge into ~/.config/zero/hooks.json");
     println!("# ($XDG_CONFIG_HOME/zero/hooks.json on non-default XDG setups), or");
     println!("# re-run with --apply to merge it in place, preserving other hooks.");
-    println!("# AI-memory server URL: {server_url}");
+    println!("# SessionMunch server URL: {server_url}");
     if auth_token.is_some() {
         println!("# Auth: token embedded in each hook's args below.");
         println!("#       Treat hooks.json as sensitive (chmod 600).");
@@ -4120,7 +4120,7 @@ fn render_zcode(
     println!("# ~/.zcode/cli/config.json (the same file `install-mcp --client");
     println!("# zcode` registers MCP servers in), or re-run with --apply to");
     println!("# merge it in place, preserving the rest of the config.");
-    println!("# AI-memory server URL: {server_url}");
+    println!("# SessionMunch server URL: {server_url}");
     if auth_token.is_some() {
         println!("# Auth: this printed snippet embeds the token in each hook's args");
         println!("#       so a hand-placed config works as-is — treat it as");
@@ -4176,7 +4176,7 @@ fn render_devin(
         "# Devin CLI hook config — write to ~/.devin/hooks.v1.json or ~/.devin/config.json hooks key"
     );
     println!("# Hook scripts: {}", hooks_dir.display());
-    println!("# AI-memory server URL: {server_url}");
+    println!("# SessionMunch server URL: {server_url}");
     if auth_token.is_some() {
         println!("# Auth: SESSIONMUNCH_AUTH_TOKEN embedded in each hook command below.");
         println!(
@@ -4233,7 +4233,7 @@ fn render_kimi_code(
     println!("# with --apply to merge it in place, preserving providers/model and");
     println!("# any third-party [[hooks]] entries already in the file.");
     println!("# Hook scripts: {}", hooks_dir.display());
-    println!("# AI-memory server URL: {server_url}");
+    println!("# SessionMunch server URL: {server_url}");
     if auth_token.is_some() {
         println!("# Auth: SESSIONMUNCH_AUTH_TOKEN embedded in each hook command below.");
         println!("#       Treat config.toml as sensitive (chmod 600).");
@@ -4282,7 +4282,7 @@ fn render_kiro_cli(
     println!("// no file, so create one first (`kiro-cli agent create`). Do not reuse");
     println!("// this v2 registration for v3; use `--agent kiro-cli-v3` instead.");
     println!("// Hook scripts: {}", hooks_dir.display());
-    println!("// AI-memory server URL: {server_url}");
+    println!("// SessionMunch server URL: {server_url}");
     if auth_token.is_some() {
         println!("// Auth: SESSIONMUNCH_AUTH_TOKEN embedded in each hook command below.");
         println!("//       Treat agent configs as sensitive (chmod 600).");
@@ -4327,7 +4327,7 @@ fn render_kiro_cli_v3(
     println!("// $KIRO_HOME/hooks/sessionmunch.json (~/.kiro/hooks/sessionmunch.json when unset),");
     println!("// or re-run with --apply for an atomic, idempotent merge.");
     println!("// Hook scripts: {}", hooks_dir.display());
-    println!("// AI-memory server URL: {server_url}");
+    println!("// SessionMunch server URL: {server_url}");
     if auth_token.is_some() {
         println!("// Auth: SESSIONMUNCH_AUTH_TOKEN embedded in each hook command below.");
         println!("//       Treat the hook file as sensitive (chmod 600).");
@@ -4405,7 +4405,7 @@ fn render_pool_output(
     out.push_str("# does not write project-local files, so paste this snippet manually\n");
     out.push_str("# (re-run with --apply first to stage the scripts to a stable path).\n");
     out.push_str(&format!("# Hook scripts: {}\n", hooks_dir.display()));
-    out.push_str(&format!("# AI-memory server URL: {server_url}\n"));
+    out.push_str(&format!("# SessionMunch server URL: {server_url}\n"));
     if auth_token.is_some() {
         out.push_str("# Auth: SESSIONMUNCH_AUTH_TOKEN embedded in each hook command below.\n");
         out.push_str("#       Treat .poolside/settings.yaml as sensitive (chmod 600).\n");

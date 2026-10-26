@@ -17,7 +17,28 @@ const IMPORT_VERSION: &str = "omc-wiki-v1";
 const CONVERSATION_IMPORT_VERSION: &str = "external-conversation-v1";
 const DEFAULT_SERVER_URL: &str = "http://127.0.0.1:49374";
 const EXTERNAL_IMPORT_AGENT: &str = "external-import";
-const EXTERNAL_IMPORT_EXTENSION: &str = "ai-memory-importer";
+/// Pre-rename env names, still honored when the `SESSIONMUNCH_*` name is
+/// unset so existing installs keep working.
+const LEGACY_SERVER_URL_ENV: &str = "AI_MEMORY_SERVER_URL";
+const LEGACY_AUTH_TOKEN_ENV: &str = "AI_MEMORY_AUTH_TOKEN";
+
+/// Non-empty value of `name`, falling back to the pre-rename `legacy` name.
+fn env_with_legacy(name: &str, legacy: &str) -> Option<String> {
+    [name, legacy]
+        .into_iter()
+        .find_map(|key| std::env::var(key).ok().filter(|v| !v.is_empty()))
+}
+
+/// Default `--server-url` when neither the flag nor `SESSIONMUNCH_SERVER_URL`
+/// is set: the legacy env name, then the loopback default.
+fn default_server_url() -> String {
+    std::env::var(LEGACY_SERVER_URL_ENV)
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| DEFAULT_SERVER_URL.to_string())
+}
+
+const EXTERNAL_IMPORT_EXTENSION: &str = "sessionmunch-importer";
 const MAX_CONVERSATION_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_CONVERSATION_MESSAGES: usize = 128;
 const MAX_USER_MESSAGE_BYTES: usize = 16 * 1024;
@@ -25,7 +46,7 @@ const MAX_EXTENSION_MESSAGE_BYTES: usize = 2_000;
 const MAX_CONVERSATION_TOTAL_BYTES: usize = 1024 * 1024;
 
 #[derive(Parser, Debug)]
-#[command(author, version, about = "Optional ai-memory import companion")]
+#[command(author, version, about = "Optional SessionMunch import companion")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -35,7 +56,7 @@ struct Cli {
 enum Commands {
     /// Import an oh-my-claudecode / OMC flat markdown wiki directory.
     OmcWiki(OmcArgs),
-    /// Replay a generic external conversation through ai-memory's hook API.
+    /// Replay a generic external conversation through SessionMunch's hook API.
     ExternalConversation(ConversationArgs),
 }
 
@@ -47,7 +68,7 @@ struct OmcArgs {
     workspace: Option<String>,
     #[arg(long)]
     project: Option<String>,
-    #[arg(long, env = "AI_MEMORY_SERVER_URL", default_value = DEFAULT_SERVER_URL)]
+    #[arg(long, env = "SESSIONMUNCH_SERVER_URL", default_value_t = default_server_url())]
     server_url: String,
     #[arg(long)]
     apply: bool,
@@ -73,7 +94,7 @@ struct ConversationArgs {
     /// Explicit destination workspace. The project comes from the envelope.
     #[arg(long)]
     workspace: Option<String>,
-    #[arg(long, env = "AI_MEMORY_SERVER_URL", default_value = DEFAULT_SERVER_URL)]
+    #[arg(long, env = "SESSIONMUNCH_SERVER_URL", default_value_t = default_server_url())]
     server_url: String,
     /// Perform the replay. Without this flag the command only prints a plan.
     #[arg(long)]
@@ -1245,9 +1266,7 @@ impl ImportClient {
                 .build()?,
             origin,
             base_path,
-            token: std::env::var("AI_MEMORY_AUTH_TOKEN")
-                .ok()
-                .filter(|s| !s.is_empty()),
+            token: env_with_legacy("SESSIONMUNCH_AUTH_TOKEN", LEGACY_AUTH_TOKEN_ENV),
         })
     }
     fn url(&self, path: &str) -> String {
@@ -1554,7 +1573,8 @@ mod tests {
             "Bearer secret-token"
         );
         let dbg = format!("{:?}", req.headers());
-        assert!(!dbg.contains("AI_MEMORY_AUTH_TOKEN"));
+        assert!(!dbg.contains("SESSIONMUNCH_AUTH_TOKEN"));
+        assert!(!dbg.contains(LEGACY_AUTH_TOKEN_ENV));
     }
 
     #[test]

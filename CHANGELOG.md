@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - The README, install guide, Hermes guide and MCP reference now match the shipped code. The harness table lists the four first-class integrations plus any MCP client, and it no longer claims Aider or Windsurf. The MCP reference documents all 20 tools. The install guide explains how to build the Docker image and binary locally until the first tagged release publishes them. (#11)
+- Finished the SessionMunch rename in companions and installer output. The
+  importer companion is now `companions/sessionmunch-importer` and reads
+  `SESSIONMUNCH_SERVER_URL` / `SESSIONMUNCH_AUTH_TOKEN`, still honoring the
+  legacy `AI_MEMORY_*` names when the new ones are unset. Hook/agent setup
+  banners say "SessionMunch server". The unused upstream Hermes plugin copy
+  (`legacy_reference.py`) is no longer shipped in the Hermes wheel.
 - Product-wide rename: `ai-memory` is now SessionMunch (t_3f5184b0). Binary
   `sessionmunch`; crates `sessionmunch-*`; env `SESSIONMUNCH_*`; data dir
   `<data-local>/sessionmunch`; config `~/.config/sessionmunch`; marker

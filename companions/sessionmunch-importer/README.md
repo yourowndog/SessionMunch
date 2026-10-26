@@ -1,7 +1,7 @@
-# ai-memory-importer
+# sessionmunch-importer
 
 Standalone optional companion for importing external memory corpora into a
-running ai-memory server. This crate is deliberately isolated from the root
+running SessionMunch server. This crate is deliberately isolated from the root
 workspace: its `Cargo.toml` has its own `[workspace]`, uses only crates.io
 dependencies, and is not included in root `cargo test --workspace`.
 
@@ -34,10 +34,10 @@ Roles are `system`, `user`, or `assistant`. Product-specific ChatGPT, Claude
 Desktop, Markdown, or other export adapters intentionally stay outside this
 repository; they only need to emit the generic envelope.
 
-The importer replays the conversation through ai-memory's public hook pipeline:
+The importer replays the conversation through SessionMunch's public hook pipeline:
 one `session-start`, the ordered messages, and one `session-end`. User messages
 use the canonical `user-prompt` event. Assistant/system messages use the
-validated `ai-memory-importer` extension vocabulary so their role and body stay
+validated `sessionmunch-importer` extension vocabulary so their role and body stay
 available to later consolidation. The whole sequence uses `/hook/batch`, whose
 inline processing preserves order and does not return until the session page
 and other SessionEnd effects have landed.
@@ -58,7 +58,7 @@ stubs for them.
 - Live mode requires explicit `--workspace`, `--project`, and
   `--manifest-out <path>`.
 - Live writes use only `POST /admin/write-page`; the importer never opens
-  ai-memory SQLite or wiki files directly and never deletes pages.
+  SessionMunch SQLite or wiki files directly and never deletes pages.
 - The destination workspace/project must already exist unless
   `--create-destination` is passed.
 - Existing destination pages abort the import unless `--overwrite` is passed.
@@ -74,7 +74,7 @@ stubs for them.
 - Dry-run output does not print full page bodies unless `--show-body` is passed.
 - Only endpoint-supported metadata is mapped: `title`, `kind`, `tier`, `tags`,
   `pinned`, and `body`. Unknown frontmatter is ignored.
-- Auth comes only from `AI_MEMORY_AUTH_TOKEN`; there is intentionally no CLI
+- Auth comes only from `SESSIONMUNCH_AUTH_TOKEN` (legacy `AI_MEMORY_AUTH_TOKEN` is still read when it is unset); there is intentionally no CLI
   token argument.
 - External conversations are fully parsed, schema-checked, bounded, and
   sanitized before any manifest or HTTP request is created. Unknown fields and
@@ -83,7 +83,7 @@ stubs for them.
   the same durable hook caps: 16 KiB for user prompts and 2,000 bytes for
   extension messages. The dry-run and manifest report the truncation count.
 - Conversation bodies receive client-side credential redaction before replay
-  and then cross ai-memory's normal server sanitizer as a second boundary.
+  and then cross SessionMunch's normal server sanitizer as a second boundary.
 - Stable session IDs derive from `(workspace, project, source, session_id)`.
   Each replay event has a stable `ingest_key`; a changed transcript gets a new
   terminal generation key, so rerunning an interrupted import is safe and
@@ -99,14 +99,14 @@ stubs for them.
 Dry-run with a summary:
 
 ```bash
-cargo run --manifest-path companions/ai-memory-importer/Cargo.toml -- \
+cargo run --manifest-path companions/sessionmunch-importer/Cargo.toml -- \
   omc-wiki --dir /path/to/omc/wiki --workspace default --project my-project
 ```
 
 Dry-run with a manifest:
 
 ```bash
-cargo run --manifest-path companions/ai-memory-importer/Cargo.toml -- \
+cargo run --manifest-path companions/sessionmunch-importer/Cargo.toml -- \
   omc-wiki --dir /path/to/omc/wiki --workspace default --project my-project \
   --manifest-out /tmp/omc-import-manifest.json
 ```
@@ -114,16 +114,16 @@ cargo run --manifest-path companions/ai-memory-importer/Cargo.toml -- \
 Live import:
 
 ```bash
-AI_MEMORY_AUTH_TOKEN=... \
-cargo run --manifest-path companions/ai-memory-importer/Cargo.toml -- \
+SESSIONMUNCH_AUTH_TOKEN=... \
+cargo run --manifest-path companions/sessionmunch-importer/Cargo.toml -- \
   omc-wiki --dir /path/to/omc/wiki --workspace default --project my-project \
   --apply --manifest-out /tmp/omc-import-manifest.json
 ```
 
 Options:
 
-- `--server-url URL`: ai-memory server URL; defaults to
-  `http://127.0.0.1:49374`, or `AI_MEMORY_SERVER_URL` when set. A URL path is
+- `--server-url URL`: SessionMunch server URL; defaults to
+  `http://127.0.0.1:49374`, or `SESSIONMUNCH_SERVER_URL` (legacy `AI_MEMORY_SERVER_URL`) when set. A URL path is
   treated as the base path.
 - `--create-destination`: allow `/admin/write-page` to auto-create the
   workspace/project after the read preflight fails.
@@ -137,7 +137,7 @@ Options:
 Dry-run (the default):
 
 ```bash
-cargo run --manifest-path companions/ai-memory-importer/Cargo.toml -- \
+cargo run --manifest-path companions/sessionmunch-importer/Cargo.toml -- \
   external-conversation --file /path/to/conversation.json \
   --workspace default
 ```
@@ -145,7 +145,7 @@ cargo run --manifest-path companions/ai-memory-importer/Cargo.toml -- \
 Show the sanitized event bodies in the dry-run:
 
 ```bash
-cargo run --manifest-path companions/ai-memory-importer/Cargo.toml -- \
+cargo run --manifest-path companions/sessionmunch-importer/Cargo.toml -- \
   external-conversation --file /path/to/conversation.json \
   --workspace default --show-body
 ```
@@ -153,8 +153,8 @@ cargo run --manifest-path companions/ai-memory-importer/Cargo.toml -- \
 Live replay:
 
 ```bash
-AI_MEMORY_AUTH_TOKEN=... \
-cargo run --manifest-path companions/ai-memory-importer/Cargo.toml -- \
+SESSIONMUNCH_AUTH_TOKEN=... \
+cargo run --manifest-path companions/sessionmunch-importer/Cargo.toml -- \
   external-conversation --file /path/to/conversation.json \
   --workspace default --apply \
   --manifest-out /tmp/conversation-import-manifest.json
@@ -170,9 +170,9 @@ before invoking the importer.
 Run these from the repository root:
 
 ```bash
-cargo fmt --check --manifest-path companions/ai-memory-importer/Cargo.toml
-cargo test --manifest-path companions/ai-memory-importer/Cargo.toml
-cargo clippy --manifest-path companions/ai-memory-importer/Cargo.toml --all-targets -- -D warnings
+cargo fmt --check --manifest-path companions/sessionmunch-importer/Cargo.toml
+cargo test --manifest-path companions/sessionmunch-importer/Cargo.toml
+cargo clippy --manifest-path companions/sessionmunch-importer/Cargo.toml --all-targets -- -D warnings
 ```
 
 Root hygiene checks remain separate:
