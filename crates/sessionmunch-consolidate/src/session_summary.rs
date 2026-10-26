@@ -81,7 +81,7 @@ impl SummaryBudgets {
 }
 
 /// Version of how job inputs are built (segmentation and compression).
-pub const BUILDER_VERSION: u32 = 1;
+pub const BUILDER_VERSION: u32 = 2;
 /// Version of the system prompt and schema.
 pub const PROMPT_VERSION: u32 = 1;
 
@@ -572,6 +572,28 @@ fn segments(digest: &SessionDigest, lines: Vec<(usize, String)>) -> Vec<Vec<(usi
     segments
 }
 
+/// Join consecutive request segments while together they fit `budget`. A
+/// session of many short requests is then a few calls instead of one per
+/// request; a segment over `budget` stays alone.
+fn pack(segments: Vec<Vec<(usize, String)>>, budget: usize) -> Vec<Vec<(usize, String)>> {
+    let mut packed: Vec<Vec<(usize, String)>> = Vec::new();
+    let mut used = 0;
+    for segment in segments {
+        let size: usize = segment.iter().map(|(_, l)| tokens(l)).sum();
+        match packed.last_mut() {
+            Some(last) if used + size <= budget => {
+                last.extend(segment);
+                used += size;
+            }
+            _ => {
+                packed.push(segment);
+                used = size;
+            }
+        }
+    }
+    packed
+}
+
 /// Keep a segment's head (40%) and tail within budget.
 fn fit(segment: Vec<(usize, String)>, budget: usize) -> Vec<(Option<usize>, String)> {
     let total: usize = segment.iter().map(|(_, l)| tokens(l)).sum();
@@ -626,7 +648,7 @@ pub fn build_jobs(
             allowed,
         }];
     }
-    segments(digest, lines)
+    pack(segments(digest, lines), budgets.one_shot_tokens())
         .into_iter()
         .enumerate()
         .map(|(index, segment)| {

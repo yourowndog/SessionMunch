@@ -348,13 +348,13 @@ async fn an_anticipated_denial_is_the_intended_result() {
 }
 
 fn long_session() -> Parts {
-    // Assistant turns are clipped to 1,200 chars (~300 tokens), so 3 x 15 of
-    // them put the session over the 12k-token one-job budget.
+    // Assistant turns are clipped to 1,200 chars (~300 tokens), so 20 of them
+    // make each request too big to share a 12k-token job with another.
     let filler = "word ".repeat(400);
     let mut events = Vec::new();
     for n in 1..=3 {
         events.push(user(&format!("Request number {n}: build part {n}")));
-        for _ in 0..15 {
+        for _ in 0..20 {
             events.push(assistant(&filler));
             events.extend(bash("make", &"log line\n".repeat(50), false));
         }
@@ -411,6 +411,33 @@ async fn long_sessions_map_per_request_then_reduce_and_keep_open_steps() {
         fields.next_action.text,
         "Wire part 2 into the release script."
     );
+}
+
+#[test]
+fn short_requests_share_a_job_instead_of_one_call_each() {
+    let filler = "word ".repeat(400);
+    let mut events = Vec::new();
+    for n in 1..=40 {
+        events.push(user(&format!("Request number {n}: tweak part {n}")));
+        for _ in 0..3 {
+            events.push(assistant(&filler));
+        }
+    }
+    let parts = session(events);
+    let jobs = build_jobs(&parts.0, &parts.1, SummaryBudgets::default());
+    // 40 requests of ~1k tokens each pack into four ~12k-token segments.
+    assert!(
+        (3..=5).contains(&jobs.len()),
+        "{} jobs for 40 short requests",
+        jobs.len()
+    );
+    let mut cited: Vec<usize> = jobs
+        .iter()
+        .flat_map(|j| j.allowed.iter().copied())
+        .collect();
+    cited.sort_unstable();
+    cited.dedup();
+    assert_eq!(cited.len(), 160, "every event lands in exactly one segment");
 }
 
 #[tokio::test]
