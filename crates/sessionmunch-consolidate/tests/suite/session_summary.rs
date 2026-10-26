@@ -548,6 +548,8 @@ mod tick {
     use sessionmunch_wiki::{Wiki, WritePageRequest};
     use tempfile::TempDir;
 
+    use sessionmunch_llm::{ChatRequest, ChatResponse, LlmProvider, LlmResult};
+
     use super::{FakeProvider, RateLimitedProvider};
 
     struct Fixture {
@@ -663,56 +665,109 @@ mod tick {
         })
     }
 
+    impl Fixture {
+        /// A carded session long enough for three segment jobs and a reduce.
+        async fn long_carded_session(&self) -> SessionId {
+            let id = SessionId::new();
+            self.store
+                .writer
+                .begin_session(NewSession {
+                    id,
+                    workspace_id: self.ws,
+                    project_id: self.proj,
+                    agent_kind: AgentKind::Codex,
+                    cwd: None,
+                    actor_user: None,
+                })
+                .await
+                .unwrap();
+            let filler = "word ".repeat(400);
+            let mut rows = Vec::new();
+            for n in 1..=3 {
+                rows.push(ledger(
+                    &format!("u{n}"),
+                    "user",
+                    &format!("Request {n}: build part {n}"),
+                ));
+                for k in 0..20 {
+                    rows.push(ledger(
+                        &format!("a{n}-{k}"),
+                        "assistant",
+                        &format!("{k} {filler}"),
+                    ));
+                }
+            }
+            self.store
+                .writer
+                .append_session_events(id, rows)
+                .await
+                .unwrap();
+            run_session_card_tick(&self.store.reader, &self.wiki, None, 50, 1)
+                .await
+                .unwrap();
+            id
+        }
+    }
+
+    /// The three segment answers of [`Fixture::long_carded_session`]; each
+    /// segment opens with its request: e1, e22, e43.
+    fn segments() -> Vec<serde_json::Value> {
+        ["e1", "e22", "e43"]
+            .into_iter()
+            .map(|cite| {
+                json!({
+                    "outcome": {"status": "partial", "text": "Part built.", "cites": [cite]},
+                    "decisions": [], "retractions": [],
+                    "next_action": {"text": "none", "cites": []},
+                })
+            })
+            .collect()
+    }
+
+    fn reduce() -> serde_json::Value {
+        json!({
+            "outcome": {"status": "done", "text": "All parts built.", "cites": ["e1"]},
+            "decisions": [], "retractions": [],
+            "next_action": {"text": "none", "cites": []},
+        })
+    }
+
+    /// Answers like [`FakeProvider`] until its script runs out, then never
+    /// returns, like a process stopped mid-session.
+    struct StallingProvider(FakeProvider);
+
+    #[async_trait::async_trait]
+    impl LlmProvider for StallingProvider {
+        fn name(&self) -> &'static str {
+            "stalling"
+        }
+
+        fn model(&self) -> &str {
+            "stalling-model"
+        }
+
+        async fn complete(&self, request: ChatRequest) -> LlmResult<ChatResponse> {
+            self.0.complete(request).await
+        }
+
+        async fn complete_structured_raw(
+            &self,
+            request: ChatRequest,
+            schema: serde_json::Value,
+        ) -> LlmResult<serde_json::Value> {
+            match self.0.complete_structured_raw(request, schema).await {
+                Ok(answer) => Ok(answer),
+                Err(_) => std::future::pending().await,
+            }
+        }
+    }
+
     #[tokio::test]
     async fn answers_accepted_before_a_provider_error_are_kept() {
         let f = fixture().await;
-        let id = SessionId::new();
-        f.store
-            .writer
-            .begin_session(NewSession {
-                id,
-                workspace_id: f.ws,
-                project_id: f.proj,
-                agent_kind: AgentKind::Codex,
-                cwd: None,
-                actor_user: None,
-            })
-            .await
-            .unwrap();
-        let filler = "word ".repeat(400);
-        let mut rows = Vec::new();
-        for n in 1..=3 {
-            rows.push(ledger(
-                &format!("u{n}"),
-                "user",
-                &format!("Request {n}: build part {n}"),
-            ));
-            for k in 0..20 {
-                rows.push(ledger(
-                    &format!("a{n}-{k}"),
-                    "assistant",
-                    &format!("{k} {filler}"),
-                ));
-            }
-        }
-        f.store
-            .writer
-            .append_session_events(id, rows)
-            .await
-            .unwrap();
-        run_session_card_tick(&f.store.reader, &f.wiki, None, 50, 1)
-            .await
-            .unwrap();
-        // Each segment opens with its request: e1, e22, e43.
-        let segment = |cite: &str| {
-            json!({
-                "outcome": {"status": "partial", "text": "Part built.", "cites": [cite]},
-                "decisions": [], "retractions": [],
-                "next_action": {"text": "none", "cites": []},
-            })
-        };
+        f.long_carded_session().await;
         // Three segment answers, then nothing left for the reduce: an error.
-        let first = FakeProvider::new(vec![segment("e1"), segment("e22"), segment("e43")]);
+        let first = FakeProvider::new(segments());
         let tick = f.tick(&first, 5).await;
         assert_eq!((tick.failed, tick.calls), (1, 0), "{tick:?}");
         assert_eq!(
@@ -720,15 +775,39 @@ mod tick {
             4,
             "three segments, then the failed reduce"
         );
-        let reduce = json!({
-            "outcome": {"status": "done", "text": "All parts built.", "cites": ["e1"]},
-            "decisions": [], "retractions": [],
-            "next_action": {"text": "none", "cites": []},
-        });
-        let second = FakeProvider::new(vec![reduce]);
+        let second = FakeProvider::new(vec![reduce()]);
         let tick = f.tick(&second, 5).await;
         assert_eq!(tick.written, 1, "{tick:?}");
         assert_eq!(second.prompts().len(), 1, "only the reduce is asked again");
+    }
+
+    #[tokio::test]
+    async fn segments_finished_before_a_restart_are_not_asked_again() {
+        let f = fixture().await;
+        f.long_carded_session().await;
+        let stalling = StallingProvider(FakeProvider::new(segments()));
+        // The reduce never returns; dropping the tick is the restart.
+        let interrupted = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            run_session_summary_tick(
+                &f.store.reader,
+                &f.store.writer,
+                &f.wiki,
+                &[sessionmunch_consolidate::SummaryLane {
+                    provider: &stalling,
+                    slots: 1,
+                }],
+                SummaryBudgets::default(),
+                None,
+                5,
+            ),
+        )
+        .await;
+        assert!(interrupted.is_err(), "the tick was cut off mid-session");
+        let after = FakeProvider::new(vec![reduce()]);
+        let tick = f.tick(&after, 5).await;
+        assert_eq!(tick.written, 1, "{tick:?}");
+        assert_eq!(after.prompts().len(), 1, "only the reduce is asked again");
     }
 
     #[tokio::test]
