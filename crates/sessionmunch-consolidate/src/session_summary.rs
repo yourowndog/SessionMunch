@@ -1089,9 +1089,11 @@ fn reduce_job(
 
 // ------------------------------------------------------------ the card tick
 
-/// AI summaries one tick writes at most per lane. Each can take several
-/// provider calls, so this stays small.
-pub const SUMMARIES_PER_TICK: usize = 2;
+/// AI summaries one tick writes at most per lane. A tick ends only when its
+/// slowest session does, so a small batch leaves lanes idle behind one long
+/// session; answers are saved as they arrive, so a longer tick loses nothing
+/// to a restart.
+pub const SUMMARIES_PER_TICK: usize = 10;
 /// Pause between summary ticks while a backlog remains.
 pub const SESSION_SUMMARY_CATCH_UP_PAUSE: std::time::Duration = std::time::Duration::from_secs(1);
 /// How often the server runs the summary tick (provider configured,

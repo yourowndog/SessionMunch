@@ -88,7 +88,7 @@ from hook paths.
    ring, so a card that keeps failing cannot starve the rest, and it replaces
    only a missing or generated page, never a consolidated or annotated one.
    With an LLM provider configured and `[session_cards] ai_summary` on (the
-   default), a second bounded tick (two sessions per minute, one wiki commit)
+   default), a second bounded tick (up to ten sessions per lane, one wiki commit)
    appends a labelled "AI summary" section to current cards: outcome,
    decisions, retractions and next step, each citing `eN` events and naming
    the model. A deterministic validator rejects cites outside the job's input
