@@ -346,8 +346,13 @@ pub(crate) fn export_jsonl(
         };
         validated.unwrap_or_else(|| (0, Sha256::new()))
     } else {
+        // A cursor past the end means the file was rewritten shorter
+        // (compaction, resume, a tool rewriting its log). Re-read it whole;
+        // event ids are stable, so records already imported dedupe.
         (
-            cursor.map_or(0, |cursor| cursor.offset.min(len)),
+            cursor
+                .filter(|cursor| cursor.offset <= len)
+                .map_or(0, |cursor| cursor.offset),
             Sha256::new(),
         )
     };
@@ -3854,6 +3859,45 @@ mod tests {
             serde_json::from_str(export.source_cursor.as_deref().unwrap()).unwrap();
         assert_eq!(cursor.offset, 74);
         assert_eq!(export.events.len(), 1);
+    }
+
+    #[test]
+    fn a_cursor_past_a_rewritten_shorter_file_reads_it_again() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("session.jsonl");
+        let record = |id: &str, text: &str| {
+            format!(
+                "{}\n",
+                json!({"type":"message","id":id,"message":{"role":"user","content":text}})
+            )
+        };
+        fs::write(
+            &path,
+            record("one", &"a long first request ".repeat(20)) + &record("two", "hello"),
+        )
+        .unwrap();
+        let first = export_jsonl(ManagedHarness::Pi, &path, "session", None).unwrap();
+        assert_eq!(first.events.len(), 2);
+        fs::write(&path, record("three", "after the rewrite")).unwrap();
+        let again = export_jsonl(
+            ManagedHarness::Pi,
+            &path,
+            "session",
+            first.source_cursor.as_deref(),
+        )
+        .unwrap();
+        assert_eq!(
+            again
+                .events
+                .iter()
+                .map(|e| e.content.as_str())
+                .collect::<Vec<_>>(),
+            ["after the rewrite"],
+            "a shorter file is read from the start, not skipped"
+        );
+        let cursor: FileCursor =
+            serde_json::from_str(again.source_cursor.as_deref().unwrap()).unwrap();
+        assert_eq!(cursor.offset, fs::metadata(&path).unwrap().len());
     }
 
     #[test]
