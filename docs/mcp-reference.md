@@ -67,7 +67,7 @@ Search the knowledge base using hybrid Reciprocal Rank Fusion across FTS5, entit
   - `workspace` (string, optional): Workspace name. Pass together with `project`.
   - `project` (string, optional): Project name. Pass together with `workspace`.
   - `scopes` (array of `{workspace, project}`, optional): Search several explicit projects. Cannot be combined with `workspace`/`project`.
-  - `global` (boolean, optional): Search every project in every workspace. Omit `workspace`, `project`, and `scopes` when true.
+  - `global` (boolean, optional): Search every project in every workspace. Omit `workspace`, `project`, and `scopes` when set. With `unit=passage` the same cross-project search runs at passage granularity (hybrid FTS + dense when an embedder is configured) and each hit identifies its source page; `parent_expansion=document` adds the workspace + project id.
   - `include_expired` (boolean, optional, default: false): Also return pages past their `expires_at`.
   - `explain` (boolean, optional, default: false): Attach per-stream ranks, raw scores, and RRF contributions. A `global` query reports only `streams_active`.
   - `as_of` (string, optional): ISO-8601 instant for a time-travel lookup of what the store knew then. Cannot be combined with `global`, `scopes`, or `unit: "passage"`.

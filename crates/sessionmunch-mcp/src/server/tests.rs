@@ -7685,3 +7685,410 @@ async fn client_activity_flushes_without_a_later_tool_call() {
     assert!(locked.pending.is_empty());
     assert!(!locked.flush_scheduled);
 }
+
+/// B1: `memory_query(global=true, unit="passage")` calls the store's
+/// cross-project hybrid passage search and returns hits from every project,
+/// each attributed to its real source page (page_path + document parent
+/// workspace/project ids), not the caller's default project.
+#[tokio::test]
+async fn memory_query_global_passage_searches_all_projects() {
+    let (_tmp, store, server, ws, _pj) = setup_server().await;
+    let infra = store
+        .writer
+        .get_or_create_project(ws, "infra", None)
+        .await
+        .unwrap();
+    let ops_ws = store.writer.get_or_create_workspace("ops").await.unwrap();
+    let ops = store
+        .writer
+        .get_or_create_project(ops_ws, "runbooks", None)
+        .await
+        .unwrap();
+    // One distinctive token that appears ONLY in non-default projects, so a
+    // hit can only come from the cross-project search.
+    for (w, p, path, title, body) in [
+        (
+            ws,
+            infra,
+            "cluster.md",
+            "Cluster",
+            "globtok42 lives in the infra debug logs.",
+        ),
+        (
+            ops_ws,
+            ops,
+            "deploy.md",
+            "Deploy",
+            "globtok42 rotates in the ops runbooks.",
+        ),
+    ] {
+        store
+            .writer
+            .upsert_page(NewPage {
+                workspace_id: w,
+                project_id: p,
+                path: PagePath::new(path).unwrap(),
+                title: title.into(),
+                body: body.into(),
+                tier: Tier::Semantic,
+                frontmatter_json: serde_json::json!({}),
+                pinned: false,
+                links: Vec::new(),
+                author_id: None,
+                expires_at: None,
+                entities: Vec::new(),
+                evidence: Vec::new(),
+            })
+            .await
+            .unwrap();
+    }
+
+    let result = server
+        .memory_query(
+            Parameters(QueryArgs {
+                query: "globtok42".into(),
+                limit: Some(10),
+                project: None,
+                scopes: Vec::new(),
+                workspace: None,
+                global: Some(true),
+                include_expired: None,
+                explain: Some(true),
+                as_of: None,
+                unit: Some(QueryUnit::Passage),
+                parent_expansion: Some(ParentExpansion::Document),
+                content_budget: None,
+            }),
+            OptionalParts(test_parts_default()),
+        )
+        .await
+        .unwrap();
+    let text = result.content.first().and_then(|c| c.as_text()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&text.text).unwrap();
+    let hits = value["hits"].as_array().expect("hits array");
+    assert!(!hits.is_empty(), "expected cross-project passage hits");
+    let mut by_path: std::collections::BTreeMap<String, (String, String)> =
+        std::collections::BTreeMap::new();
+    for hit in hits {
+        let path = hit["page_path"].as_str().expect("page_path").to_string();
+        let parent = hit["parent"].as_object().expect("document parent");
+        let ws_id = parent["workspace_id"].as_str().expect("ws id").to_string();
+        let project_id = parent["project_id"]
+            .as_str()
+            .expect("project id")
+            .to_string();
+        assert!(
+            !ws_id.is_empty() && !project_id.is_empty(),
+            "attribution ids must be real"
+        );
+        by_path.insert(path, (ws_id, project_id));
+    }
+    assert!(
+        by_path.contains_key("cluster.md"),
+        "expected the infra-project passage, got {by_path:?}"
+    );
+    assert!(
+        by_path.contains_key("deploy.md"),
+        "expected the ops-project passage, got {by_path:?}"
+    );
+    let (cluster_ws, cluster_proj) = &by_path["cluster.md"];
+    let (deploy_ws, deploy_proj) = &by_path["deploy.md"];
+    assert_ne!(
+        cluster_ws, deploy_ws,
+        "workspace attribution must reflect the real sources"
+    );
+    assert_ne!(
+        cluster_proj, deploy_proj,
+        "project attribution must reflect the real sources"
+    );
+    // The passage path reports the streams it actually consulted: FTS here
+    // (no embedder configured in these tests), never entity/graph.
+    assert_eq!(value["streams_active"], serde_json::json!(["fts"]));
+    // Existing schema shape is preserved: passage hits live in `hits`; the
+    // page-level containers stay empty/absent.
+    assert!(value.get("global_hits").is_none());
+    assert!(value.get("global_scope_hits").is_none());
+}
+
+/// B1: an explicit `limit=0` in passage mode returns an empty result — the
+/// store short-circuits on a zero limit — rather than the clamped single hit.
+#[tokio::test]
+async fn memory_query_passage_limit_zero_is_empty() {
+    let (_tmp, _store, server, _ws, _pj) = setup_server().await;
+    for global in [Some(true), None] {
+        let result = server
+            .memory_query(
+                Parameters(QueryArgs {
+                    query: "karpathy".into(),
+                    limit: Some(0),
+                    project: None,
+                    scopes: Vec::new(),
+                    workspace: None,
+                    global,
+                    include_expired: None,
+                    explain: None,
+                    as_of: None,
+                    unit: Some(QueryUnit::Passage),
+                    parent_expansion: None,
+                    content_budget: None,
+                }),
+                OptionalParts(test_parts_default()),
+            )
+            .await
+            .unwrap();
+        let text = result.content.first().and_then(|c| c.as_text()).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&text.text).unwrap();
+        assert_eq!(
+            value["hits"],
+            serde_json::json!([]),
+            "limit=0 must return no hits (global={global:?})"
+        );
+    }
+}
+
+/// B1 regression: the scoped passage path still searches only the default
+/// project when `global` is not set, and the page-mode scoped search keeps
+/// working — the new cross-project path must not leak or change either.
+#[tokio::test]
+async fn memory_query_scoped_searches_stay_isolated() {
+    let (_tmp, store, server, ws, _pj) = setup_server().await;
+    let infra = store
+        .writer
+        .get_or_create_project(ws, "infra", None)
+        .await
+        .unwrap();
+    store
+        .writer
+        .upsert_page(NewPage {
+            workspace_id: ws,
+            project_id: infra,
+            path: PagePath::new("cluster.md").unwrap(),
+            title: "Cluster".into(),
+            body: "globtok42 lives in the infra debug logs.".into(),
+            tier: Tier::Semantic,
+            frontmatter_json: serde_json::json!({}),
+            pinned: false,
+            links: Vec::new(),
+            author_id: None,
+            expires_at: None,
+            entities: Vec::new(),
+            evidence: Vec::new(),
+        })
+        .await
+        .unwrap();
+
+    // Scoped (default project) passage query for a token that only exists in
+    // another project: no hits, proving scoped behavior is unchanged.
+    let scoped = server
+        .memory_query(
+            Parameters(QueryArgs {
+                query: "globtok42".into(),
+                limit: Some(5),
+                project: None,
+                scopes: Vec::new(),
+                workspace: None,
+                global: None,
+                include_expired: None,
+                explain: None,
+                as_of: None,
+                unit: Some(QueryUnit::Passage),
+                parent_expansion: None,
+                content_budget: None,
+            }),
+            OptionalParts(test_parts_default()),
+        )
+        .await
+        .unwrap();
+    let text = scoped.content.first().and_then(|c| c.as_text()).unwrap();
+    let scoped_value: serde_json::Value = serde_json::from_str(&text.text).unwrap();
+    assert_eq!(
+        scoped_value["hits"],
+        serde_json::json!([]),
+        "scoped passage search must stay inside the default project"
+    );
+
+    // The default project's own passage still resolves scoped.
+    let scoped_own = server
+        .memory_query(
+            Parameters(QueryArgs {
+                query: "karpathy".into(),
+                limit: Some(5),
+                project: None,
+                scopes: Vec::new(),
+                workspace: None,
+                global: None,
+                include_expired: None,
+                explain: None,
+                as_of: None,
+                unit: Some(QueryUnit::Passage),
+                parent_expansion: None,
+                content_budget: None,
+            }),
+            OptionalParts(test_parts_default()),
+        )
+        .await
+        .unwrap();
+    let text = scoped_own
+        .content
+        .first()
+        .and_then(|c| c.as_text())
+        .unwrap();
+    let own_value: serde_json::Value = serde_json::from_str(&text.text).unwrap();
+    let hits = own_value["hits"].as_array().expect("hits array");
+    assert!(
+        !hits.is_empty(),
+        "default-project passage query must still hit"
+    );
+    assert_eq!(hits[0]["page_path"], "foo.md");
+
+    // Page mode with the same scoped args still resolves a page-level hit.
+    let page = server
+        .memory_query(
+            Parameters(QueryArgs {
+                query: "karpathy".into(),
+                limit: Some(5),
+                project: None,
+                scopes: Vec::new(),
+                workspace: None,
+                global: None,
+                include_expired: None,
+                explain: None,
+                as_of: None,
+                unit: None,
+                parent_expansion: None,
+                content_budget: None,
+            }),
+            OptionalParts(test_parts_default()),
+        )
+        .await
+        .unwrap();
+    let text = page.content.first().and_then(|c| c.as_text()).unwrap();
+    let page_value: serde_json::Value = serde_json::from_str(&text.text).unwrap();
+    let hits = page_value["hits"].as_array().expect("hits array");
+    assert!(!hits.is_empty(), "page-mode scoped search must still hit");
+    assert_eq!(hits[0]["path"], "foo.md");
+}
+
+/// B1: the cross-project passage path rejects the same explicit-scope and
+/// `as_of` combinations the page-mode global path rejects.
+#[tokio::test]
+async fn memory_query_global_passage_rejects_explicit_scope_and_as_of() {
+    let (_tmp, _store, server, _ws, _pj) = setup_server().await;
+    let call = |args: QueryArgs| async {
+        server
+            .memory_query(Parameters(args), OptionalParts(test_parts_default()))
+            .await
+    };
+    let base = || QueryArgs {
+        query: "karpathy".into(),
+        limit: Some(5),
+        project: None,
+        scopes: Vec::new(),
+        workspace: None,
+        global: Some(true),
+        include_expired: None,
+        explain: None,
+        as_of: None,
+        unit: Some(QueryUnit::Passage),
+        parent_expansion: None,
+        content_budget: None,
+    };
+    for (label, mutate) in [
+        (
+            "workspace",
+            Box::new(|mut a: QueryArgs| {
+                a.workspace = Some("default".into());
+                a
+            }) as Box<dyn Fn(QueryArgs) -> QueryArgs>,
+        ),
+        (
+            "project",
+            Box::new(|mut a: QueryArgs| {
+                a.project = Some("scratch".into());
+                a
+            }) as Box<dyn Fn(QueryArgs) -> QueryArgs>,
+        ),
+        (
+            "scopes",
+            Box::new(|mut a: QueryArgs| {
+                a.scopes = vec![MemoryScopeArg {
+                    workspace: "default".into(),
+                    project: "scratch".into(),
+                }];
+                a
+            }) as Box<dyn Fn(QueryArgs) -> QueryArgs>,
+        ),
+        (
+            "as_of",
+            Box::new(|mut a: QueryArgs| {
+                a.as_of = Some("2026-01-01T00:00:00Z".into());
+                a
+            }) as Box<dyn Fn(QueryArgs) -> QueryArgs>,
+        ),
+    ] {
+        let err = match call(mutate(base())).await {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("{label} must fail closed"),
+        };
+        assert!(
+            if label == "as_of" {
+                err.contains("as_of cannot be combined")
+            } else {
+                err.contains("global cannot be combined")
+            },
+            "{label} error: {err}"
+        );
+    }
+}
+
+/// B1: the new global passage path keeps the existing actor/authorization
+/// boundary — both an anonymous stdio caller and an authenticated HTTP
+/// caller get the same cross-project results.
+#[tokio::test]
+async fn memory_query_global_passage_preserves_actor_boundary() {
+    let (_tmp, _store, server, _ws, _pj) = setup_server().await;
+    let authenticated_parts = {
+        let mut parts = test_parts_default();
+        parts.extensions.insert(AuthLevel::User);
+        parts.extensions.insert(sessionmunch_core::UserId::new());
+        parts.extensions.insert(sessionmunch_core::ActorContext {
+            user: Some("alice".into()),
+            name: Some("Alice Smith".into()),
+            email: Some("alice@example.com".into()),
+            ..ActorContext::default()
+        });
+        parts
+    };
+    for (label, parts) in [
+        ("anonymous", test_parts_default()),
+        ("authenticated", authenticated_parts),
+    ] {
+        let result = match server
+            .memory_query(
+                Parameters(QueryArgs {
+                    query: "karpathy".into(),
+                    limit: Some(5),
+                    project: None,
+                    scopes: Vec::new(),
+                    workspace: None,
+                    global: Some(true),
+                    include_expired: None,
+                    explain: None,
+                    as_of: None,
+                    unit: Some(QueryUnit::Passage),
+                    parent_expansion: None,
+                    content_budget: None,
+                }),
+                OptionalParts(parts),
+            )
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => panic!("{label} call must succeed: {e}"),
+        };
+        let text = result.content.first().and_then(|c| c.as_text()).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&text.text).unwrap();
+        let hits = value["hits"].as_array().expect("hits array");
+        assert!(!hits.is_empty(), "{label} caller must get passage hits");
+    }
+}

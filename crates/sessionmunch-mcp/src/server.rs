@@ -872,8 +872,12 @@ impl SessionMunchServer {
     }
 
     /// Handle passage-mode `memory_query`: calls `search_passages_hybrid`
-    /// and builds `PassageQueryHit` responses with optional parent
-    /// expansion and content budget enforcement.
+    /// for scoped reads, or `search_passages_hybrid_global` (cross-project)
+    /// when `global=true`, building `PassageQueryHit` responses with
+    /// optional parent expansion and content budget enforcement. Global
+    /// hits flow through the same `PassageQueryHit` schema, so their
+    /// `page_path`/`page_title` (and with `parent_expansion=document`,
+    /// `workspace_id`/`project_id`) always describe the real source page.
     #[allow(clippy::too_many_arguments)]
     async fn memory_query_passage(
         &self,
@@ -881,10 +885,36 @@ impl SessionMunchServer {
         parts: &axum::http::request::Parts,
         args: &QueryArgs,
         limit: usize,
+        global: bool,
         explain: bool,
         parent_expansion: ParentExpansion,
         content_budget: usize,
     ) -> Result<CallToolResult, McpError> {
+        // Same invalid-combination guards as the page-mode global path: a
+        // cross-project search cannot be narrowed by an explicit scope, and
+        // passage rows carry no version history so `as_of` is meaningless.
+        if global
+            && (!args.scopes.is_empty()
+                || args
+                    .workspace
+                    .as_deref()
+                    .is_some_and(|s| !s.trim().is_empty())
+                || args
+                    .project
+                    .as_deref()
+                    .is_some_and(|s| !s.trim().is_empty()))
+        {
+            return Err(McpError::internal_error(
+                "global cannot be combined with workspace/project/scopes",
+                None,
+            ));
+        }
+        if global && args.as_of.as_deref().is_some_and(|s| !s.trim().is_empty()) {
+            return Err(McpError::internal_error(
+                "as_of cannot be combined with global or scopes",
+                None,
+            ));
+        }
         let resolved_scopes = if args.scopes.is_empty() {
             None
         } else {
@@ -898,7 +928,24 @@ impl SessionMunchServer {
         };
         let _bump_actor = Self::bump_actor_from_parts(parts);
 
-        let passage_hits = if let Some(scopes) = &resolved_scopes {
+        let passage_hits = if global {
+            // Cross-project (global) passage search reuses the store's
+            // hybrid lexical+dense RRF machinery with the default
+            // (unrestricted) hard filter; explicit filter args are a later
+            // slice. Ordering and the per-parent cap live in the store.
+            self.reader
+                .search_passages_hybrid_global(
+                    Default::default(),
+                    query.clone(),
+                    query_vec.as_deref().map(<[f32]>::to_vec),
+                    provider,
+                    model,
+                    dim,
+                    limit,
+                )
+                .await
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?
+        } else if let Some(scopes) = &resolved_scopes {
             let mut all_hits: Vec<sessionmunch_store::PassageHit> = Vec::new();
             for &(ws, proj) in scopes {
                 let hits = self
@@ -951,15 +998,26 @@ impl SessionMunchServer {
             global_hits: Vec::new(),
             global_scope_hits: Vec::new(),
             streams_active: explain.then(|| {
-                let mut streams = vec!["fts", "entity"];
-                if query_vec.is_some() {
-                    streams.push("vector");
-                    if self.reader.retrieval_tuning().abstract_vectors {
-                        streams.push("abstract");
+                if global {
+                    // The global passage path consults the lexical stream and,
+                    // when an embedder produced a query vector, the dense
+                    // stream; entity/graph/abstract stay out of this path.
+                    let mut streams = vec!["fts"];
+                    if query_vec.is_some() {
+                        streams.push("vector");
                     }
+                    streams
+                } else {
+                    let mut streams = vec!["fts", "entity"];
+                    if query_vec.is_some() {
+                        streams.push("vector");
+                        if self.reader.retrieval_tuning().abstract_vectors {
+                            streams.push("abstract");
+                        }
+                    }
+                    streams.push("graph");
+                    streams
                 }
-                streams.push("graph");
-                streams
             }),
         };
         ok_json(&response)
@@ -1027,6 +1085,10 @@ impl SessionMunchServer {
         project/scopes hits; it also returns `streams_active`. \
         Cross-project `global=true` search is FTS-only and therefore reports \
         `streams_active` without per-hit RRF details. \
+        With `unit=passage`, `global=true` runs the same cross-project \
+        search at passage granularity (hybrid FTS + dense when an embedder \
+        is configured); each hit identifies its source page, and \
+        `parent_expansion=document` adds the workspace + project id. \
         If compiled wiki search misses in default/project/`scopes` mode, \
         `raw_hits` contains bounded raw observation fallback matches; \
         `global=true` searches compiled wiki pages only and returns no raw \
@@ -1056,12 +1118,18 @@ impl SessionMunchServer {
         // this only fires when the caller passed none of them.
         if unit == QueryUnit::Passage {
             let _ = include_expired;
+            // Explicit `limit=0` means "no hits" in passage mode: the store
+            // short-circuits on a zero limit. Every other value keeps the
+            // documented 1..=100 clamp, so existing scoped passage calls are
+            // unchanged; page-mode `limit` handling is untouched below.
+            let passage_limit = if args.limit == Some(0) { 0 } else { limit };
             return self
                 .memory_query_passage(
                     &aps_actor,
                     &parts,
                     &args,
-                    limit,
+                    passage_limit,
+                    args.global.unwrap_or(false),
                     explain,
                     parent_expansion,
                     content_budget,
