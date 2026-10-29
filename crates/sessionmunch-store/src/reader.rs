@@ -1637,16 +1637,39 @@ fn rrf_fuse(
         .collect()
 }
 
-fn l2_normalize(v: &[f32]) -> Vec<f32> {
-    let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if norm == 0.0 {
-        return v.to_vec();
+fn l2_normalize(v: &[f32]) -> StoreResult<Vec<f32>> {
+    if v.iter().any(|x| !x.is_finite()) {
+        return Err(StoreError::Memory(sessionmunch_core::MemoryError::MalformedRecord(
+            "embedding vector contains a non-finite value".into(),
+        )));
     }
-    v.iter().map(|x| x / norm).collect()
+    let norm_sq: f64 = v.iter().map(|x| (*x as f64) * (*x as f64)).sum();
+    if !norm_sq.is_finite() {
+        return Err(StoreError::Memory(sessionmunch_core::MemoryError::MalformedRecord(
+            "embedding norm overflowed".into(),
+        )));
+    }
+    let norm = norm_sq.sqrt();
+    if norm == 0.0 {
+        return Ok(v.to_vec());
+    }
+    Ok(v.iter().map(|x| ((*x as f64) / norm) as f32).collect())
 }
 
-fn dot_f32(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+fn dot_f32(a: &[f32], b: &[f32]) -> StoreResult<f32> {
+    let dot: f64 = a.iter().zip(b.iter()).map(|(x, y)| (*x as f64) * (*y as f64)).sum();
+    if !dot.is_finite() {
+        return Err(StoreError::Memory(sessionmunch_core::MemoryError::MalformedRecord(
+            "dense dot product is not finite".into(),
+        )));
+    }
+    let score = dot as f32;
+    if !score.is_finite() {
+        return Err(StoreError::Memory(sessionmunch_core::MemoryError::MalformedRecord(
+            "dense dot product exceeds finite f32 range".into(),
+        )));
+    }
+    Ok(score)
 }
 
 impl ReaderPool {
@@ -1945,8 +1968,16 @@ pub struct StoredEmbedding {
     pub vector: Vec<f32>,
 }
 
-fn score_desc(a: &(PageId, PagePath, f32), b: &(PageId, PagePath, f32)) -> std::cmp::Ordering {
-    b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal)
+/// Shared dense-search total order: descending score, then ascending stable
+/// page/passage id bytes. Uses `f32::total_cmp` so the comparator is total:
+/// exact ties and even non-finite scores still order deterministically.
+/// Non-finite scores are additionally rejected at scoring time before this
+/// comparator ever runs, so the result set only ever contains finite values.
+fn dense_total_cmp(a_score: f32, a_id: &[u8], b_score: f32, b_id: &[u8]) -> Ordering {
+    b_score.total_cmp(&a_score).then_with(|| a_id.cmp(b_id))
+}
+fn score_desc(a: &(PageId, PagePath, f32), b: &(PageId, PagePath, f32)) -> Ordering {
+    dense_total_cmp(a.2, a.0.as_bytes(), b.2, b.0.as_bytes())
 }
 
 fn dot_embedding_bytes(query: &[f32], bytes: &[u8], dim: u32) -> StoreResult<f32> {
@@ -1970,11 +2001,27 @@ fn dot_embedding_bytes(query: &[f32], bytes: &[u8], dim: u32) -> StoreResult<f32
             )),
         ));
     }
-    Ok(query
-        .iter()
-        .zip(bytes.as_chunks::<4>().0)
-        .map(|(q, chunk)| f32::from_le_bytes(*chunk) * q)
-        .sum())
+    let mut dot = 0.0_f64;
+    for (q, chunk) in query.iter().zip(bytes.as_chunks::<4>().0) {
+        if !q.is_finite() {
+            return Err(StoreError::Memory(sessionmunch_core::MemoryError::MalformedRecord(
+                "query vector contains a non-finite value".into(),
+            )));
+        }
+        dot += (*q as f64) * (f32::from_le_bytes(*chunk) as f64);
+    }
+    if !dot.is_finite() {
+        return Err(StoreError::Memory(sessionmunch_core::MemoryError::MalformedRecord(
+            "dense dot product is not finite".into(),
+        )));
+    }
+    let score = dot as f32;
+    if !score.is_finite() {
+        return Err(StoreError::Memory(sessionmunch_core::MemoryError::MalformedRecord(
+            "dense dot product exceeds finite f32 range".into(),
+        )));
+    }
+    Ok(score)
 }
 
 fn bytes_to_f32_vec(bytes: &[u8], dim: u32) -> StoreResult<Vec<f32>> {
@@ -2775,3 +2822,5 @@ fn open_read_only(path: &Path) -> StoreResult<Connection> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_dense_topk;

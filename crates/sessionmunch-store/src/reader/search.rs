@@ -373,6 +373,9 @@ impl ReaderPool {
         dim: u32,
         limit: usize,
     ) -> StoreResult<Vec<(PassageHit, f32)>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
         let dim_check = query_vector.len();
         if dim_check != dim as usize {
             return Err(StoreError::Memory(
@@ -440,9 +443,9 @@ impl ReaderPool {
             for row in rows {
                 let (pid, sid, page_id, ws, proj, path, title, heading_path, text, s, e, emb) =
                     row?;
-                let query_norm = l2_normalize(&query_vector);
-                let emb_norm = l2_normalize(&bytes_to_f32_vec(&emb, dim)?);
-                let cosine = dot_f32(&query_norm, &emb_norm);
+                let query_norm = l2_normalize(&query_vector)?;
+                let emb_norm = l2_normalize(&bytes_to_f32_vec(&emb, dim)?)?;
+                let cosine = dot_f32(&query_norm, &emb_norm)?;
                 scored.push((
                     PassageHit {
                         passage_id: uuid_from_stored_bytes(&pid, "page_passages.id")?,
@@ -464,7 +467,9 @@ impl ReaderPool {
                     cosine,
                 ));
             }
-            scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
+            scored.sort_by(|a, b| {
+                dense_total_cmp(a.1, a.0.passage_id.as_bytes(), b.1, b.0.passage_id.as_bytes())
+            });
             scored.truncate(limit);
             Ok(scored)
         })
