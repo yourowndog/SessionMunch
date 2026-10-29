@@ -692,6 +692,44 @@ pub struct PassageHit {
     pub rrf_score: Option<f64>,
 }
 
+/// Hard filters applied as SQL predicates to the cross-project (global)
+/// passage search. Each field is an exclusion filter: rows that do not match
+/// are dropped in SQL, never re-ranked.
+///
+/// Column binding (schema in `migrations/V01__init.sql` and
+/// `V64__page_sections_passages.sql`):
+/// * `since_us` / `until_us`  -> `pages.updated_at` (integer microseconds)
+/// * `machine`                -> `json_extract(pages.frontmatter_json,'$.machine')`
+/// * `harness`                -> `json_extract(pages.frontmatter_json,'$.agent')`
+/// * `project_ids`            -> `page_passages.project_id`
+/// * `kind`                   -> `page_kind_expr(pages.path, pages.frontmatter_json)`
+///
+/// `None` leaves the dimension unconstrained. An empty vector constrains to
+/// nothing (`1=0`), which is the honest "exclude everything" semantics for a
+/// hard allowlist.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GlobalPassageFilter {
+    /// Only pages last updated at or after this Unix-microsecond timestamp.
+    pub since_us: Option<i64>,
+    /// Only pages last updated at or before this Unix-microsecond timestamp.
+    pub until_us: Option<i64>,
+    /// Allowlist of `$.machine` frontmatter values (empty = exclude all).
+    pub machine: Option<Vec<String>>,
+    /// Allowlist of `$.agent` frontmatter values — the creating harness /
+    /// agent kind of session-consolidated pages (empty = exclude all).
+    pub harness: Option<Vec<String>>,
+    /// Allowlist of project ids, matched against `page_passages.project_id`
+    /// (empty = exclude all).
+    pub project_ids: Option<Vec<ProjectId>>,
+    /// Allowlist of page kinds as computed by [`page_kind_expr`]
+    /// (empty = exclude all).
+    pub kind: Option<Vec<String>>,
+}
+
+/// Maximum number of passage hits per parent page in the global passage
+/// search, so one page cannot flood the result set.
+const GLOBAL_MAX_PASSAGES_PER_PAGE: usize = 3;
+
 /// One raw passage candidate with its stream-specific scores, used during
 /// RRF fusion before the final `PassageHit` is assembled.
 #[derive(Debug, Clone)]
@@ -699,6 +737,94 @@ struct PassageCandidate {
     hit: PassageHit,
     lexical_score: Option<f64>,
     dense_score: Option<f64>,
+}
+
+/// Render an IN-list for `count` values, returning `(sql, params)`.
+fn in_list<T>(expr: &str, values: &[T], to_param: impl Fn(&T) -> Value) -> (String, Vec<Value>) {
+    if values.is_empty() {
+        return ("1 = 0".to_string(), Vec::new());
+    }
+    let marks = vec!["?"; values.len()].join(",");
+    let params = values.iter().map(to_param).collect();
+    (format!("{expr} IN ({marks})"), params)
+}
+
+/// Build the SQL hard-filter WHERE fragment (without a leading `AND`) and the
+/// bound params for a [`GlobalPassageFilter`], against the `pages` /
+/// `page_passages` table aliases used by the passage queries. This is the
+/// single place that maps each hard filter to its real schema column, so the
+/// lexical, dense and hybrid global queries all exclude identically.
+fn global_passage_filter_fragments(filter: &GlobalPassageFilter) -> (String, Vec<Value>) {
+    let mut sql = Vec::new();
+    let mut params = Vec::new();
+
+    if let Some(since) = filter.since_us {
+        sql.push("pages.updated_at >= ?".to_string());
+        params.push(Value::Integer(since));
+    }
+    if let Some(until) = filter.until_us {
+        sql.push("pages.updated_at <= ?".to_string());
+        params.push(Value::Integer(until));
+    }
+    if let Some(machines) = &filter.machine {
+        let (s, mut p) = in_list(
+            "json_extract(pages.frontmatter_json, '$.machine')",
+            machines,
+            |v| Value::Text(v.clone()),
+        );
+        sql.push(s);
+        params.append(&mut p);
+    }
+    if let Some(harnesses) = &filter.harness {
+        let (s, mut p) = in_list(
+            "json_extract(pages.frontmatter_json, '$.agent')",
+            harnesses,
+            |v| Value::Text(v.clone()),
+        );
+        sql.push(s);
+        params.append(&mut p);
+    }
+    if let Some(project_ids) = &filter.project_ids {
+        let (s, mut p) = in_list("page_passages.project_id", project_ids, |v| {
+            Value::from(v.as_bytes().to_vec())
+        });
+        sql.push(s);
+        params.append(&mut p);
+    }
+    if let Some(kinds) = &filter.kind {
+        let kind_expr = page_kind_expr("pages.path", "pages.frontmatter_json");
+        let (s, mut p) = in_list(&kind_expr, kinds, |v| Value::Text(v.clone()));
+        sql.push(s);
+        params.append(&mut p);
+    }
+
+    if sql.is_empty() {
+        ("1 = 1".to_string(), params)
+    } else {
+        (sql.join(" AND "), params)
+    }
+}
+
+/// Cap the RRF-fused global passage results to at most
+/// [`GLOBAL_MAX_PASSAGES_PER_PAGE`] hits per parent page, preserving the fused
+/// order so every page contributes its top passages without one page
+/// flooding the result. Deterministic (order is already fully resolved by the
+/// caller).
+fn cap_passages_per_page(fused: Vec<PassageHit>, limit: usize) -> Vec<PassageHit> {
+    let mut seen: std::collections::HashMap<PageId, usize> = std::collections::HashMap::new();
+    let mut out = Vec::new();
+    for hit in fused {
+        let count = seen.entry(hit.page_id).or_insert(0);
+        if *count >= GLOBAL_MAX_PASSAGES_PER_PAGE {
+            continue;
+        }
+        *count += 1;
+        out.push(hit);
+        if out.len() >= limit {
+            break;
+        }
+    }
+    out
 }
 
 /// Completed session selected for scheduled auto-improvement.

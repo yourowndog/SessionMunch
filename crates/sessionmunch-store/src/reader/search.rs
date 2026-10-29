@@ -476,6 +476,280 @@ impl ReaderPool {
         .await
     }
 
+    /// Cross-project (global) lexical passage search: same BM25 ordering as
+    /// [`ReaderPool::search_passages_lexical`] but without a workspace /
+    /// project equality filter — instead every hard-filter predicate on
+    /// `filter` is applied as a SQL exclusion so forbidden sources can never
+    /// rank. Rows arrive already in BM25 order (rank ascending, first hits
+    /// best, UUID tie-break), matching the scoped lexical path.
+    ///
+    /// # Errors
+    /// Propagates any SQL or pool error; malformed stored ids fail loudly.
+    pub(super) async fn search_passages_lexical_global(
+        &self,
+        filter: GlobalPassageFilter,
+        fts_query: String,
+        limit: usize,
+    ) -> StoreResult<Vec<PassageHit>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        self.with_conn(move |conn| {
+            let (filter_sql, params) = global_passage_filter_fragments(&filter);
+            let sql = format!(
+                "SELECT page_passages.id, page_passages.section_id, \
+                        page_passages.page_id, page_passages.workspace_id, \
+                        page_passages.project_id, pages.path, pages.title, \
+                        page_passages.heading_path, page_passages.text, \
+                        page_passages.start_byte, page_passages.end_byte, \
+                        page_passages_fts.rank \
+                 FROM page_passages_fts \
+                 JOIN page_passages ON page_passages.rowid = page_passages_fts.rowid \
+                 JOIN pages ON pages.id = page_passages.page_id \
+                 WHERE page_passages_fts MATCH ? \
+                   AND {filter_sql} \
+                 ORDER BY page_passages_fts.rank, page_passages.id \
+                 LIMIT ?"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let mut full_params = Vec::with_capacity(params.len() + 2);
+            full_params.push(Value::from(fts_query));
+            full_params.extend(params);
+            full_params.push(Value::from(limit as i64));
+            let rows = stmt.query_map(params_from_iter(full_params), |row| {
+                let passage_id_bytes: Vec<u8> = row.get(0)?;
+                let section_id_bytes: Vec<u8> = row.get(1)?;
+                let page_id_bytes: Vec<u8> = row.get(2)?;
+                let ws_bytes: Vec<u8> = row.get(3)?;
+                let proj_bytes: Vec<u8> = row.get(4)?;
+                let path: String = row.get(5)?;
+                let title: String = row.get(6)?;
+                let heading_path: String = row.get(7)?;
+                let text: String = row.get(8)?;
+                let start_byte: i64 = row.get(9)?;
+                let end_byte: i64 = row.get(10)?;
+                let rank: f64 = row.get(11)?;
+                Ok((
+                    passage_id_bytes,
+                    section_id_bytes,
+                    page_id_bytes,
+                    ws_bytes,
+                    proj_bytes,
+                    path,
+                    title,
+                    heading_path,
+                    text,
+                    start_byte,
+                    end_byte,
+                    rank,
+                ))
+            })?;
+            let mut hits = Vec::new();
+            for row in rows {
+                let (pid, sid, page_id, ws, proj, path, title, heading_path, text, s, e, _rank) =
+                    row?;
+                hits.push(PassageHit {
+                    passage_id: uuid_from_stored_bytes(&pid, "page_passages.id")?,
+                    section_id: uuid_from_stored_bytes(&sid, "page_passages.section_id")?,
+                    page_id: PageId::from_slice(&page_id)?,
+                    workspace_id: WorkspaceId::from_slice(&ws)?,
+                    project_id: ProjectId::from_slice(&proj)?,
+                    page_path: PagePath::new(path)?,
+                    page_title: title,
+                    heading_path,
+                    text,
+                    start_byte: s,
+                    end_byte: e,
+                    rank: 0,
+                    lexical_rank: None,
+                    dense_rank: None,
+                    rrf_score: None,
+                });
+            }
+            // BM25 order preserved (do NOT re-sort), matching the scoped path.
+            for (i, hit) in hits.iter_mut().enumerate() {
+                hit.lexical_rank = Some(i + 1);
+            }
+            Ok(hits)
+        })
+        .await
+    }
+
+    /// Cross-project (global) dense passage search: same cosine ordering as
+    /// [`ReaderPool::search_passages_dense`] with every `filter` predicate
+    /// applied as a SQL exclusion. Dimension mismatch fails loudly before any
+    /// query runs.
+    ///
+    /// # Errors
+    /// Propagates any SQL, pool or dimension error.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn search_passages_dense_global(
+        &self,
+        filter: GlobalPassageFilter,
+        query_vector: Vec<f32>,
+        provider: String,
+        model: String,
+        dim: u32,
+        limit: usize,
+    ) -> StoreResult<Vec<(PassageHit, f32)>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let dim_check = query_vector.len();
+        if dim_check != dim as usize {
+            return Err(StoreError::Memory(
+                sessionmunch_core::MemoryError::MalformedRecord(format!(
+                    "query vector dim {} != embedding dim {}",
+                    dim_check, dim
+                )),
+            ));
+        }
+        self.with_conn(move |conn| {
+            let (filter_sql, params) = global_passage_filter_fragments(&filter);
+            let sql = format!(
+                "SELECT page_passages.id, page_passages.section_id, \
+                        page_passages.page_id, page_passages.workspace_id, \
+                        page_passages.project_id, pages.path, pages.title, \
+                        page_passages.heading_path, page_passages.text, \
+                        page_passages.start_byte, page_passages.end_byte, \
+                        page_passage_embeddings.embedding \
+                 FROM page_passage_embeddings \
+                 JOIN page_passages ON page_passages.id = page_passage_embeddings.passage_id \
+                 JOIN pages ON pages.id = page_passages.page_id \
+                 WHERE page_passage_embeddings.provider = ? \
+                   AND page_passage_embeddings.model = ? \
+                   AND page_passage_embeddings.dim = ? \
+                   AND {filter_sql}"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let mut full_params = Vec::with_capacity(params.len() + 3);
+            full_params.push(Value::from(provider));
+            full_params.push(Value::from(model));
+            full_params.push(Value::from(dim));
+            full_params.extend(params);
+            let rows = stmt.query_map(params_from_iter(full_params), |row| {
+                let passage_id_bytes: Vec<u8> = row.get(0)?;
+                let section_id_bytes: Vec<u8> = row.get(1)?;
+                let page_id_bytes: Vec<u8> = row.get(2)?;
+                let ws_bytes: Vec<u8> = row.get(3)?;
+                let proj_bytes: Vec<u8> = row.get(4)?;
+                let path: String = row.get(5)?;
+                let title: String = row.get(6)?;
+                let heading_path: String = row.get(7)?;
+                let text: String = row.get(8)?;
+                let start_byte: i64 = row.get(9)?;
+                let end_byte: i64 = row.get(10)?;
+                let embedding_bytes: Vec<u8> = row.get(11)?;
+                Ok((
+                    passage_id_bytes,
+                    section_id_bytes,
+                    page_id_bytes,
+                    ws_bytes,
+                    proj_bytes,
+                    path,
+                    title,
+                    heading_path,
+                    text,
+                    start_byte,
+                    end_byte,
+                    embedding_bytes,
+                ))
+            })?;
+            let mut scored = Vec::new();
+            for row in rows {
+                let (pid, sid, page_id, ws, proj, path, title, heading_path, text, s, e, emb) =
+                    row?;
+                let query_norm = l2_normalize(&query_vector)?;
+                let emb_norm = l2_normalize(&bytes_to_f32_vec(&emb, dim)?)?;
+                let cosine = dot_f32(&query_norm, &emb_norm)?;
+                scored.push((
+                    PassageHit {
+                        passage_id: uuid_from_stored_bytes(&pid, "page_passages.id")?,
+                        section_id: uuid_from_stored_bytes(&sid, "page_passages.section_id")?,
+                        page_id: PageId::from_slice(&page_id)?,
+                        workspace_id: WorkspaceId::from_slice(&ws)?,
+                        project_id: ProjectId::from_slice(&proj)?,
+                        page_path: PagePath::new(path)?,
+                        page_title: title,
+                        heading_path,
+                        text,
+                        start_byte: s,
+                        end_byte: e,
+                        rank: 0,
+                        lexical_rank: None,
+                        dense_rank: None,
+                        rrf_score: None,
+                    },
+                    cosine,
+                ));
+            }
+            scored.sort_by(|a, b| {
+                dense_total_cmp(
+                    a.1,
+                    a.0.passage_id.as_bytes(),
+                    b.1,
+                    b.0.passage_id.as_bytes(),
+                )
+            });
+            scored.truncate(limit);
+            Ok(scored)
+        })
+        .await
+    }
+
+    /// Cross-project (global) hybrid passage search. Lexical and dense streams
+    /// are both hard-filtered in SQL, fused with
+    /// [`rrf_fuse`](super::rrf_fuse), then capped at
+    /// [`GLOBAL_MAX_PASSAGES_PER_PAGE`] per parent page so no single page can
+    /// flood the result. `limit == 0` returns empty without touching the
+    /// store; an absent query vector runs lexical-only, and an empty FTS query
+    /// runs dense-only.
+    ///
+    /// # Errors
+    /// Propagates any SQL, pool or dimension error.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn search_passages_hybrid_global(
+        &self,
+        filter: GlobalPassageFilter,
+        query: String,
+        query_vector: Option<Vec<f32>>,
+        provider: String,
+        model: String,
+        dim: u32,
+        limit: usize,
+    ) -> StoreResult<Vec<PassageHit>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        // Fetch a per-stream budget larger than the requested limit so the
+        // per-parent cap has enough candidates to fill `limit` unique pages.
+        let stream_limit = limit.max(GLOBAL_MAX_PASSAGES_PER_PAGE);
+        let fts_query = prepare_fts5_query(&query);
+        let lexical = if fts_query.is_empty() {
+            Vec::new()
+        } else {
+            self.search_passages_lexical_global(filter.clone(), fts_query, stream_limit)
+                .await?
+        };
+        let dense = if let Some(vec) = query_vector {
+            Some(
+                self.search_passages_dense_global(
+                    filter.clone(),
+                    vec,
+                    provider.clone(),
+                    model.clone(),
+                    dim,
+                    stream_limit,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+        let fused = rrf_fuse(lexical, dense, stream_limit);
+        Ok(cap_passages_per_page(fused, limit))
+    }
+
     pub(super) async fn search_page_candidates_for_project(
         &self,
         workspace_id: WorkspaceId,

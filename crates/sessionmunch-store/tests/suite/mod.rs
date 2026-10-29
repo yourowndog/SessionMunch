@@ -8,6 +8,7 @@ mod audit_log;
 mod auto_improve_staging;
 mod client_activity;
 mod fts_drift_status;
+mod global_passage_filter;
 mod handoff_ownership;
 mod hybrid_search;
 mod most_recently_active_scope;
