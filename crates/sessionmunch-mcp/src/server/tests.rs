@@ -444,6 +444,12 @@ async fn multi_scope_query_invokes_the_reranker_once_after_fusion() {
                     unit: None,
                     parent_expansion: None,
                     content_budget: None,
+                    since: None,
+                    until: None,
+                    machine: None,
+                    harness: None,
+                    kinds: None,
+                    source_projects: None,
                 }),
                 test_optional_parts(),
             )
@@ -478,6 +484,12 @@ async fn global_query_does_not_invoke_the_project_reranker() {
                     unit: None,
                     parent_expansion: None,
                     content_budget: None,
+                    since: None,
+                    until: None,
+                    machine: None,
+                    harness: None,
+                    kinds: None,
+                    source_projects: None,
                 }),
                 test_optional_parts(),
             )
@@ -2112,6 +2124,12 @@ async fn memory_query_as_of_travels_the_entity_timeline() {
         unit: None,
         parent_expansion: None,
         content_budget: None,
+        since: None,
+        until: None,
+        machine: None,
+        harness: None,
+        kinds: None,
+        source_projects: None,
     };
 
     // Historical instant → the superseded version answers.
@@ -2153,6 +2171,12 @@ async fn memory_query_as_of_travels_the_entity_timeline() {
                 unit: None,
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -2225,6 +2249,12 @@ async fn memory_query_returns_hits_via_tool_method() {
                 unit: None,
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -2253,6 +2283,12 @@ async fn memory_query_returns_hits_via_tool_method() {
                 unit: None,
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -2300,6 +2336,12 @@ async fn memory_query_passage_unit_returns_passage_hits() {
                 unit: Some(QueryUnit::Passage),
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -2339,6 +2381,12 @@ async fn memory_query_passage_unit_with_document_parent_expansion() {
                 unit: Some(QueryUnit::Passage),
                 parent_expansion: Some(ParentExpansion::Document),
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -2376,6 +2424,12 @@ async fn memory_query_passage_unit_respects_content_budget() {
                 unit: Some(QueryUnit::Passage),
                 parent_expansion: None,
                 content_budget: Some(5),
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -2459,6 +2513,12 @@ async fn query_without_embedder_runs_entity_and_graph_streams() {
                     unit: None,
                     parent_expansion: None,
                     content_budget: None,
+                    since: None,
+                    until: None,
+                    machine: None,
+                    harness: None,
+                    kinds: None,
+                    source_projects: None,
                 }),
                 OptionalParts(test_parts_default()),
             )
@@ -2549,6 +2609,12 @@ async fn default_query_unions_global_scope_and_explicit_scope_skips_it() {
         unit: None,
         parent_expansion: None,
         content_budget: None,
+        since: None,
+        until: None,
+        machine: None,
+        harness: None,
+        kinds: None,
+        source_projects: None,
     };
 
     let result = server
@@ -2628,6 +2694,12 @@ async fn default_query_without_global_scope_is_unchanged() {
                 unit: None,
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -2759,6 +2831,12 @@ async fn memory_query_returns_raw_hits_when_pages_miss() {
                 unit: None,
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -2841,6 +2919,12 @@ async fn memory_query_returns_raw_hits_via_explicit_scopes() {
                 unit: None,
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             test_optional_parts(),
         )
@@ -2939,6 +3023,12 @@ async fn memory_query_scoped_raw_hits_respect_limit_and_rank_order() {
                     unit: None,
                     parent_expansion: None,
                     content_budget: None,
+                    since: None,
+                    until: None,
+                    machine: None,
+                    harness: None,
+                    kinds: None,
+                    source_projects: None,
                 }),
                 test_optional_parts(),
             )
@@ -3008,6 +3098,12 @@ async fn memory_query_scoped_raw_hits_deduplicate_duplicate_scopes() {
                     unit: None,
                     parent_expansion: None,
                     content_budget: None,
+                    since: None,
+                    until: None,
+                    machine: None,
+                    harness: None,
+                    kinds: None,
+                    source_projects: None,
                 }),
                 test_optional_parts(),
             )
@@ -3053,6 +3149,12 @@ async fn memory_query_missing_scope_fails_closed_without_default_raw_fallback() 
                 unit: None,
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             test_optional_parts(),
         )
@@ -3131,6 +3233,12 @@ async fn memory_query_page_hits_suppress_scoped_raw_fallback() {
                     unit: None,
                     parent_expansion: None,
                     content_budget: None,
+                    since: None,
+                    until: None,
+                    machine: None,
+                    harness: None,
+                    kinds: None,
+                    source_projects: None,
                 }),
                 test_optional_parts(),
             )
@@ -3200,6 +3308,12 @@ async fn memory_query_can_target_explicit_workspace_project() {
                 unit: None,
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -4246,6 +4360,12 @@ async fn memory_query_can_search_multiple_scopes() {
                 unit: None,
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -4358,6 +4478,12 @@ async fn memory_query_global_searches_all_projects() {
                 unit: None,
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -4408,6 +4534,12 @@ async fn memory_query_global_searches_all_projects() {
                 unit: None,
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -4491,6 +4623,12 @@ async fn memory_query_default_global_marker_broadens_unscoped_query() {
                 unit: None,
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -4526,6 +4664,12 @@ async fn memory_query_default_global_marker_broadens_unscoped_query() {
                 unit: None,
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -4565,6 +4709,12 @@ async fn memory_query_global_rejects_explicit_scope() {
                 unit: None,
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -7433,6 +7583,12 @@ async fn memory_query_clamps_outlandish_limit() {
                 unit: None,
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -7470,6 +7626,12 @@ async fn memory_query_malformed_fts5_returns_error() {
                 unit: None,
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -7758,6 +7920,12 @@ async fn memory_query_global_passage_searches_all_projects() {
                 unit: Some(QueryUnit::Passage),
                 parent_expansion: Some(ParentExpansion::Document),
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -7831,6 +7999,12 @@ async fn memory_query_passage_limit_zero_is_empty() {
                     unit: Some(QueryUnit::Passage),
                     parent_expansion: None,
                     content_budget: None,
+                    since: None,
+                    until: None,
+                    machine: None,
+                    harness: None,
+                    kinds: None,
+                    source_projects: None,
                 }),
                 OptionalParts(test_parts_default()),
             )
@@ -7894,6 +8068,12 @@ async fn memory_query_scoped_searches_stay_isolated() {
                 unit: Some(QueryUnit::Passage),
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -7923,6 +8103,12 @@ async fn memory_query_scoped_searches_stay_isolated() {
                 unit: Some(QueryUnit::Passage),
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -7957,6 +8143,12 @@ async fn memory_query_scoped_searches_stay_isolated() {
                 unit: None,
                 parent_expansion: None,
                 content_budget: None,
+                since: None,
+                until: None,
+                machine: None,
+                harness: None,
+                kinds: None,
+                source_projects: None,
             }),
             OptionalParts(test_parts_default()),
         )
@@ -7992,6 +8184,12 @@ async fn memory_query_global_passage_rejects_explicit_scope_and_as_of() {
         unit: Some(QueryUnit::Passage),
         parent_expansion: None,
         content_budget: None,
+        since: None,
+        until: None,
+        machine: None,
+        harness: None,
+        kinds: None,
+        source_projects: None,
     };
     for (label, mutate) in [
         (
@@ -8078,6 +8276,12 @@ async fn memory_query_global_passage_preserves_actor_boundary() {
                     unit: Some(QueryUnit::Passage),
                     parent_expansion: None,
                     content_budget: None,
+                    since: None,
+                    until: None,
+                    machine: None,
+                    harness: None,
+                    kinds: None,
+                    source_projects: None,
                 }),
                 OptionalParts(parts),
             )
@@ -8092,3 +8296,286 @@ async fn memory_query_global_passage_preserves_actor_boundary() {
         assert!(!hits.is_empty(), "{label} caller must get passage hits");
     }
 }
+// ---- Session-evidence field tests (global retrieval feature) ----
+//
+// Cover the additive `session_evidence` field on `memory_query` /
+// `memory_query_passage`: (1) a documented query returns both wiki hits
+// and session evidence in the new field; (2) forbidden (owned) sources are
+// excluded for an anonymous caller; (3) `limit=0` returns empty results
+// without error; (4) the response shape is backward-compatible — when the
+// evidence list is empty the field is skipped entirely, so existing callers
+// see byte-identical JSON.
+async fn seed_session_with_event(
+    store: &Store,
+    workspace_id: WorkspaceId,
+    project_id: ProjectId,
+    owner: Option<&str>,
+    event_id: &str,
+    content: &str,
+) -> SessionId {
+    let session_id = SessionId::new();
+    store
+        .writer
+        .begin_session(NewSession {
+            id: session_id,
+            workspace_id,
+            project_id,
+            agent_kind: AgentKind::OpenCode,
+            cwd: None,
+            actor_user: owner.map(str::to_string),
+        })
+        .await
+        .unwrap();
+    let appended = store
+        .writer
+        .append_session_events(
+            session_id,
+            vec![sessionmunch_core::NewSessionEvent {
+                event_id: event_id.to_string(),
+                kind: sessionmunch_core::WorkstreamEventKind::Message,
+                role: Some("user".into()),
+                content: content.to_string(),
+                occurred_at: None,
+                source: sessionmunch_core::SessionSource::Hook,
+                metadata: serde_json::json!({}),
+            }],
+        )
+        .await
+        .unwrap();
+    assert_eq!(appended, 1, "seed session event must be inserted");
+    session_id
+}
+
+#[tokio::test]
+async fn memory_query_returns_both_wiki_hits_and_session_evidence() {
+    // The `session_evidence` field must be populated alongside the normal
+    // wiki `hits` for one query: setup_server already writes a page whose
+    // body mentions "Karpathy"; seed a shared session event that also
+    // contains "karpathy" so both retrieval surfaces hit.
+    let (_tmp, store, server, ws, proj) = setup_server().await;
+    let shared_session =
+        seed_session_with_event(&store, ws, proj, None, "evt:1", "standup notes on Karpathy").await;
+    let value = call_tool_json(
+        server
+            .memory_query(
+                Parameters(QueryArgs {
+                    query: "karpathy".into(),
+                    limit: Some(5),
+                    project: None,
+                    scopes: Vec::new(),
+                    workspace: None,
+                    global: None,
+                    include_expired: None,
+                    explain: None,
+                    as_of: None,
+                    unit: None,
+                    parent_expansion: None,
+                    content_budget: None,
+                    since: None,
+                    until: None,
+                    machine: None,
+                    harness: None,
+                    kinds: None,
+                    source_projects: None,
+                }),
+                OptionalParts(test_parts_default()),
+            )
+            .await
+            .unwrap(),
+    );
+    // (1) wiki hits still present.
+    let hits = value["hits"].as_array().expect("hits array");
+    assert!(
+        hits.iter()
+            .any(|h| h.get("path").and_then(|p| p.as_str()) == Some("foo.md")),
+        "expected foo.md wiki hit; got {value}"
+    );
+    // (1) the additive field carries the session evidence.
+    let evidence = value
+        .get("session_evidence")
+        .expect("session_evidence must be present")
+        .as_array()
+        .expect("session_evidence array");
+    assert_eq!(evidence.len(), 1, "expected one evidence row; got {value}");
+    let row = &evidence[0];
+    assert_eq!(
+        row.get("event_id").and_then(|v| v.as_str()),
+        Some("evt:1"),
+        "unexpected evidence row: {row}"
+    );
+    assert_eq!(
+        row.get("session_id").and_then(|v| v.as_str()),
+        Some(shared_session.to_string().as_str()),
+        "evidence must carry the seeded session id: {row}"
+    );
+}
+
+#[tokio::test]
+async fn session_evidence_excludes_forbidden_owned_sources_for_anonymous_caller() {
+    // An anonymous caller (Unattributed owner filter) must see only shared
+    // sessions (actor_user IS NULL). Seed a shared session AND an owned
+    // session, both containing the query term, and require the evidence to
+    // contain only the shared one.
+    let (_tmp, store, server, ws, proj) = setup_server().await;
+    let shared =
+        seed_session_with_event(&store, ws, proj, None, "evt:shared", "Karpathy shared note").await;
+    let owned = seed_session_with_event(
+        &store,
+        ws,
+        proj,
+        Some("user:alice"),
+        "evt:owned",
+        "Karpathy private note",
+    )
+    .await;
+    assert_ne!(shared, owned);
+    let value = call_tool_json(
+        server
+            .memory_query(
+                Parameters(QueryArgs {
+                    query: "karpathy".into(),
+                    limit: Some(5),
+                    project: None,
+                    scopes: Vec::new(),
+                    workspace: None,
+                    global: None,
+                    include_expired: None,
+                    explain: None,
+                    as_of: None,
+                    unit: None,
+                    parent_expansion: None,
+                    content_budget: None,
+                    since: None,
+                    until: None,
+                    machine: None,
+                    harness: None,
+                    kinds: None,
+                    source_projects: None,
+                }),
+                test_optional_parts(),
+            )
+            .await
+            .unwrap(),
+    );
+    let evidence = value
+        .get("session_evidence")
+        .map(|e| e.as_array().cloned().unwrap_or_default())
+        .unwrap_or_default();
+    assert_eq!(
+        evidence.len(),
+        1,
+        "anonymous caller must see only the shared session; got {value}"
+    );
+    assert_eq!(
+        evidence[0].get("session_id").and_then(|v| v.as_str()),
+        Some(shared.to_string().as_str()),
+        "owned session must be excluded; got {value}"
+    );
+    assert!(
+        evidence
+            .iter()
+            .all(|row| row.get("session_id").and_then(|v| v.as_str())
+                != Some(owned.to_string().as_str())),
+        "forbidden owned session leaked into evidence: {value}"
+    );
+}
+
+#[tokio::test]
+async fn memory_query_passage_limit_zero_returns_empty_without_error() {
+    // `limit=0` short-circuits both the passage hits and the evidence list
+    // before any SQL runs — the call must succeed with empty results, not
+    // error. Page-mode clamps 1..=100, so this documented contract is
+    // exercised through the passage path which preserves limit=0.
+    let (_tmp, store, server, ws, proj) = setup_server().await;
+    seed_session_with_event(&store, ws, proj, None, "evt:1", "Karpathy passage note").await;
+    let value = call_tool_json(
+        server
+            .memory_query(
+                Parameters(QueryArgs {
+                    query: "karpathy".into(),
+                    limit: Some(0),
+                    project: None,
+                    scopes: Vec::new(),
+                    workspace: None,
+                    global: None,
+                    include_expired: None,
+                    explain: None,
+                    as_of: None,
+                    unit: Some(QueryUnit::Passage),
+                    parent_expansion: None,
+                    content_budget: None,
+                    since: None,
+                    until: None,
+                    machine: None,
+                    harness: None,
+                    kinds: None,
+                    source_projects: None,
+                }),
+                OptionalParts(test_parts_default()),
+            )
+            .await
+            .unwrap(),
+    );
+    assert_eq!(
+        value["hits"].as_array().unwrap().len(),
+        0,
+        "limit=0 must return no passage hits; got {value}"
+    );
+    assert!(
+        value.get("session_evidence").is_none(),
+        "limit=0 must omit the empty evidence field; got {value}"
+    );
+}
+
+#[tokio::test]
+async fn memory_query_is_backward_compatible_when_evidence_is_empty() {
+    // With no matching session events the `session_evidence` field must be
+    // entirely absent from the serialized response (`skip_serializing_if`),
+    // so the JSON an existing caller already parses is byte-identical.
+    // setup_server seeds a page but no session events.
+    let (_tmp, _store, server, _ws, _proj) = setup_server().await;
+    let value = call_tool_json(
+        server
+            .memory_query(
+                Parameters(QueryArgs {
+                    query: "karpathy".into(),
+                    limit: Some(5),
+                    project: None,
+                    scopes: Vec::new(),
+                    workspace: None,
+                    global: None,
+                    include_expired: None,
+                    explain: None,
+                    as_of: None,
+                    unit: None,
+                    parent_expansion: None,
+                    content_budget: None,
+                    since: None,
+                    until: None,
+                    machine: None,
+                    harness: None,
+                    kinds: None,
+                    source_projects: None,
+                }),
+                OptionalParts(test_parts_default()),
+            )
+            .await
+            .unwrap(),
+    );
+    // Existing keys unchanged and present.
+    assert_eq!(
+        value["hits"].as_array().unwrap().len(),
+        1,
+        "expected the seeded page hit; got {value}"
+    );
+    assert!(
+        value.get("session_evidence").is_none(),
+        "empty evidence must be omitted for byte-compat; got {value}"
+    );
+    assert!(
+        value.get("global_hits").is_none() && value.get("raw_hits").is_none(),
+        "other additive fields absent when empty; got {value}"
+    );
+}
+
+// ---- end session-evidence field tests ----

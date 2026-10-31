@@ -91,6 +91,53 @@ pub(super) struct QueryArgs {
     /// window. Defaults to 8 192 chars. Ignored when 0 (no cap).
     #[serde(default = "default_content_budget")]
     pub(super) content_budget: Option<usize>,
+    /// Lower bound on page `updated_at` — the earliest instant a page may
+    /// have been updated to be eligible. **Type:** string. **Format:**
+    /// ISO-8601 instant (e.g. `2026-06-01T00:00:00Z`); parsed with jiff.
+    /// **Applies only to** `global=true` with `unit=passage` (cross-project
+    /// passage search). Supplying it in any other mode is a caller error.
+    /// Must not be later than `until` when both are given.
+    #[serde(default)]
+    pub(super) since: Option<String>,
+    /// Upper bound on page `updated_at` — the latest instant a page may
+    /// have been updated to be eligible. **Type:** string. **Format:**
+    /// ISO-8601 instant (e.g. `2026-06-01T00:00:00Z`); parsed with jiff.
+    /// **Applies only to** `global=true` with `unit=passage`. An error if
+    /// it precedes `since`.
+    #[serde(default)]
+    pub(super) until: Option<String>,
+    /// Allowlist of `$.machine` frontmatter values; a page must match at
+    /// least one to be eligible. **Type:** array of strings. **Applies
+    /// only to** `global=true` with `unit=passage`. Pass `null`/omit to
+    /// leave unconstrained; an empty list is rejected (use omission).
+    #[serde(default)]
+    pub(super) machine: Option<Vec<String>>,
+    /// Allowlist of `$.agent` (the creating harness) frontmatter values; a
+    /// page must match at least one to be eligible. **Type:** array of
+    /// strings. **Applies only to** `global=true` with `unit=passage`.
+    /// Pass `null`/omit to leave unconstrained; an empty list is rejected
+    /// (use omission).
+    #[serde(default)]
+    pub(super) harness: Option<Vec<String>>,
+    /// Allowlist of page kinds (from frontmatter `kind` or the path-derived
+    /// kind); a page must match one to be eligible. **Type:** array of
+    /// strings. **Allowed values:** `rule`, `slot`, `session`, `decision`,
+    /// `gotcha`, `concept`, `procedure`, `note`, `fact`. An unknown value
+    /// is a caller error. **Applies only to** `global=true` with
+    /// `unit=passage`. Pass `null`/omit to leave unconstrained; an empty
+    /// list is rejected (use omission).
+    #[serde(default)]
+    pub(super) kinds: Option<Vec<String>>,
+    /// Allowlist of source-project identifiers (the middle element of each
+    /// project's `workspace/project/path` 3-tuple) whose passages are
+    /// eligible for a `global=true` query. **Type:** array of strings.
+    /// **Format:** each entry is a valid project id (a UUID, e.g.
+    /// `6f98c1e4-...`); invalid ids are a caller error. **Applies only to**
+    /// `unit=passage`; mutually exclusive with the scoping `project` /
+    /// `workspace` / `scopes`. Pass `null`/omit to search every project; an
+    /// empty list is rejected (use omission).
+    #[serde(default)]
+    pub(super) source_projects: Option<Vec<String>>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -191,6 +238,16 @@ pub(super) struct MemoryQueryResponse {
     /// An `as_of` query runs `entity` plus version-filtered `fts`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) streams_active: Option<Vec<&'static str>>,
+    /// Bounded session-event evidence for this query, deduplicated by
+    /// parent session (best-ranked hit per session) and capped at
+    /// `SESSION_EVIDENCE_MAX_HITS` rows with content truncated to
+    /// `SESSION_EVIDENCE_CONTENT_CHARS`. Each row carries provenance:
+    /// session id, source kind, machine, harness, workspace/project
+    /// names + ids, timestamps, and the caller's owner filter, so
+    /// forbidden sources are excluded. Additive field — omitted when
+    /// empty, so existing callers see an unchanged response.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(super) session_evidence: Vec<sessionmunch_core::SessionEventHit>,
 }
 
 /// One `memory_query` passage hit when `unit="passage"`. Carries the
@@ -271,6 +328,14 @@ pub(super) struct MemoryQueryPassageResponse {
     pub(super) global_scope_hits: Vec<PassageQueryHit>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) streams_active: Option<Vec<&'static str>>,
+    /// Bounded session-event evidence for this query, deduplicated by
+    /// parent session and capped at `SESSION_EVIDENCE_MAX_HITS` rows
+    /// with content truncated to `SESSION_EVIDENCE_CONTENT_CHARS`.
+    /// Each row carries source/provenance metadata; forbidden sources
+    /// are excluded via the caller's owner filter. Additive field -
+    /// omitted when empty, so existing callers see an unchanged response.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(super) session_evidence: Vec<sessionmunch_core::SessionEventHit>,
 }
 
 /// Response for `memory_recent`. `hits` carries the current project's recent
@@ -690,6 +755,15 @@ pub(super) const SEARCH_EVENTS_MAX_LIMIT: usize = 100;
 
 /// Per-hit content cap in `memory_search_events` responses.
 pub(super) const SEARCH_EVENTS_CONTENT_CHARS: usize = 2_000;
+
+/// Cap on session-event evidence rows attached to `memory_query` /
+/// `memory_query_passage` responses (additive field omitted when empty).
+pub(super) const SESSION_EVIDENCE_MAX_HITS: usize = 5;
+/// Candidate rows fetched per resolved scope before session-dedupe, so
+/// the bounded cap can survive one-session flooding.
+pub(super) const SESSION_EVIDENCE_FETCH_LIMIT: usize = 20;
+/// Per-row content cap for embedded session-event evidence.
+pub(super) const SESSION_EVIDENCE_CONTENT_CHARS: usize = 1_200;
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub(super) struct ReadSessionObservationsArgs {

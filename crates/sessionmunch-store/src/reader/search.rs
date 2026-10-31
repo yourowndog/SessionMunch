@@ -468,7 +468,12 @@ impl ReaderPool {
                 ));
             }
             scored.sort_by(|a, b| {
-                dense_total_cmp(a.1, a.0.passage_id.as_bytes(), b.1, b.0.passage_id.as_bytes())
+                dense_total_cmp(
+                    a.1,
+                    a.0.passage_id.as_bytes(),
+                    b.1,
+                    b.0.passage_id.as_bytes(),
+                )
             });
             scored.truncate(limit);
             Ok(scored)

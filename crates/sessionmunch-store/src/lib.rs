@@ -66,13 +66,13 @@ pub use reader::{
     ActivityWindow, AgentSessionCount, AuditEvent, AuditLogFilter, AutoImproveCandidateSession,
     BriefPageBody, BriefingPage, BriefingSnapshot, ClientActivity, ContaminationFinding,
     ContaminationReport, ContaminationSummary, ContradictionEdge, DecayCandidate, DecayTombstone,
-    DerivedIndexStatus, EmbeddingTripleCount, FeedbackFinding, GraphVia, HealthDetail, HealthPage,
-    ObservationHit, ObservationOrder, ObservationPage, ObservationPageResult, ObservationRecord,
-    OpenSession, PageAuthor, PageHit, PageHitWithMeta, PageLinks, PageMeta, PageSummary,
-    PassageHit, ProjectSummary, ReaderPool, ReindexTargetStatus, RelatedPage, RrfContributions,
-    ScopeRow, SearchExplain, SessionDependentRows, SessionEndDisposition, SessionSummary,
-    SettledPage, StatusCounts, StorageStatus, StoredEmbedding, StoredPageBody, WorkspaceScopeRow,
-    WorkspaceSummary, f32_vec_to_bytes,
+    DerivedIndexStatus, EmbeddingTripleCount, FeedbackFinding, GlobalPassageFilter, GraphVia,
+    HealthDetail, HealthPage, ObservationHit, ObservationOrder, ObservationPage,
+    ObservationPageResult, ObservationRecord, OpenSession, PageAuthor, PageHit, PageHitWithMeta,
+    PageLinks, PageMeta, PageSummary, PassageHit, ProjectSummary, ReaderPool, ReindexTargetStatus,
+    RelatedPage, RrfContributions, ScopeRow, SearchExplain, SessionDependentRows,
+    SessionEndDisposition, SessionSummary, SettledPage, StatusCounts, StorageStatus,
+    StoredEmbedding, StoredPageBody, WorkspaceScopeRow, WorkspaceSummary, f32_vec_to_bytes,
 };
 pub use retrieval_tuning::{RetrievalTuning, is_session_recall_query};
 pub use scope::{

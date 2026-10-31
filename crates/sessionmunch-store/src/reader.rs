@@ -1765,15 +1765,17 @@ fn rrf_fuse(
 
 fn l2_normalize(v: &[f32]) -> StoreResult<Vec<f32>> {
     if v.iter().any(|x| !x.is_finite()) {
-        return Err(StoreError::Memory(sessionmunch_core::MemoryError::MalformedRecord(
-            "embedding vector contains a non-finite value".into(),
-        )));
+        return Err(StoreError::Memory(
+            sessionmunch_core::MemoryError::MalformedRecord(
+                "embedding vector contains a non-finite value".into(),
+            ),
+        ));
     }
     let norm_sq: f64 = v.iter().map(|x| (*x as f64) * (*x as f64)).sum();
     if !norm_sq.is_finite() {
-        return Err(StoreError::Memory(sessionmunch_core::MemoryError::MalformedRecord(
-            "embedding norm overflowed".into(),
-        )));
+        return Err(StoreError::Memory(
+            sessionmunch_core::MemoryError::MalformedRecord("embedding norm overflowed".into()),
+        ));
     }
     let norm = norm_sq.sqrt();
     if norm == 0.0 {
@@ -1783,17 +1785,25 @@ fn l2_normalize(v: &[f32]) -> StoreResult<Vec<f32>> {
 }
 
 fn dot_f32(a: &[f32], b: &[f32]) -> StoreResult<f32> {
-    let dot: f64 = a.iter().zip(b.iter()).map(|(x, y)| (*x as f64) * (*y as f64)).sum();
+    let dot: f64 = a
+        .iter()
+        .zip(b.iter())
+        .map(|(x, y)| (*x as f64) * (*y as f64))
+        .sum();
     if !dot.is_finite() {
-        return Err(StoreError::Memory(sessionmunch_core::MemoryError::MalformedRecord(
-            "dense dot product is not finite".into(),
-        )));
+        return Err(StoreError::Memory(
+            sessionmunch_core::MemoryError::MalformedRecord(
+                "dense dot product is not finite".into(),
+            ),
+        ));
     }
     let score = dot as f32;
     if !score.is_finite() {
-        return Err(StoreError::Memory(sessionmunch_core::MemoryError::MalformedRecord(
-            "dense dot product exceeds finite f32 range".into(),
-        )));
+        return Err(StoreError::Memory(
+            sessionmunch_core::MemoryError::MalformedRecord(
+                "dense dot product exceeds finite f32 range".into(),
+            ),
+        ));
     }
     Ok(score)
 }
@@ -2130,22 +2140,28 @@ fn dot_embedding_bytes(query: &[f32], bytes: &[u8], dim: u32) -> StoreResult<f32
     let mut dot = 0.0_f64;
     for (q, chunk) in query.iter().zip(bytes.as_chunks::<4>().0) {
         if !q.is_finite() {
-            return Err(StoreError::Memory(sessionmunch_core::MemoryError::MalformedRecord(
-                "query vector contains a non-finite value".into(),
-            )));
+            return Err(StoreError::Memory(
+                sessionmunch_core::MemoryError::MalformedRecord(
+                    "query vector contains a non-finite value".into(),
+                ),
+            ));
         }
         dot += (*q as f64) * (f32::from_le_bytes(*chunk) as f64);
     }
     if !dot.is_finite() {
-        return Err(StoreError::Memory(sessionmunch_core::MemoryError::MalformedRecord(
-            "dense dot product is not finite".into(),
-        )));
+        return Err(StoreError::Memory(
+            sessionmunch_core::MemoryError::MalformedRecord(
+                "dense dot product is not finite".into(),
+            ),
+        ));
     }
     let score = dot as f32;
     if !score.is_finite() {
-        return Err(StoreError::Memory(sessionmunch_core::MemoryError::MalformedRecord(
-            "dense dot product exceeds finite f32 range".into(),
-        )));
+        return Err(StoreError::Memory(
+            sessionmunch_core::MemoryError::MalformedRecord(
+                "dense dot product exceeds finite f32 range".into(),
+            ),
+        ));
     }
     Ok(score)
 }

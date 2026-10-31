@@ -31,7 +31,7 @@ use sessionmunch_store::{
     StageAutoImproveRun,
 };
 use sessionmunch_store::{
-    DecayParams, PageHit, ReaderPool, ScopeName, ScopeResolver, WriterHandle,
+    DecayParams, GlobalPassageFilter, PageHit, ReaderPool, ScopeName, ScopeResolver, WriterHandle,
 };
 use sessionmunch_wiki::{Wiki, WikiError, WritePageRequest};
 
@@ -288,6 +288,158 @@ const RERANK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// Microseconds in one UTC day, for `client_activity` bucketing.
 const US_PER_DAY: i64 = 86_400_000_000;
+/// The page kinds accepted by the `kinds` filter — the vocabulary the store
+/// derives from page frontmatter `kind` or the path-derived kind. Kept in
+/// sync with what `page_kind_expr` in the store emits; an unknown value is a
+/// caller error here rather than a silently-empty result set.
+const PASSAGE_PAGE_KINDS: &[&str] = &[
+    "rule",
+    "slot",
+    "session",
+    "decision",
+    "gotcha",
+    "concept",
+    "procedure",
+    "note",
+    "fact",
+];
+
+/// Build the cross-project [`GlobalPassageFilter`] from the optional
+/// hard-filter args of `memory_query`, validating them first:
+/// * `since` / `until` must be ISO-8601 instants, and `since` must not
+///   follow `until`.
+/// * `machine` / `harness` / `kinds` must be non-empty strings (an empty
+///   list is rejected so callers cannot accidentally exclude everything).
+/// * `source_projects` must be non-empty, valid project-id strings.
+///
+/// Returns `Ok(None)` when no filter arg is present, so callers keep the
+/// unrestricted default behaviour exactly as before.
+fn global_passage_filter_from_args(
+    args: &QueryArgs,
+) -> Result<Option<GlobalPassageFilter>, McpError> {
+    let parse_us = |s: &str, label: &str| -> Result<i64, McpError> {
+        jiff::Timestamp::from_str(s.trim())
+            .map(|t| t.as_microsecond())
+            .map_err(|e| {
+                McpError::internal_error(format!("{label} must be an ISO-8601 instant: {e}"), None)
+            })
+    };
+    let since_us = match args.since.as_deref() {
+        Some(s) if !s.trim().is_empty() => Some(parse_us(s, "since")?),
+        _ => None,
+    };
+    let until_us = match args.until.as_deref() {
+        Some(s) if !s.trim().is_empty() => Some(parse_us(s, "until")?),
+        _ => None,
+    };
+    if let (Some(a), Some(b)) = (since_us, until_us)
+        && a > b
+    {
+        return Err(McpError::internal_error(
+            "since must not be later than until",
+            None,
+        ));
+    }
+    let clean_list =
+        |values: &Option<Vec<String>>, label: &str| -> Result<Option<Vec<String>>, McpError> {
+            let Some(values) = values else {
+                return Ok(None);
+            };
+            let mut out = Vec::with_capacity(values.len());
+            for v in values {
+                let t = v.trim();
+                if t.is_empty() {
+                    return Err(McpError::internal_error(
+                        format!("{label} entries must be non-empty"),
+                        None,
+                    ));
+                }
+                out.push(t.to_string());
+            }
+            Ok(Some(out))
+        };
+    let machine = match clean_list(&args.machine, "machine")? {
+        Some(v) if v.is_empty() => {
+            return Err(McpError::internal_error(
+                "machine must not be an empty list (omit it to leave unconstrained)",
+                None,
+            ));
+        }
+        other => other,
+    };
+    let harness = match clean_list(&args.harness, "harness")? {
+        Some(v) if v.is_empty() => {
+            return Err(McpError::internal_error(
+                "harness must not be an empty list (omit it to leave unconstrained)",
+                None,
+            ));
+        }
+        other => other,
+    };
+    let kinds = match clean_list(&args.kinds, "kinds")? {
+        Some(v) if v.is_empty() => {
+            return Err(McpError::internal_error(
+                "kinds must not be an empty list (omit it to leave unconstrained)",
+                None,
+            ));
+        }
+        Some(v) => {
+            for k in &v {
+                if !PASSAGE_PAGE_KINDS.contains(&k.as_str()) {
+                    return Err(McpError::internal_error(
+                        format!(
+                            "kinds entry '{k}' is not a known page kind (expected one of {})",
+                            PASSAGE_PAGE_KINDS.join(", ")
+                        ),
+                        None,
+                    ));
+                }
+            }
+            Some(v)
+        }
+        None => None,
+    };
+    let project_ids = match clean_list(&args.source_projects, "source_projects")? {
+        Some(v) if v.is_empty() => {
+            return Err(McpError::internal_error(
+                "source_projects must not be an empty list (omit it to leave unconstrained)",
+                None,
+            ));
+        }
+        Some(v) => {
+            let mut ids = Vec::with_capacity(v.len());
+            for id in v {
+                let pid = ProjectId::from_str(&id).map_err(|e| {
+                    McpError::internal_error(
+                        format!("source_projects entry must be a valid project id: {e}"),
+                        None,
+                    )
+                })?;
+                ids.push(pid);
+            }
+            Some(ids)
+        }
+        None => None,
+    };
+    if since_us.is_none()
+        && until_us.is_none()
+        && machine.is_none()
+        && harness.is_none()
+        && kinds.is_none()
+        && project_ids.is_none()
+    {
+        return Ok(None);
+    }
+    Ok(Some(GlobalPassageFilter {
+        since_us,
+        until_us,
+        machine,
+        harness,
+        project_ids,
+        kind: kinds,
+    }))
+}
+
 #[tool_router]
 impl SessionMunchServer {
     fn scope_resolver(&self) -> ScopeResolver<'_> {
@@ -930,12 +1082,13 @@ impl SessionMunchServer {
 
         let passage_hits = if global {
             // Cross-project (global) passage search reuses the store's
-            // hybrid lexical+dense RRF machinery with the default
-            // (unrestricted) hard filter; explicit filter args are a later
-            // slice. Ordering and the per-parent cap live in the store.
+            // hybrid lexical+dense RRF machinery with the caller-supplied
+            // hard filter (default = unrestricted). Ordering and the
+            // per-parent cap live in the store.
+            let filter = global_passage_filter_from_args(args)?;
             self.reader
                 .search_passages_hybrid_global(
-                    Default::default(),
+                    filter.unwrap_or_default(),
                     query.clone(),
                     query_vec.as_deref().map(<[f32]>::to_vec),
                     provider,
@@ -993,8 +1146,27 @@ impl SessionMunchServer {
             .map(|ph| self.build_passage_hit(ph, parent_expansion, content_budget))
             .collect();
 
+        let evidence_scopes = if global {
+            Vec::new()
+        } else if let Some(scopes) = &resolved_scopes {
+            scopes.clone()
+        } else {
+            let (ws, proj) = self
+                .effective_ids_for_read_args_with_actor(
+                    args.workspace.as_deref(),
+                    args.project.as_deref(),
+                    aps_actor,
+                )
+                .await?;
+            vec![(ws, proj)]
+        };
+        let session_evidence = self
+            .session_evidence_for_query(parts, &args.query, &evidence_scopes, None, limit)
+            .await?;
+
         let response = MemoryQueryPassageResponse {
             hits,
+            session_evidence,
             global_hits: Vec::new(),
             global_scope_hits: Vec::new(),
             streams_active: explain.then(|| {
@@ -1089,6 +1261,17 @@ impl SessionMunchServer {
         search at passage granularity (hybrid FTS + dense when an embedder \
         is configured); each hit identifies its source page, and \
         `parent_expansion=document` adds the workspace + project id. \
+        On this global passage path you may further narrow eligibility with \
+        the optional hard filters `since` / `until` (ISO-8601 instants \
+        bounding page `updated_at`; `since` must not be later than `until`), \
+        `machine` / `harness` (array allowlists against `$.machine` and \
+        `$.agent` frontmatter), `kinds` (array allowlist from: rule, slot, \
+        session, decision, gotcha, concept, procedure, note, fact), and \
+        `source_projects` (array of project-id UUIDs; mutually exclusive \
+        with `project`/`workspace`/`scopes`). Each list arg is optional; \
+        omit (or pass null) to leave it unconstrained, and never pass an \
+        empty list — omission is the unconstrained form. Supplying any of \
+        these outside `global=true` + `unit=passage` is a caller error. \
         If compiled wiki search misses in default/project/`scopes` mode, \
         `raw_hits` contains bounded raw observation fallback matches; \
         `global=true` searches compiled wiki pages only and returns no raw \
@@ -1116,6 +1299,17 @@ impl SessionMunchServer {
         // behave as `global=true`. Precedence is strict: an explicit
         // `global` / `scopes` / `workspace` / `project` arg always wins, so
         // this only fires when the caller passed none of them.
+        // The cross-project hard-filter args only apply to the
+        // `global=true` + `unit=passage` path; reject them anywhere else
+        // rather than silently dropping them.
+        if passage_filter_args_present(&args)
+            && (unit != QueryUnit::Passage || !args.global.unwrap_or(false))
+        {
+            return Err(McpError::internal_error(
+                "since/until/machine/harness/kinds/source_projects require global=true with unit=passage",
+                None,
+            ));
+        }
         if unit == QueryUnit::Passage {
             let _ = include_expired;
             // Explicit `limit=0` means "no hits" in passage mode: the store
@@ -1171,11 +1365,15 @@ impl SessionMunchServer {
                 )
                 .await
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            let session_evidence = self
+                .session_evidence_for_query(&parts, &args.query, &[], None, limit)
+                .await?;
             return ok_json(&MemoryQueryResponse {
                 hits: Vec::new(),
                 raw_hits: Vec::new(),
                 global_hits,
                 global_scope_hits: Vec::new(),
+                session_evidence,
                 streams_active: explain.then(|| vec!["fts"]),
             });
         }
@@ -1229,6 +1427,15 @@ impl SessionMunchServer {
                 )
                 .await
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            let session_evidence = self
+                .session_evidence_for_query(
+                    &parts,
+                    &args.query,
+                    &[(ws, proj)],
+                    Some(instant.as_microsecond()),
+                    limit,
+                )
+                .await?;
             return ok_json(&MemoryQueryResponse {
                 hits: fused
                     .into_iter()
@@ -1240,6 +1447,7 @@ impl SessionMunchServer {
                 raw_hits: Vec::new(),
                 global_hits: Vec::new(),
                 global_scope_hits: Vec::new(),
+                session_evidence,
                 streams_active: explain.then(|| vec!["entity", "fts"]),
             });
         }
@@ -1432,11 +1640,27 @@ impl SessionMunchServer {
                 score_details: score_details.filter(|_| explain),
             })
             .collect();
+        let evidence_scopes = if let Some(scopes) = &resolved_scopes {
+            scopes.clone()
+        } else {
+            let (ws, proj) = self
+                .effective_ids_for_read_args_with_actor(
+                    args.workspace.as_deref(),
+                    args.project.as_deref(),
+                    &aps_actor,
+                )
+                .await?;
+            vec![(ws, proj)]
+        };
+        let session_evidence = self
+            .session_evidence_for_query(&parts, &args.query, &evidence_scopes, None, limit)
+            .await?;
         let response = MemoryQueryResponse {
             hits,
             raw_hits,
             global_hits: Vec::new(),
             global_scope_hits,
+            session_evidence,
             streams_active,
         };
         ok_json(&response)
@@ -2719,6 +2943,84 @@ impl SessionMunchServer {
         ok_json(&serde_json::json!({ "hits": hits }))
     }
 
+    /// Bounded session-event evidence for a `memory_query` /
+    /// `memory_query_passage` response: at most `SESSION_EVIDENCE_MAX_HITS`
+    /// rows matching `query`, deduplicated by parent session (best-ranked
+    /// hit per session, `SESSION_EVIDENCE_FETCH_LIMIT` candidates per
+    /// scope), owner-filtered so forbidden sources are excluded, with
+    /// each row's content capped at `SESSION_EVIDENCE_CONTENT_CHARS`.
+    /// Additive: empty when `limit == 0`, when no scope matches, or when
+    /// the actor has no visible source sessions.
+    async fn session_evidence_for_query(
+        &self,
+        parts: &axum::http::request::Parts,
+        query: &str,
+        scopes: &[(WorkspaceId, ProjectId)],
+        until_micros: Option<i64>,
+        limit: usize,
+    ) -> Result<Vec<sessionmunch_core::SessionEventHit>, McpError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let owner = sessionmunch_core::OwnerFilter::for_actor_context(
+            &crate::actor::actor_from_parts(parts),
+        );
+        // Fetch with headroom per scope, then dedupe by parent session and
+        // truncate to the documented bound. Empty scopes = global/cross-
+        // project evidence (owner-filtered only).
+        let mut best_by_session: HashMap<
+            sessionmunch_core::SessionId,
+            sessionmunch_core::SessionEventHit,
+        > = HashMap::new();
+        let scope_rounds: Vec<Option<(WorkspaceId, ProjectId)>> = if scopes.is_empty() {
+            vec![None]
+        } else {
+            scopes.iter().copied().map(Some).collect()
+        };
+        for scope in scope_rounds {
+            let search = sessionmunch_core::SessionEventSearch {
+                query: query.to_string(),
+                limit: SESSION_EVIDENCE_FETCH_LIMIT,
+                scope,
+                machine: None,
+                harness: None,
+                since_micros: None,
+                until_micros,
+                newest_first: false,
+                owner: Some(owner.clone()),
+            };
+            let hits = self
+                .reader
+                .search_session_events_filtered(search)
+                .await
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            for hit in hits {
+                match best_by_session.entry(hit.session_id) {
+                    std::collections::hash_map::Entry::Occupied(mut slot) => {
+                        if hit.rank < slot.get().rank {
+                            slot.insert(hit);
+                        }
+                    }
+                    std::collections::hash_map::Entry::Vacant(slot) => {
+                        slot.insert(hit);
+                    }
+                }
+            }
+        }
+        let mut evidence: Vec<_> = best_by_session.into_values().collect();
+        evidence.sort_by(|a, b| {
+            a.rank
+                .partial_cmp(&b.rank)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        evidence.truncate(SESSION_EVIDENCE_MAX_HITS);
+        for hit in &mut evidence {
+            hit.content =
+                cap_text_with_marker(&hit.content, SESSION_EVIDENCE_CONTENT_CHARS, "content");
+        }
+        Ok(evidence)
+    }
+
     /// Delete a single wiki page by exact path.
     #[tool(description = "Delete a single wiki page by its exact relative \
         path (e.g. `notes/foo.md`). Use when the user explicitly asks to \
@@ -3625,6 +3927,19 @@ impl SessionMunchServer {
 /// its `scopes` list on top of this.
 fn named_scope_args_present(workspace: Option<&str>, project: Option<&str>) -> bool {
     workspace.is_some_and(|s| !s.trim().is_empty()) || project.is_some_and(|s| !s.trim().is_empty())
+}
+
+/// True when the caller supplied any of the cross-project hard-filter args
+/// (`since` / `until` / `machine` / `harness` / `kinds` / `source_projects`).
+/// These only apply to the `global=true` + `unit=passage` path; passing them
+/// anywhere else is rejected by the caller.
+fn passage_filter_args_present(args: &QueryArgs) -> bool {
+    args.since.as_deref().is_some_and(|s| !s.trim().is_empty())
+        || args.until.as_deref().is_some_and(|s| !s.trim().is_empty())
+        || args.machine.as_ref().is_some_and(|v| !v.is_empty())
+        || args.harness.as_ref().is_some_and(|v| !v.is_empty())
+        || args.kinds.as_ref().is_some_and(|v| !v.is_empty())
+        || args.source_projects.as_ref().is_some_and(|v| !v.is_empty())
 }
 
 fn ok_json<T: Serialize>(value: &T) -> Result<CallToolResult, McpError> {

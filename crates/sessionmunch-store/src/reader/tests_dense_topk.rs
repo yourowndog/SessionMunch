@@ -27,7 +27,10 @@ fn hit(id: u128, score: f32) -> (PageId, PagePath, f32) {
 
 /// Replicate the exact top-k pipeline used by `top_embedding_hits_in_table`
 /// so we can oracle it against a full sort.
-fn top_k_pipeline(mut items: Vec<(PageId, PagePath, f32)>, limit: usize) -> Vec<(PageId, PagePath, f32)> {
+fn top_k_pipeline(
+    mut items: Vec<(PageId, PagePath, f32)>,
+    limit: usize,
+) -> Vec<(PageId, PagePath, f32)> {
     if items.len() > limit {
         items.select_nth_unstable_by(limit, score_desc);
         items.truncate(limit);
@@ -41,8 +44,16 @@ fn score_desc_orders_by_score_then_ascending_page_id() {
     // Same score, different ids -> ascending id wins, deterministically.
     let a = hit(0x10, 0.5);
     let b = hit(0x02, 0.5);
-    assert_eq!(score_desc(&a, &b), Ordering::Greater, "higher id, equal score sorts after");
-    assert_eq!(score_desc(&b, &a), Ordering::Less, "lower id, equal score sorts first");
+    assert_eq!(
+        score_desc(&a, &b),
+        Ordering::Greater,
+        "higher id, equal score sorts after"
+    );
+    assert_eq!(
+        score_desc(&b, &a),
+        Ordering::Less,
+        "lower id, equal score sorts first"
+    );
     // Different scores -> higher score first regardless of id.
     let hi = hit(0xFF, 0.9);
     let lo = hit(0x01, 0.1);
@@ -68,7 +79,11 @@ fn top_k_oracle_matches_full_sort_at_boundaries() {
     full.sort_by(score_desc);
     for limit in [0usize, 1, n - 1, n, n + 1] {
         let got = top_k_pipeline(items.clone(), limit);
-        assert_eq!(got, full[..limit.min(n)], "top-{limit} must equal full-sort head");
+        assert_eq!(
+            got,
+            full[..limit.min(n)],
+            "top-{limit} must equal full-sort head"
+        );
     }
 }
 
@@ -77,27 +92,33 @@ fn equal_score_shuffle_yields_identical_ranking_every_time() {
     // Same score set, several permutation orders -> identical final order.
     let scores = [0.5f32, 0.5, 0.5, 0.5, 0.5];
     let ids = [0xAAu128, 0x01, 0x7F, 0x00, 0x99];
-    let base: Vec<(PageId, PagePath, f32)> = ids
-        .iter()
-        .zip(scores)
-        .map(|(id, s)| hit(*id, s))
-        .collect();
+    let base: Vec<(PageId, PagePath, f32)> =
+        ids.iter().zip(scores).map(|(id, s)| hit(*id, s)).collect();
     let mut sorted = base.clone();
     sorted.sort_by(score_desc);
     // ascending id order among the ties (big-endian seed == id byte ordering)
     let mut by_id = ids.to_vec();
     by_id.sort_unstable();
-    let got_seed_order: Vec<u128> = sorted.iter().map(|(p, _, _)| {
-        let b: [u8; 16] = p.as_bytes().to_owned();
-        u128::from_be_bytes(b)
-    }).collect();
+    let got_seed_order: Vec<u128> = sorted
+        .iter()
+        .map(|(p, _, _)| {
+            let b: [u8; 16] = p.as_bytes().to_owned();
+            u128::from_be_bytes(b)
+        })
+        .collect();
     assert_eq!(got_seed_order, by_id, "ties resolve by ascending id");
     // reversed and forward permutations all sort identically
     let mut rev = base.clone();
     rev.reverse();
     rev.sort_by(score_desc);
     assert_eq!(rev, sorted);
-    let mut rand = vec![base[3].clone(), base[0].clone(), base[4].clone(), base[1].clone(), base[2].clone()];
+    let mut rand = vec![
+        base[3].clone(),
+        base[0].clone(),
+        base[4].clone(),
+        base[1].clone(),
+        base[2].clone(),
+    ];
     rand.sort_by(score_desc);
     assert_eq!(rand, sorted);
 }
@@ -109,7 +130,10 @@ fn l2_normalize_accumulates_in_f64_without_overflow() {
     let n = l2_normalize(&v).unwrap();
     let norm: f64 = n.iter().map(|x| (*x as f64) * (*x as f64)).sum();
     assert!((norm - 1.0).abs() < 1e-6, "norm must be ~1, got {norm}");
-    assert!(n.iter().all(|x| x.is_finite()), "no inf/nan in normalized output");
+    assert!(
+        n.iter().all(|x| x.is_finite()),
+        "no inf/nan in normalized output"
+    );
     // Zero vector -> unchanged (unit vector of length 0, existing behaviour).
     assert_eq!(l2_normalize(&[0.0, 0.0]).unwrap(), vec![0.0, 0.0]);
     // Ordinary vector.
@@ -122,7 +146,9 @@ fn l2_normalize_accumulates_in_f64_without_overflow() {
 fn l2_normalize_rejects_non_finite() {
     assert!(matches!(
         l2_normalize(&[1.0, f32::NAN]),
-        Err(StoreError::Memory(sessionmunch_core::MemoryError::MalformedRecord(_)))
+        Err(StoreError::Memory(
+            sessionmunch_core::MemoryError::MalformedRecord(_)
+        ))
     ));
     assert!(l2_normalize(&[f32::INFINITY, 1.0]).is_err());
     assert!(l2_normalize(&[1.0, f32::NEG_INFINITY]).is_err());
@@ -142,7 +168,10 @@ fn dot_f32_accumulates_in_f64_and_rejects_non_finite() {
     let b = vec![big; 4];
     let s = dot_f32(&a, &b).unwrap();
     assert!(s.is_finite(), "score must be finite, got {s}");
-    assert!((s - f32::MAX).abs() < f32::MAX * 1e-6, "expected ~f32::MAX, got {s}");
+    assert!(
+        (s - f32::MAX).abs() < f32::MAX * 1e-6,
+        "expected ~f32::MAX, got {s}"
+    );
     // Overflowing inputs (individual product > f32 range) are rejected, never
     // emitted as inf.
     let huge = vec![f32::MAX; 2];
@@ -156,7 +185,10 @@ fn dot_f32_accumulates_in_f64_and_rejects_non_finite() {
 fn dot_embedding_bytes_is_f64_safe_and_rejects_bad_input() {
     // dim == bytes/4; ordinary dot product exact.
     let bytes = f32_vec_to_bytes(&[1.0, 2.0, 3.0]);
-    assert_eq!(dot_embedding_bytes(&[1.0, 2.0, 3.0], &bytes, 3).unwrap(), 14.0);
+    assert_eq!(
+        dot_embedding_bytes(&[1.0, 2.0, 3.0], &bytes, 3).unwrap(),
+        14.0
+    );
     // dimension mismatch rejected (existing contract preserved).
     assert!(dot_embedding_bytes(&[1.0, 2.0, 3.0], &bytes, 2).is_err());
     assert!(dot_embedding_bytes(&[1.0; 13], &bytes, 3).is_err());
@@ -172,7 +204,11 @@ fn dot_embedding_bytes_is_f64_safe_and_rejects_bad_input() {
     let big = f32::MAX.sqrt() / 2.0f32.sqrt(); // per-term product ≈ MAX/2
     let big_bytes = f32_vec_to_bytes(&[big; 2]);
     let big_q = [big; 2];
-    assert!(dot_embedding_bytes(&big_q, &big_bytes, 2).unwrap().is_finite());
+    assert!(
+        dot_embedding_bytes(&big_q, &big_bytes, 2)
+            .unwrap()
+            .is_finite()
+    );
     // Even larger components that would overflow f32 are rejected outright.
     let huge_bytes = f32_vec_to_bytes(&[f32::MAX; 2]);
     let huge_q = [f32::MAX; 2];
