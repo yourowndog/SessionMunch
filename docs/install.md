@@ -1179,6 +1179,9 @@ loaded at startup.
 
 ### OpenCode 2 (beta)
 
+The V2 adapter fetches the handoff once per session and reinserts the cached text
+into each outgoing model context without duplicating an existing system entry.
+
 The 2.0 beta installs side by side as `opencode2` and shares v1's config
 dir and session store, but its MCP schema and plugin API changed. Wire it
 with the `opencode2` client/agent names:

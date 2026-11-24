@@ -63,11 +63,10 @@ const SessionMunchOpencode2: Plugin = {
         prompt: typeof prompt?.text === "string" ? prompt.text : textFromParts(prompt?.parts),
       });
     });
-    const handoffInjected = new Set<string>();
     const contextRegistration = await ctx.session.hook("context", async (event) => {
       const e = event as any;
       const id = e?.sessionID;
-      if (!id || handoffInjected.has(id)) return;
+      if (!id || !Array.isArray(e.system)) return;
       startSession(id, cwdFor(id, directory));
       let pending = handoffFetches.get(id);
       if (!pending) {
@@ -75,12 +74,12 @@ const SessionMunchOpencode2: Plugin = {
         handoffFetches.set(id, pending);
       }
       const handoff = await pending;
-      if (handoff) {
+      if (handoff && startedSessions.has(id) && !e.system.some((part: any) => part?.type === "text" && part.text === handoff)) {
         // SystemPart is `{ type: "text", text }` — the `type` discriminator
         // is required: without it the host fails the model call with a
         // schema validation error (observed live on beta-18999).
         e.system.push({ type: "text", text: handoff });
-        handoffInjected.add(id);
+        // Context arrays are ephemeral: reuse the cached handoff on every call.
       }
     });
     const beforeRegistration = await ctx.tool.hook("execute.before", (event) => {
