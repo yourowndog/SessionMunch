@@ -1,8 +1,61 @@
 //! refinery-driven schema migrations.
 
 use crate::error::{StoreError, StoreResult};
+use refinery_core::traits::sync::{Migrate, Query, Transaction};
+use rusqlite::{Connection, Error, types::Type};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 refinery::embed_migrations!("migrations");
+
+/// Adapter for refinery's public synchronous driver contract. Keep the
+/// established migration history, checksum and runner logic unchanged while
+/// allowing the patched bundled SQLite version. Like refinery's original
+/// SQLite driver, each execute/query batch is transactional.
+struct SqliteMigrationConnection<'a>(&'a mut Connection);
+
+impl Transaction for SqliteMigrationConnection<'_> {
+    type Error = Error;
+
+    fn execute(&mut self, queries: &[&str]) -> Result<usize, Self::Error> {
+        let tx = self.0.transaction()?;
+        for query in queries {
+            tx.execute_batch(query)?;
+        }
+        tx.commit()?;
+        Ok(queries.len())
+    }
+}
+
+impl Query<Vec<refinery::Migration>> for SqliteMigrationConnection<'_> {
+    fn query(&mut self, query: &str) -> Result<Vec<refinery::Migration>, Self::Error> {
+        let tx = self.0.transaction()?;
+        let applied = {
+            let mut stmt = tx.prepare(query)?;
+            let rows = stmt.query_map([], |row| {
+                let applied_on: String = row.get(2)?;
+                let checksum: String = row.get(3)?;
+                // Treat corrupt history as a typed database failure, never a
+                // panic or a silently skipped migration.
+                let applied_on = OffsetDateTime::parse(&applied_on, &Rfc3339)
+                    .map_err(|err| Error::FromSqlConversionFailure(2, Type::Text, Box::new(err)))?;
+                let checksum = checksum
+                    .parse::<u64>()
+                    .map_err(|err| Error::FromSqlConversionFailure(3, Type::Text, Box::new(err)))?;
+                Ok(refinery::Migration::applied(
+                    row.get(0)?,
+                    row.get(1)?,
+                    applied_on,
+                    checksum,
+                ))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        tx.commit()?;
+        Ok(applied)
+    }
+}
+
+impl Migrate for SqliteMigrationConnection<'_> {}
 
 /// Run all pending migrations against an open connection.
 ///
@@ -14,7 +67,9 @@ refinery::embed_migrations!("migrations");
 /// is remapped to [`StoreError::DataSchemaAhead`], which names the offending
 /// migration and points the operator at the fix.
 pub fn run(conn: &mut rusqlite::Connection) -> StoreResult<()> {
-    migrations::runner().run(conn).map_err(classify_run_error)?;
+    migrations::runner()
+        .run(&mut SqliteMigrationConnection(conn))
+        .map_err(classify_run_error)?;
     Ok(())
 }
 
@@ -45,7 +100,7 @@ fn classify_run_error(err: refinery::Error) -> StoreError {
 pub(crate) fn run_to(conn: &mut rusqlite::Connection, target: u32) -> Result<(), refinery::Error> {
     migrations::runner()
         .set_target(refinery::Target::Version(target))
-        .run(conn)?;
+        .run(&mut SqliteMigrationConnection(conn))?;
     Ok(())
 }
 
@@ -188,6 +243,23 @@ mod tests {
             schema_object_count(&conn, "trigger", "workstreams_ws_proj_pairing_ai"),
             1
         );
+    }
+
+    #[test]
+    fn corrupt_migration_history_fails_without_panicking_or_advancing() {
+        for column in ["checksum", "applied_on"] {
+            let mut conn = Connection::open_in_memory().unwrap();
+            run_to(&mut conn, 30).unwrap();
+            conn.execute(
+                &format!(
+                    "UPDATE refinery_schema_history SET {column} = 'corrupt' WHERE version = 30"
+                ),
+                [],
+            )
+            .unwrap();
+            assert!(matches!(run(&mut conn), Err(StoreError::Migration(_))));
+            assert_eq!(applied_versions(&conn).last(), Some(&30));
+        }
     }
 
     fn applied_versions(conn: &Connection) -> Vec<i64> {
