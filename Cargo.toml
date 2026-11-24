@@ -167,10 +167,10 @@ git2 = { version = "0.21", default-features = false, features = ["vendored-libgi
 # path keeps a populated store.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots", "stream"] }
 # Local (in-process, pure-Rust) embeddings — 2.0 item 5.
-candle-core = "0.11"
-candle-nn = "0.11"
-candle-transformers = "0.11"
-tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
+candle-core = "0.11.1"
+candle-nn = "0.11.1"
+candle-transformers = "0.11.1"
+tokenizers = { version = "0.23.2", default-features = false, features = ["fancy-regex"] }
 futures-util = "0.3"
 async-trait = "0.1"
 
