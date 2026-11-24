@@ -2112,6 +2112,24 @@ pub struct StoredEmbedding {
 fn dense_total_cmp(a_score: f32, a_id: &[u8], b_score: f32, b_id: &[u8]) -> Ordering {
     b_score.total_cmp(&a_score).then_with(|| a_id.cmp(b_id))
 }
+// Select only the needed head before sorting. The same total order is used
+// for partitioning and sorting, including stable UUID tie-breaks.
+fn dense_passage_top_k(scored: &mut Vec<(PassageHit, f32)>, limit: usize) {
+    let cmp = |a: &(PassageHit, f32), b: &(PassageHit, f32)| {
+        dense_total_cmp(
+            a.1,
+            a.0.passage_id.as_bytes(),
+            b.1,
+            b.0.passage_id.as_bytes(),
+        )
+    };
+    if scored.len() > limit {
+        scored.select_nth_unstable_by(limit, cmp);
+        scored.truncate(limit);
+    }
+    scored.sort_by(cmp);
+}
+
 fn score_desc(a: &(PageId, PagePath, f32), b: &(PageId, PagePath, f32)) -> Ordering {
     dense_total_cmp(a.2, a.0.as_bytes(), b.2, b.0.as_bytes())
 }

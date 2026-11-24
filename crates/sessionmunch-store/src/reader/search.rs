@@ -439,11 +439,13 @@ impl ReaderPool {
                     ))
                 },
             )?;
+            // Normalize once per query, not once per candidate. Retain the
+            // checked f64 normalization and deterministic total-order ranking.
+            let query_norm = l2_normalize(&query_vector)?;
             let mut scored = Vec::new();
             for row in rows {
                 let (pid, sid, page_id, ws, proj, path, title, heading_path, text, s, e, emb) =
                     row?;
-                let query_norm = l2_normalize(&query_vector)?;
                 let emb_norm = l2_normalize(&bytes_to_f32_vec(&emb, dim)?)?;
                 let cosine = dot_f32(&query_norm, &emb_norm)?;
                 scored.push((
@@ -467,15 +469,7 @@ impl ReaderPool {
                     cosine,
                 ));
             }
-            scored.sort_by(|a, b| {
-                dense_total_cmp(
-                    a.1,
-                    a.0.passage_id.as_bytes(),
-                    b.1,
-                    b.0.passage_id.as_bytes(),
-                )
-            });
-            scored.truncate(limit);
+            dense_passage_top_k(&mut scored, limit);
             Ok(scored)
         })
         .await
@@ -660,11 +654,13 @@ impl ReaderPool {
                     embedding_bytes,
                 ))
             })?;
+            // Normalize once per query, not once per candidate. Retain the
+            // checked f64 normalization and deterministic total-order ranking.
+            let query_norm = l2_normalize(&query_vector)?;
             let mut scored = Vec::new();
             for row in rows {
                 let (pid, sid, page_id, ws, proj, path, title, heading_path, text, s, e, emb) =
                     row?;
-                let query_norm = l2_normalize(&query_vector)?;
                 let emb_norm = l2_normalize(&bytes_to_f32_vec(&emb, dim)?)?;
                 let cosine = dot_f32(&query_norm, &emb_norm)?;
                 scored.push((
@@ -688,15 +684,7 @@ impl ReaderPool {
                     cosine,
                 ));
             }
-            scored.sort_by(|a, b| {
-                dense_total_cmp(
-                    a.1,
-                    a.0.passage_id.as_bytes(),
-                    b.1,
-                    b.0.passage_id.as_bytes(),
-                )
-            });
-            scored.truncate(limit);
+            dense_passage_top_k(&mut scored, limit);
             Ok(scored)
         })
         .await
