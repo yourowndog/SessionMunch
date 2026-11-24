@@ -19,8 +19,8 @@ use sha2::{Digest as _, Sha256};
 
 use crate::harness::ManagedHarness;
 use crate::transcript::{
-    ExportedTranscript, collect_session_files, export_jsonl, export_opencode, export_opencode2,
-    opencode_db, session_header, valid_native_session_id,
+    ExportedTranscript, collect_history_session_files, export_jsonl, export_opencode,
+    export_opencode2, opencode_db, session_header, valid_native_session_id,
 };
 
 /// Every harness with a native transcript adapter, in report order.
@@ -158,7 +158,7 @@ pub fn discover_harness_history(
             }
         }
         _ => {
-            let files = match collect_session_files(harness, home, None) {
+            let files = match collect_history_session_files(harness, home, None) {
                 Ok(files) => files,
                 Err(error) => {
                     discovery.status = StoreStatus::Unreadable(format!("{error:#}"));
@@ -190,6 +190,9 @@ pub fn discover_harness_history(
                     }
                     // A file with no session header is a sidecar or an
                     // in-progress journal, not a lost session.
+                    Ok(_) if crate::transcript::is_compressed_codex(harness, &path) => {
+                        discovery.unreadable.push(path.display().to_string());
+                    }
                     Ok(_) => {}
                     Err(_) => discovery.unreadable.push(path.display().to_string()),
                 }
@@ -404,6 +407,79 @@ mod tests {
         let text = "é".repeat(10_000);
         let excerpt = head_tail_excerpt(&text, 101, 101);
         assert!(excerpt.contains("bytes omitted"));
+    }
+
+    #[test]
+    fn compressed_codex_and_archived_journals_keep_native_event_identity() {
+        let home = tempfile::tempdir().unwrap();
+        let active = home.path().join(".codex/sessions");
+        let archive = home.path().join(".codex/archived_sessions");
+        std::fs::create_dir_all(&active).unwrap();
+        std::fs::create_dir_all(&archive).unwrap();
+        let id = "4f6e1a52-0000-4000-8000-000000000001";
+        let raw = concat!(
+            r#"{"type":"session_meta","payload":{"id":"4f6e1a52-0000-4000-8000-000000000001","cwd":"/elsewhere/repo"}}"#,
+            "\n",
+            r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"desktop journal canary"}]}}"#,
+            "\n",
+        );
+        let plain = active.join("rollout.jsonl");
+        let packed = archive.join("rollout.jsonl.zst");
+        std::fs::write(&plain, raw).unwrap();
+        std::fs::write(
+            &packed,
+            zstd::stream::encode_all(raw.as_bytes(), 3).unwrap(),
+        )
+        .unwrap();
+        let corrupt = active.join("corrupt.jsonl.zst");
+        std::fs::write(&corrupt, b"not a zstd frame").unwrap();
+        let d = discover_harness_history(ManagedHarness::Codex, home.path(), UNIX_EPOCH);
+        assert_eq!(d.status, StoreStatus::Found);
+        assert_eq!(d.sessions.len(), 2, "{:?}", d.unreadable);
+        assert_eq!(d.unreadable, vec![corrupt.display().to_string()]);
+        let a = export_jsonl(ManagedHarness::Codex, &plain, id, None).unwrap();
+        let b = export_jsonl(ManagedHarness::Codex, &packed, id, None).unwrap();
+        assert_eq!(a.events.len(), 1);
+        assert_eq!(
+            serde_json::to_value(&a.events).unwrap(),
+            serde_json::to_value(&b.events).unwrap()
+        );
+        let cursor = b.source_cursor.as_deref();
+        assert!(
+            export_jsonl(ManagedHarness::Codex, &packed, id, cursor)
+                .unwrap()
+                .events
+                .is_empty()
+        );
+        let extra = concat!(
+            r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"new desktop response"}]}}"#,
+            "\n"
+        );
+        let extended = format!("{raw}{extra}");
+        std::fs::write(
+            &packed,
+            zstd::stream::encode_all(extended.as_bytes(), 3).unwrap(),
+        )
+        .unwrap();
+        let tail = export_jsonl(ManagedHarness::Codex, &packed, id, cursor).unwrap();
+        assert_eq!(tail.events.len(), 1);
+        assert_eq!(tail.events[0].content, "new desktop response");
+        let rewritten = extended.replace("desktop journal canary", "rewritten");
+        std::fs::write(
+            &packed,
+            zstd::stream::encode_all(rewritten.as_bytes(), 3).unwrap(),
+        )
+        .unwrap();
+        let replay = export_jsonl(
+            ManagedHarness::Codex,
+            &packed,
+            id,
+            tail.source_cursor.as_deref(),
+        )
+        .unwrap();
+        assert_eq!(replay.events.len(), 2, "changed prefix must replay");
+        assert_eq!(replay.events[0].content, "rewritten");
+        assert!(export_jsonl(ManagedHarness::Codex, &corrupt, id, None).is_err());
     }
 
     #[test]

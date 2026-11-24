@@ -325,6 +325,9 @@ pub(crate) fn export_jsonl(
     native_session_id: &str,
     source_cursor: Option<&str>,
 ) -> Result<ExportedTranscript> {
+    if is_compressed_codex(harness, path) {
+        return export_compressed_codex(path, native_session_id, source_cursor);
+    }
     let flavor = file_flavor(harness);
     let cursor = source_cursor
         .and_then(|raw| serde_json::from_str::<FileCursor>(raw).ok())
@@ -334,7 +337,7 @@ pub(crate) fn export_jsonl(
     let mut file = File::open(path)
         .with_context(|| format!("opening native transcript {}", path.display()))?;
     let len = file.metadata()?.len();
-    let (start, mut prefix_hasher) = if journal_rewrites_in_place(harness) {
+    let (start, prefix_hasher) = if journal_rewrites_in_place(harness) {
         let validated = if let Some(cursor) = cursor.as_ref().filter(|cursor| cursor.offset <= len)
             && let Some(expected) = cursor.prefix_sha256.as_deref()
             && let Some(hasher) = hash_file_prefix(&mut file, cursor.offset)?
@@ -357,7 +360,30 @@ pub(crate) fn export_jsonl(
         )
     };
     file.seek(SeekFrom::Start(start))?;
-    let mut reader = BufReader::new(file);
+    export_jsonl_records(
+        harness,
+        path,
+        native_session_id,
+        BufReader::new(file),
+        start,
+        prefix_hasher,
+        journal_rewrites_in_place(harness),
+    )
+}
+
+// The decompressed byte stream is the native journal. Use the identical
+// parser and byte offsets as an uncompressed file, so compression/repacking
+// cannot create a second copy of the transcript.
+fn export_jsonl_records(
+    harness: ManagedHarness,
+    path: &Path,
+    native_session_id: &str,
+    mut reader: impl std::io::BufRead,
+    start: u64,
+    mut prefix_hasher: Sha256,
+    hash_prefix: bool,
+) -> Result<ExportedTranscript> {
+    let flavor = file_flavor(harness);
     let mut offset = start;
     let mut committed_offset = start;
     let mut line = Vec::new();
@@ -373,7 +399,7 @@ pub(crate) fn export_jsonl(
         if !line.ends_with(b"\n") {
             break;
         }
-        if journal_rewrites_in_place(harness) {
+        if hash_prefix {
             prefix_hasher.update(&line);
         }
         committed_offset = offset;
@@ -479,12 +505,75 @@ pub(crate) fn export_jsonl(
             path: path.to_string_lossy().into_owned(),
             offset: committed_offset,
             flavor,
-            prefix_sha256: journal_rewrites_in_place(harness)
-                .then(|| format!("{:x}", prefix_hasher.finalize())),
+            prefix_sha256: hash_prefix.then(|| format!("{:x}", prefix_hasher.finalize())),
         })?),
         events,
         losses: deduplicate_losses(losses),
     })
+}
+
+const MAX_CODEX_DECOMPRESSED_BYTES: u64 = 512 * 1024 * 1024;
+
+pub(crate) fn is_compressed_codex(harness: ManagedHarness, path: &Path) -> bool {
+    harness == ManagedHarness::Codex
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with(".jsonl.zst"))
+}
+
+fn codex_decoder(path: &Path) -> Result<zstd::stream::read::Decoder<'static, BufReader<File>>> {
+    let file = File::open(path)
+        .with_context(|| format!("opening compressed Codex journal {}", path.display()))?;
+    let mut decoder = zstd::stream::read::Decoder::new(file)?;
+    // Bound decoder window allocation even for a hostile/corrupt archive.
+    decoder.window_log_max(27)?;
+    Ok(decoder)
+}
+
+pub(crate) fn read_compressed_codex(path: &Path) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    codex_decoder(path)?
+        .take(MAX_CODEX_DECOMPRESSED_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_CODEX_DECOMPRESSED_BYTES {
+        anyhow::bail!("compressed Codex journal exceeds 512 MiB decoded limit");
+    }
+    Ok(bytes)
+}
+
+fn export_compressed_codex(
+    path: &Path,
+    native_session_id: &str,
+    source_cursor: Option<&str>,
+) -> Result<ExportedTranscript> {
+    let bytes = read_compressed_codex(path)?;
+    let cursor = source_cursor
+        .and_then(|raw| serde_json::from_str::<FileCursor>(raw).ok())
+        .filter(|cursor| Path::new(&cursor.path) == path && cursor.flavor.is_none());
+    // Compressed files are frequently rewritten. Validate the decompressed
+    // prefix before trusting a saved offset; replays keep the same event IDs.
+    let (start, hasher) = cursor
+        .and_then(|cursor| {
+            let offset = usize::try_from(cursor.offset).ok()?;
+            let prefix = bytes.get(..offset)?;
+            let mut hasher = Sha256::new();
+            hasher.update(prefix);
+            (cursor.prefix_sha256.as_deref() == Some(&format!("{:x}", hasher.clone().finalize())))
+                .then_some((cursor.offset, hasher))
+        })
+        .unwrap_or_else(|| (0, Sha256::new()));
+    let mut reader = std::io::Cursor::new(bytes);
+    reader.set_position(start);
+    export_jsonl_records(
+        ManagedHarness::Codex,
+        path,
+        native_session_id,
+        reader,
+        start,
+        hasher,
+        true,
+    )
 }
 
 fn hash_file_prefix(file: &mut File, len: u64) -> Result<Option<Sha256>> {
@@ -2396,6 +2485,7 @@ fn transcript_file(harness: ManagedHarness, path: &Path) -> bool {
         return path.extension().is_some_and(|ext| ext == "db");
     }
     path.extension().is_some_and(|ext| ext == "jsonl")
+        || is_compressed_codex(harness, path)
         || matches!(harness, ManagedHarness::Pi | ManagedHarness::Omp) && temporary_transcript(path)
 }
 
@@ -2426,7 +2516,12 @@ pub(crate) fn session_header(
     if harness == ManagedHarness::Antigravity {
         return antigravity_session_header(path);
     }
-    let mut reader = BufReader::new(File::open(path)?);
+    // Discovery needs only a bounded header, not a whole decompression.
+    let mut reader: Box<dyn std::io::BufRead> = if is_compressed_codex(harness, path) {
+        Box::new(BufReader::new(codex_decoder(path)?.take(4 * 1024 * 1024)))
+    } else {
+        Box::new(BufReader::new(File::open(path)?))
+    };
     let mut line = String::new();
     for _ in 0..64 {
         line.clear();
@@ -3300,6 +3395,21 @@ pub(crate) fn collect_session_files(
                 files.push(path);
             }
         }
+    }
+    Ok(files)
+}
+
+pub(crate) fn collect_history_session_files(
+    harness: ManagedHarness,
+    home: &Path,
+    override_dir: Option<&Path>,
+) -> Result<Vec<PathBuf>> {
+    let mut files = collect_session_files(harness, home, override_dir)?;
+    if harness == ManagedHarness::Codex && override_dir.is_none() {
+        files.extend(collect_files(
+            &home.join(".codex/archived_sessions"),
+            |path| transcript_file(harness, path),
+        )?);
     }
     Ok(files)
 }

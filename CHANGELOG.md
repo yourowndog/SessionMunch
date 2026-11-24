@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   API-key prefixes are unchanged (credential contract, not branding).
 
 ### Added
+- Discover active and archived Codex desktop Zstandard-compressed JSONL journals, reuse the existing native event identities, and preserve sanitized compressed snapshots for later recovery.
 - Import explicitly selected ChatGPT and Claude account conversation JSON exports with stable account-scoped session identity, visible-message filtering, dry-run reports, artifact delivery and idempotent ledger ingestion. Hosted chats are distinct from desktop-local coding sessions.
 - `[[session_cards.summary_endpoints]]` spreads AI summaries across more providers, each with its own `lanes`, next to the main provider's `summary_lanes`. All lanes pull from one queue, and a lane that answers 429 hands its session to another lane and rests until the next tick. Endpoints are validated at startup like `[[llm_fallbacks]]`. (#29)
 - Card and AI summary backfills drain fast. While a backlog remains, the maintenance ticks run again after one second instead of a minute. `[session_cards] card_lanes` (default 4) builds that many cards at once, and `summary_lanes` (default 1) sends that many sessions to the provider at once. AI summaries now wait until the card backlog is drained. (#27)

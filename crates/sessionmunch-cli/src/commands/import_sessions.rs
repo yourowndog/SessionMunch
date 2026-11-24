@@ -137,7 +137,11 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
     };
     let machine = machine_identity();
     let sanitizer = Sanitizer::new(&config.sanitize).context("building canonical sanitizer")?;
-    let (hub_url, token) = hub_target(config).await;
+    let (hub_url, token) = if args.dry_run {
+        ("http://127.0.0.1:1".into(), None)
+    } else {
+        hub_target(config).await
+    };
     let hermes_home = args
         .hermes_home
         .clone()
