@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolResult, Content, Implementation, ListToolsResult, PaginatedRequestParams,
-    ProtocolVersion, ServerCapabilities, ServerInfo, Tool,
+    CallToolResult, ContentBlock, Implementation, ListToolsResult, PaginatedRequestParams,
+    ProtocolVersion, ServerCapabilities, ServerConfig, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{
@@ -3724,14 +3724,14 @@ fn hex_to_sha256(hex: &str) -> Result<[u8; 32], String> {
 
 #[tool_handler]
 impl ServerHandler for SessionMunchServer {
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         // `Implementation::from_build_env()` reads CARGO_PKG_NAME/VERSION
         // from *rmcp's* compilation unit, not ours. Patch the fields
         // post-construction so the wire protocol surfaces "sessionmunch".
         let mut implementation = Implementation::from_build_env();
         implementation.name = "sessionmunch".into();
         implementation.version = env!("CARGO_PKG_VERSION").into();
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(implementation)
             .with_protocol_version(ProtocolVersion::V_2024_11_05)
             .with_instructions(MEMORY_INSTRUCTIONS.to_string())
@@ -3745,7 +3745,7 @@ impl ServerHandler for SessionMunchServer {
         &self,
         request: rmcp::model::CallToolRequestParams,
         context: rmcp::service::RequestContext<RoleServer>,
-    ) -> Result<rmcp::model::CallToolResult, McpError> {
+    ) -> Result<rmcp::model::CallToolResponse, McpError> {
         self.record_client_activity(&request.name, &context);
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         self.tool_router.call(tcc).await
@@ -3945,7 +3945,7 @@ fn passage_filter_args_present(args: &QueryArgs) -> bool {
 fn ok_json<T: Serialize>(value: &T) -> Result<CallToolResult, McpError> {
     let s = serde_json::to_string_pretty(value)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-    Ok(CallToolResult::success(vec![Content::text(s)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(s)]))
 }
 
 fn checkpoint_or_mcp(wiki: &Wiki, message: impl AsRef<str>) -> Result<Option<String>, McpError> {

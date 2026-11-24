@@ -74,7 +74,7 @@ async fn make_router_with_dialect(
         move || Ok(server.clone()),
         LocalSessionManager::default().into(),
         StreamableHttpServerConfig::default()
-            .with_stateful_mode(stateful)
+            .with_legacy_session_mode(stateful)
             .with_json_response(!stateful),
     );
     let router = Router::new().nest_service("/mcp", svc);

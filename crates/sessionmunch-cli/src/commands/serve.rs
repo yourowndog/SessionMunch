@@ -1132,7 +1132,7 @@ pub async fn run(config: &Config, host: &HostEnv, args: ServeArgs) -> Result<()>
                 StreamableHttpServerConfig::default()
                     .with_cancellation_token(cancel.child_token())
                     .with_allowed_hosts(config.allowed_hosts.clone())
-                    .with_stateful_mode(args.http_stateful)
+                    .with_legacy_session_mode(args.http_stateful)
                     .with_json_response(!args.http_stateful),
             );
             // Shared per-cwd project cache: the hook router owns it; the admin
