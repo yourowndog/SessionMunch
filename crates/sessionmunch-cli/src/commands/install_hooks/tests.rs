@@ -2676,6 +2676,7 @@ fn opencode2_plugin_binds_the_v2_api() {
     assert!(plugin.contains("ctx.event.subscribe"));
     assert!(plugin.contains("ctx.session.hook(\"prompt\""));
     assert!(plugin.contains("ctx.session.hook(\"context\""));
+    assert!(plugin.contains("ctx.session.hook(\"compaction\""));
     assert!(plugin.contains("ctx.tool.hook(\"execute.before\""));
     assert!(plugin.contains("ctx.tool.hook(\"execute.after\""));
     // V2 lifecycle envelopes carry `{ type, data, location }`.
@@ -2696,10 +2697,12 @@ fn opencode2_plugin_binds_the_v2_api() {
     assert!(!plugin.contains("experimental."));
     // Hook registrations are disposed on unload so a reload cannot
     // leave stale callbacks capturing twice.
-    assert!(plugin.contains("registration.dispose()"));
-    // Pre-compaction arrives on its own start event; the completion
-    // event stays as the consolidation trigger, like v1.
+    assert!(plugin.contains("registration?.dispose()"));
+    // Native pre-compaction is awaited; lifecycle events are fallback only.
+    assert!(plugin.contains("if (!compactionRegistration &&"));
     assert!(plugin.contains("session.compaction.started"));
+    assert!(plugin.contains("session.compaction.ended"));
+    assert!(plugin.contains("await drainHookQueueForDispose();"));
     // Tool failures share the channel with the reason preserved.
     assert!(plugin.contains("status === \"error\""));
     // No v1 remnants.

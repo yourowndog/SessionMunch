@@ -9,6 +9,22 @@ const SessionMunchOpencode2: Plugin = {
     const ctxAny = ctx as any;
     const directory = ctxAny?.location?.directory;
     const controller = new AbortController();
+    // V2's native hook runs before the compaction model request. Older
+    // beta hosts may reject its registration; retain their event fallback.
+    // Choose one path at setup, not both, to avoid duplicate checkpoints.
+    const compactionRegistration = await (async () => {
+      try {
+        return await ctx.session.hook("compaction", async (event) => {
+          const id = (event as any)?.sessionID;
+          if (!id) return;
+          postPreCompact(id, cwdFor(id, directory));
+          await drainHookQueueForDispose();
+        });
+      } catch (_e) {
+        console.warn("SessionMunch: native OpenCode 2 compaction hook unavailable; using lifecycle events");
+        return undefined;
+      }
+    })();
     void (async () => {
       try {
         for await (const evt of ctx.event.subscribe({ signal: controller.signal })) {
@@ -34,13 +50,11 @@ const SessionMunchOpencode2: Plugin = {
             const id = data?.sessionID ?? data?.id ?? info?.id;
             endSession(id, loc, data?.directory ?? info?.directory);
           }
-          if (type === "session.compaction.started") {
+          if (!compactionRegistration &&
+              (type === "session.compaction.started" || type === "session.compacted" ||
+               type === "session.compaction.ended")) {
             const id = data?.sessionID ?? data?.id;
-            postPreCompact(id, loc);
-          }
-          if (type === "session.compacted") {
-            const id = data?.sessionID ?? data?.id;
-            postPreCompact(id, loc);
+            if (id) postPreCompact(id, loc);
           }
         }
       } catch (_e) {
@@ -120,11 +134,12 @@ const SessionMunchOpencode2: Plugin = {
       for (const registration of [
         promptRegistration,
         contextRegistration,
+        compactionRegistration,
         beforeRegistration,
         afterRegistration,
       ]) {
         try {
-          await registration.dispose();
+          await registration?.dispose();
         } catch (_e) {
           // Unload is best-effort; a dead host has nothing to unregister.
         }

@@ -1181,6 +1181,11 @@ loaded at startup.
 
 The V2 adapter fetches the handoff once per session and reinserts the cached text
 into each outgoing model context without duplicating an existing system entry.
+On V2 hosts supporting the native compaction hook, it also requests a
+pre-compaction checkpoint and waits for the existing bounded capture drain
+before returning. Older beta hosts that reject the registration use lifecycle
+events instead. Capture remains best-effort; the bounded wait is not a
+durable server acknowledgement.
 
 The 2.0 beta installs side by side as `opencode2` and shares v1's config
 dir and session store, but its MCP schema and plugin API changed. Wire it
