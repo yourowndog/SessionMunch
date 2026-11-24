@@ -43,7 +43,7 @@ use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, anyhow};
-use rusqlite::{Connection, DatabaseName, OpenFlags, params};
+use rusqlite::{Connection, MAIN_DB, OpenFlags, params};
 use serde::{Deserialize, Serialize};
 use sessionmunch_core::Sanitizer;
 use sha2::{Digest as _, Sha256};
@@ -463,7 +463,7 @@ fn snapshot_sqlite_store(
         )
         .with_context(|| format!("opening SQLite store {} read-only", source.display()))?;
         connection
-            .backup(DatabaseName::Main, &consistent, None)
+            .backup(MAIN_DB, &consistent, rusqlite::backup::NO_PROGRESS)
             .with_context(|| format!("online-backup of {}", source.display()))?;
 
         // Scrub every text cell in the consistent copy, then hash, dedupe and

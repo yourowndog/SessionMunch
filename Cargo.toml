@@ -113,7 +113,7 @@ getrandom = "0.3"
 base64 = "0.22"
 
 # Storage.
-rusqlite = { version = "0.41", features = ["bundled", "backup"] }
+rusqlite = { version = "0.41", features = ["bundled", "backup", "fallible_uint"] }
 # Keep the existing refinery runner/checksum algorithm; the published
 # rusqlite driver is capped below the patched SQLite bindings.
 refinery = "=0.8.16"
