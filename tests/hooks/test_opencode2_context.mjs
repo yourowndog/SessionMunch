@@ -24,12 +24,16 @@ try {
   const callbacks={};let disposed=0;
   const hook=async(name,fn)=>{callbacks[name]=fn;return {dispose:async()=>{disposed++}}};
   const cleanup=await plugin.setup({location:{directory},event:{subscribe:()=>({async *[Symbol.asyncIterator](){}})},session:{hook},tool:{hook}});
-  const first={sessionID:'fixture',system:[]};await callbacks.context(first);
+  const first={sessionID:'fixture',system:[]};await Promise.all([callbacks.context(first),callbacks.context(first)]);
   const second={sessionID:'fixture',system:[]};await callbacks.context(second);
   await callbacks.context(second);
   assert.deepEqual(first.system,[{type:'text',text:'stable handoff'}]);
   assert.deepEqual(second.system,first.system);
   assert.equal(state().fetched,1,'fetch/claim once per session');
+  const other={sessionID:'other',system:[]};await callbacks.context(other);
+  assert.equal(state().fetched,2,'separate sessions do not share a fetch');
+  await callbacks.context({sessionID:'fixture'});
+  assert.equal(state().fetched,2,'invalid context is ignored');
   await cleanup();assert.equal(disposed,4);
   console.log('OpenCode2 stable recall, per-context dedup and cleanup PASS');
 } finally {await rm(directory,{recursive:true,force:true})}

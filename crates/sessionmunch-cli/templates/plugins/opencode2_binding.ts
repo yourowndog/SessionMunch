@@ -74,7 +74,7 @@ const SessionMunchOpencode2: Plugin = {
         handoffFetches.set(id, pending);
       }
       const handoff = await pending;
-      if (handoff && startedSessions.has(id) && !e.system.some((part: any) => part?.type === "text" && part.text === handoff)) {
+      if (handoff && handoffFetches.get(id) === pending && startedSessions.has(id) && !e.system.some((part: any) => part?.type === "text" && part.text === handoff)) {
         // SystemPart is `{ type: "text", text }` — the `type` discriminator
         // is required: without it the host fails the model call with a
         // schema validation error (observed live on beta-18999).

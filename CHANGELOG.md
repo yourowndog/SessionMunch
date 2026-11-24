@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- OpenCode 2 reuses a session’s cached handoff in each ephemeral model context without duplicate system entries.
-
 ### Changed
 - The README, install guide, Hermes guide and MCP reference now match the shipped code. The harness table lists the four first-class integrations plus any MCP client, and it no longer claims Aider or Windsurf. The MCP reference documents all 20 tools. The install guide explains how to build the Docker image and binary locally until the first tagged release publishes them. (#11)
 - Finished the SessionMunch rename in companions and installer output. The
@@ -148,6 +146,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#t_c51f1a51).
 
 ### Fixed
+- OpenCode 2 reuses a session’s cached handoff in each ephemeral model context without duplicate system entries.
 - History import no longer stops reading a Claude Code, Codex or other append-only transcript after the file is rewritten shorter. The stored byte cursor then pointed past the end, so the importer read nothing from that file until it grew back past the old size, reporting "0 with new events" for those sessions. A cursor past the end now re-reads the file from the start; records already imported are deduplicated by their stable event ids. (#34)
 - Claude Code runs that are a single model call, not a session (`claude -p --no-session-persistence`, as started by Hermes' Claude subscription plugin and other Agent SDK callers), are no longer recorded and get no handoff injected. Before, each call registered a fake one-message session, and the changing handoff text broke the caller's prompt cache. Detection uses the Claude process's command line, or a transcript that was never written at Stop/SessionEnd.
 - Hook events in the session-event ledger are now dated by when the client captured them, not when their spooled batch reached the server. Previously every event in a drained batch shared one arrival timestamp, so a session's timeline collapsed. The drain sends each entry's enqueue time as a `captured_ms` query param; the server accepts it within the spool's 7-day window and up to 5 minutes ahead of its own clock, otherwise it keeps arrival time. Older clients are unaffected.
