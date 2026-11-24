@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Retain former project names as workspace-scoped aliases across renames, preserving history, old client lookups and links. Require canonical names for identity-changing admin requests.
 - The README, install guide, Hermes guide and MCP reference now match the shipped code. The harness table lists the four first-class integrations plus any MCP client, and it no longer claims Aider or Windsurf. The MCP reference documents all 20 tools. The install guide explains how to build the Docker image and binary locally until the first tagged release publishes them. (#11)
 - Finished the SessionMunch rename in companions and installer output. The
   importer companion is now `companions/sessionmunch-importer` and reads

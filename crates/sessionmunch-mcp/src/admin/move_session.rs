@@ -269,12 +269,15 @@ pub(super) async fn resolve_move_session_target(
     confirm: bool,
 ) -> Result<MoveTarget, MoveErr> {
     if create && confirm {
-        return create_ws_proj(state, workspace, project)
+        let ids = create_ws_proj(state, workspace, project).await?;
+        return require_canonical_project(state, ids, project)
             .await
             .map(MoveTarget::Existing);
     }
     match lookup_existing_scope(&state.reader, workspace, project).await {
-        Ok(scope) => Ok(MoveTarget::Existing(scope.as_tuple())),
+        Ok(scope) => require_canonical_project(state, scope.as_tuple(), project)
+            .await
+            .map(MoveTarget::Existing),
         Err(e) if create && e.is_not_found() => Ok(MoveTarget::WouldCreate),
         Err(e) => Err(scope_err(e)),
     }
@@ -680,7 +683,7 @@ pub(super) async fn move_session_batch(
         .from_workspace
         .clone()
         .unwrap_or_else(|| DEFAULT_WORKSPACE_NAME.to_string());
-    let from = match lookup_ws_proj_no_create(state, &from_workspace, from_project).await {
+    let from = match lookup_ws_proj_canonical(state, &from_workspace, from_project).await {
         Ok(ids) => ids,
         Err(e) => return e.into_response(),
     };

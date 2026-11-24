@@ -11,7 +11,7 @@ on a homelab box where mistakes are harder to undo.
 | `purge-project --confirm` | ✅ yes | the one project's data | no | Deletes the UUID-namespaced wiki root and raw workstream segments; sibling projects remain untouched. Refuses with `409` while a managed workstream under the project holds a live run lease — `--force` overrides. Logical delete by default; `--compact` additionally rebuilds the FTS indexes and `VACUUM`s (see below). |
 | `purge-session --session-id --confirm` | ✅ yes | the one session's data | no | Deletes one session by UUID: its row, its observations, the handoffs it **authored**, its `sessions/<id>.md` page and every superseded version, their embeddings, and its auto-improve runs. Strictly scoped — a session that does not belong to the named workspace/project is a `404` and nothing is deleted. Handoffs the session only *accepted* are kept: that text belongs to the session that wrote it. Logical delete by default; `--compact` additionally rebuilds the FTS indexes and `VACUUM`s (see below). |
 | `handoffs --expire-all --confirm` | ✅ yes | no (state change only) | no (but nothing is destroyed) | Marks every **open** handoff in the scope `expired` so it stops being offered to an agent. Rows, summaries and provenance are kept and stay visible in the audit log. Unlike the automatic sweep it does **not** spare manual handoffs or ones from another directory — those exemptions are exactly what a leftover backlog is made of, so honouring them would clear nothing. `--older-than-days N` keeps recent batons. Owner-scoped: never touches another user's baton. |
-| `rename-project --from --to` | ✅ yes | no | yes (rename back) | Column-only update on `projects.name`. The on-disk dir is keyed by `project_id` (UUID), so the rename never moves a file. |
+| `rename-project --from --to` | ✅ yes | no | yes (rename back) | Updated `projects.name` and retained the former name as an alias in the same transaction. The on-disk dir is keyed by `project_id` (UUID), so the rename never moves a file. |
 | `/admin/rename-workspace` | ✅ yes | no | yes (rename back) | Column-only update on `workspaces.name`; refreshes `_meta.md` scope manifests and checkpoints the wiki tree. |
 | `/admin/delete-workspace` | ✅ yes | the workspace and every child project | no | Runs `purge_workspace` admission first, deletes SQLite rows in one cascade, removes the UUID-keyed workspace directory and managed-workstream raw segments, reports filesystem partial failures, and dispatches mirror notification after durable work. Logical delete by default; `"compact": true` additionally rebuilds the FTS indexes and `VACUUM`s (see below). |
 | `move-project --confirm` | ✅ yes | source only in the merge case (a `Reject`-policy `purge_project` webhook can still abort the source teardown leaving everything intact) | no | Fresh destination → lossless **true move** (re-stamp `workspace_id`, keep `project_id`, rename the dir): sessions/observations/handoffs + history all survive. Destination with a same-named project → **copy+purge merge**: only latest pages migrate. |
@@ -239,8 +239,15 @@ What happens:
    miss.
 2. Validate the new name: non-empty, no `/`, no leading/trailing
    whitespace. 422 on bad input.
-3. `UPDATE projects SET name = ? WHERE id = ?`. UNIQUE-violation on
-   the `(workspace_id, name)` index → 422 with "name taken".
+3. Update the canonical name and retain the former name as a workspace-scoped
+   alias in the same writer transaction and audit entry. Both names resolve
+   the same stable project UUID, including reads, writes, links and old web URLs.
+   A name or alias owned by another project → 422 with "name taken".
+   Renaming back consumes the destination alias and retains the displaced name.
+   Aliases follow a true project move; a destination collision aborts the move.
+   Purge, move, and rename-source requests require the canonical name, not an alias.
+   A destination alias must never select the destructive copy-purge merge path.
+   Purging a project removes its aliases with the project.
 4. Return `{workspace, from, to, pages}`.
 
 Zero files move on disk because the disk path is keyed by
@@ -257,7 +264,7 @@ its link.
 
 Failure modes:
 
-- **`to` name already exists in this workspace** → 422.
+- **`to` name or alias already belongs to another project in this workspace** → 422.
 - **`to` invalid (empty, slash, whitespace)** → 422.
 - **Source `from` not found** → 404.
 
@@ -778,6 +785,8 @@ What is not rebuilt:
 
 - Sessions, observations, handoffs, users/tokens, audit rows, access counters,
   and embeddings. Those are DB-only state; keep a backup if you need them.
+- Retained project-name aliases. Use full backup/restore to preserve legacy
+  clients; wiki-only reindex is not a supported identity-migration rollback.
 
 Every scope directory carries the `_meta.md` manifest `reindex` reads its
 workspace/project name from. The manifest is written with the scope's first
@@ -894,5 +903,5 @@ the underlying class of bug are gone. Lifecycle ops are now safe
 by construction.
 
 This is also why `rename-project` is free: the disk path is keyed
-by surrogate `project_id`, not the mutable name. Rename touches one
-column; nothing moves.
+by surrogate `project_id`, not the mutable name. Rename updates the
+canonical label and retains its alias in one transaction; nothing moves.

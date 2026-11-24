@@ -284,7 +284,7 @@ impl ReaderPool {
                 clauses.push("w.name = ?");
             }
             if project.is_some() {
-                clauses.push("p.name = ?");
+                clauses.push("p.id IN (SELECT project_id FROM project_names WHERE workspace_id = p.workspace_id AND name = ?)");
             }
             if op.is_some() {
                 clauses.push("a.op = ?");

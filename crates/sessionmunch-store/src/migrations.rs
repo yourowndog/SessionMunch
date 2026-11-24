@@ -435,7 +435,8 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         let workspace_id = crate::ops::get_or_create_workspace(&mut conn, "default").unwrap();
         let project_id =
-            crate::ops::get_or_create_project(&mut conn, &workspace_id, "project", None).unwrap();
+            crate::ops::tests::seed_legacy_project(&mut conn, &workspace_id, "project", None)
+                .unwrap();
         let session_id = SessionId::new();
         conn.execute(
             "INSERT INTO sessions (id, workspace_id, project_id, agent_kind, cwd, started_at) \
@@ -542,7 +543,8 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         let workspace_id = crate::ops::get_or_create_workspace(&mut conn, "default").unwrap();
         let project_id =
-            crate::ops::get_or_create_project(&mut conn, &workspace_id, "project", None).unwrap();
+            crate::ops::tests::seed_legacy_project(&mut conn, &workspace_id, "project", None)
+                .unwrap();
         let session_id = SessionId::new();
         // Era-appropriate raw insert. This fixture deliberately stops at V33
         // and then migrates forward, so it must not go through `begin_session`:
@@ -622,7 +624,8 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         let workspace_id = crate::ops::get_or_create_workspace(&mut conn, "default").unwrap();
         let project_id =
-            crate::ops::get_or_create_project(&mut conn, &workspace_id, "project", None).unwrap();
+            crate::ops::tests::seed_legacy_project(&mut conn, &workspace_id, "project", None)
+                .unwrap();
         let session_id = SessionId::new();
         let handoff_id = HandoffId::new();
         conn.execute(
@@ -691,7 +694,8 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         let workspace_id = crate::ops::get_or_create_workspace(&mut conn, "default").unwrap();
         let project_id =
-            crate::ops::get_or_create_project(&mut conn, &workspace_id, "project", None).unwrap();
+            crate::ops::tests::seed_legacy_project(&mut conn, &workspace_id, "project", None)
+                .unwrap();
         let existing = SessionId::new();
         conn.execute(
             "INSERT INTO sessions \
@@ -775,7 +779,8 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         let workspace_id = crate::ops::get_or_create_workspace(&mut conn, "default").unwrap();
         let project_id =
-            crate::ops::get_or_create_project(&mut conn, &workspace_id, "project", None).unwrap();
+            crate::ops::tests::seed_legacy_project(&mut conn, &workspace_id, "project", None)
+                .unwrap();
         let existing = SessionId::new();
         conn.execute(
             "INSERT INTO sessions \
@@ -847,7 +852,8 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         let workspace_id = crate::ops::get_or_create_workspace(&mut conn, "default").unwrap();
         let project_id =
-            crate::ops::get_or_create_project(&mut conn, &workspace_id, "project", None).unwrap();
+            crate::ops::tests::seed_legacy_project(&mut conn, &workspace_id, "project", None)
+                .unwrap();
         let existing = SessionId::new();
         conn.execute(
             "INSERT INTO sessions \
@@ -919,7 +925,8 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         let workspace_id = crate::ops::get_or_create_workspace(&mut conn, "default").unwrap();
         let project_id =
-            crate::ops::get_or_create_project(&mut conn, &workspace_id, "project", None).unwrap();
+            crate::ops::tests::seed_legacy_project(&mut conn, &workspace_id, "project", None)
+                .unwrap();
         let existing = SessionId::new();
         conn.execute(
             "INSERT INTO sessions \
@@ -991,7 +998,8 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         let workspace_id = crate::ops::get_or_create_workspace(&mut conn, "default").unwrap();
         let project_id =
-            crate::ops::get_or_create_project(&mut conn, &workspace_id, "project", None).unwrap();
+            crate::ops::tests::seed_legacy_project(&mut conn, &workspace_id, "project", None)
+                .unwrap();
         let existing = SessionId::new();
         conn.execute(
             "INSERT INTO sessions \
@@ -1239,7 +1247,8 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         let workspace_id = crate::ops::get_or_create_workspace(&mut conn, "default").unwrap();
         let project_id =
-            crate::ops::get_or_create_project(&mut conn, &workspace_id, "project", None).unwrap();
+            crate::ops::tests::seed_legacy_project(&mut conn, &workspace_id, "project", None)
+                .unwrap();
         // Insert a legacy-era session with observations that must survive.
         let legacy_session = SessionId::new();
         conn.execute(

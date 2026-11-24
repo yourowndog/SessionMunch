@@ -136,16 +136,17 @@ async fn rename_project_happy_path() {
         .find_project(ws, "old-name".to_string())
         .await
         .unwrap();
-    assert!(
-        old_id.is_none(),
-        "old project name must no longer be findable"
-    );
+
     let new_id = store
         .reader
         .find_project(ws, "new-name".to_string())
         .await
         .unwrap();
     assert!(new_id.is_some(), "new project name must be findable");
+    assert_eq!(
+        old_id, new_id,
+        "legacy name must resolve to the same identity"
+    );
 }
 
 /// Conflict: renaming `default/keep` to `default/doomed` when `doomed`
@@ -430,5 +431,71 @@ async fn rename_project_after_purge_returns_404_not_silent_200() {
         rename_resp.status(),
         StatusCode::NOT_FOUND,
         "rename of a vanished project must NOT silently return 200"
+    );
+}
+
+#[tokio::test]
+async fn project_alias_cannot_trigger_destructive_move_or_purge() {
+    let tmp = TempDir::new().unwrap();
+    let (state, store) = make_state(&tmp).await;
+    seed_page(&store, &state.wiki, "source").await;
+    let dst = store
+        .writer
+        .get_or_create_workspace("destination")
+        .await
+        .unwrap();
+    let target = store
+        .writer
+        .get_or_create_project(dst, "source", None)
+        .await
+        .unwrap();
+    store
+        .writer
+        .rename_project(dst, target, "renamed", None)
+        .await
+        .unwrap();
+    let resp = post(
+        state,
+        "/admin/move-project",
+        json!({
+            "from_workspace":"default", "to_workspace":"destination",
+            "project":"source", "confirm":true
+        }),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    let src = store
+        .reader
+        .find_workspace("default".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        store
+            .reader
+            .find_project(src, "source".into())
+            .await
+            .unwrap()
+            .is_some()
+    );
+
+    drop(store);
+    let (state, store) = make_state(&tmp).await;
+    let resp = post(
+        state,
+        "/admin/purge-project",
+        json!({
+            "workspace":"destination", "project":"source", "confirm":true
+        }),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        store
+            .reader
+            .find_project(dst, "renamed".into())
+            .await
+            .unwrap(),
+        Some(target)
     );
 }

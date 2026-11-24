@@ -379,7 +379,7 @@ pub(super) async fn move_project_core(
 
     // Resolve the SOURCE without auto-creating — 404 on a typo.
     let (src_ws, src_proj) =
-        lookup_ws_proj_no_create(state, &req.from_workspace, &req.project).await?;
+        lookup_ws_proj_canonical(state, &req.from_workspace, &req.project).await?;
 
     // Live-session guard: refuse to move the project the hook router is
     // currently writing to. A live session's next observation/log would carry
@@ -402,10 +402,14 @@ pub(super) async fn move_project_core(
     // Detect MERGE: does the destination workspace already hold a same-named
     // project? (find_workspace may be None when the dest ws doesn't exist yet.)
     let merged_into_existing = match state.reader.find_workspace(req.to_workspace.clone()).await {
-        Ok(Some(dst_ws)) => matches!(
-            state.reader.find_project(dst_ws, req.project.clone()).await,
-            Ok(Some(_))
-        ),
+        Ok(Some(dst_ws)) => match state.reader.find_project(dst_ws, req.project.clone()).await {
+            Ok(Some(dst_proj)) => {
+                require_canonical_project(state, (dst_ws, dst_proj), &req.project).await?;
+                true
+            }
+            Ok(None) => false,
+            Err(e) => return Err(internal_err(e.to_string())),
+        },
         Ok(None) => false,
         Err(e) => return Err(internal_err(e.to_string())),
     };
@@ -433,7 +437,8 @@ pub(super) async fn move_project_core(
     // MERGE: the destination already holds a same-named project. Get-or-create
     // it (auto-creating the destination workspace) and copy the source's
     // latest pages into it, then purge the source.
-    let (dst_ws, dst_proj) = create_ws_proj(state, &req.to_workspace, &req.project).await?;
+    let ids = create_ws_proj(state, &req.to_workspace, &req.project).await?;
+    let (dst_ws, dst_proj) = require_canonical_project(state, ids, &req.project).await?;
 
     copy_purge_merge(
         state,

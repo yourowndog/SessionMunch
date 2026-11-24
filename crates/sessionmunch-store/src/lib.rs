@@ -656,7 +656,7 @@ mod tests {
         let mut conn = Connection::open(&db_path).unwrap();
         migrations::run_to(&mut conn, 23).unwrap();
         let ws = ops::get_or_create_workspace(&mut conn, "default").unwrap();
-        let proj = ops::get_or_create_project(&mut conn, &ws, "app", None).unwrap();
+        let proj = ops::tests::seed_legacy_project(&mut conn, &ws, "app", None).unwrap();
         // Era-appropriate raw insert: this fixture stops at V23 on purpose,
         // while `stage_run` writes whatever columns the CURRENT schema has, and
         // every later migration that adds one would break a test about an older
@@ -4149,8 +4149,8 @@ mod tests {
             conn.pragma_update(None, "foreign_keys", "ON").unwrap();
 
             let ws = super::ops::get_or_create_workspace(&mut conn, "default").unwrap();
-            let proj =
-                super::ops::get_or_create_project(&mut conn, &ws, "sessionmunch", None).unwrap();
+            let proj = super::ops::tests::seed_legacy_project(&mut conn, &ws, "sessionmunch", None)
+                .unwrap();
             // Raw-SQL seeding: the v19-era schema predates the V36
             // `expires_at` column that current `upsert_page` writes.
             let page_id = super::ops::tests::insert_page_pre_v36(

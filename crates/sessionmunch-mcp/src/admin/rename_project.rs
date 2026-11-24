@@ -352,7 +352,7 @@ pub(super) async fn handle_rename_project(
 ) -> impl IntoResponse {
     let author_id = author_ext.map(|axum::Extension(u)| u);
     // Look up workspace + source project; 404 if either is absent.
-    let (ws_id, proj_id) = match lookup_ws_proj_no_create(&state, &req.workspace, &req.from).await {
+    let (ws_id, proj_id) = match lookup_ws_proj_canonical(&state, &req.workspace, &req.from).await {
         Ok(ids) => ids,
         Err(e) => return e,
     };

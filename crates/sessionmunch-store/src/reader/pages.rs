@@ -161,7 +161,7 @@ impl ReaderPool {
             let mut stmt = conn.prepare(
                 "SELECT fp.path, l.to_workspace, l.to_project, l.to_path, \
                         EXISTS ( \
-                            SELECT 1 FROM projects pr \
+                            SELECT 1 FROM project_names pr \
                             JOIN workspaces ws ON ws.id = pr.workspace_id \
                             WHERE pr.name = l.to_project \
                               AND ws.name = COALESCE( \
@@ -305,7 +305,7 @@ impl ReaderPool {
                  FROM pages pg \
                  JOIN projects p ON p.id = pg.project_id \
                  JOIN workspaces w ON w.id = pg.workspace_id \
-                 WHERE w.name = ?1 AND p.name = ?2 AND pg.is_latest = 1 \
+                 WHERE w.name = ?1 AND p.id IN (SELECT project_id FROM project_names WHERE workspace_id = p.workspace_id AND name = ?2) AND pg.is_latest = 1 \
                  ORDER BY pg.path ASC"
             ))?;
             let rows = stmt.query_map(params![workspace, project], |row| {
@@ -363,7 +363,7 @@ impl ReaderPool {
                  JOIN workspaces w ON w.id = pg.workspace_id \
                  LEFT JOIN pages sp ON sp.id = pg.supersedes \
                  LEFT JOIN users au ON au.id = pg.author_id \
-                 WHERE w.name = ?1 AND p.name = ?2 AND pg.path = ?3 AND pg.is_latest = 1"
+                 WHERE w.name = ?1 AND p.id IN (SELECT project_id FROM project_names WHERE workspace_id = p.workspace_id AND name = ?2) AND pg.path = ?3 AND pg.is_latest = 1"
             );
             let row_opt = conn
                 .query_row(
