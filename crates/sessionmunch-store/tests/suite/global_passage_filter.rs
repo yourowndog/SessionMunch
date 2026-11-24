@@ -455,6 +455,65 @@ async fn per_page_cap_prevents_one_page_from_flooding() {
 }
 
 #[tokio::test]
+async fn global_parent_cap_can_fill_slots_from_lower_ranked_pages() {
+    let (_tmp, store) = make_store();
+    let (ws, proj) = make_scope(&store, "diversity-ws", "diversity-p").await;
+    // One parent with six highly relevant passages and a second parent with
+    // a weaker but still relevant passage. The cap must not consume the
+    // retrieval budget before the second parent has a chance to contribute.
+    let flood = (0..6)
+        .map(|i| {
+            format!(
+                "# Section {i}\n\n{}unique marker {i}.\n\n",
+                "diversityterm ".repeat(40)
+            )
+        })
+        .collect::<String>();
+    store
+        .writer
+        .upsert_page(make_page(ws, proj, "notes/flood.md", &flood, json!({})))
+        .await
+        .unwrap();
+    let weaker = format!(
+        "# Independent answer\n\ndiversityterm {}",
+        "unrelated context ".repeat(40)
+    );
+    store
+        .writer
+        .upsert_page(make_page(ws, proj, "notes/other.md", &weaker, json!({})))
+        .await
+        .unwrap();
+    let hits = store
+        .reader
+        .search_passages_hybrid_global(
+            GlobalPassageFilter::default(),
+            "diversityterm".to_string(),
+            None,
+            "test".to_string(),
+            "model".to_string(),
+            768,
+            4,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        hits.len(),
+        4,
+        "parent cap must not underfill a diverse result: {hits:?}"
+    );
+    assert_eq!(
+        hits.iter()
+            .filter(|h| h.page_path.as_str() == "notes/flood.md")
+            .count(),
+        3
+    );
+    assert!(
+        hits.iter()
+            .any(|h| h.page_path.as_str() == "notes/other.md")
+    );
+}
+
+#[tokio::test]
 async fn global_result_order_is_stable_across_calls() {
     let (_tmp, store) = make_store();
     let (_, _, _, _, _, _) = seed_three_projects(&store).await;

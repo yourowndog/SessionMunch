@@ -726,9 +726,17 @@ impl ReaderPool {
         if limit == 0 {
             return Ok(Vec::new());
         }
-        // Fetch a per-stream budget larger than the requested limit so the
-        // per-parent cap has enough candidates to fill `limit` unique pages.
-        let stream_limit = limit.max(GLOBAL_MAX_PASSAGES_PER_PAGE);
+        // Overfetch within a bounded budget before the per-parent cap. Taking
+        // only `limit` candidates can leave otherwise relevant pages invisible
+        // when one parent occupies the leading positions. No guarantee is made
+        // that a bounded stream can fill every slot in a pathological corpus.
+        let stream_limit = if limit <= GLOBAL_MAX_PASSAGES_PER_PAGE {
+            limit
+        } else {
+            limit
+                .saturating_mul(GLOBAL_MAX_PASSAGES_PER_PAGE)
+                .min(limit.saturating_add(300))
+        };
         let fts_query = prepare_fts5_query(&query);
         let lexical = if fts_query.is_empty() {
             Vec::new()
