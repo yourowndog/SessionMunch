@@ -6298,19 +6298,48 @@ fn project_aliases_guard_inserts_moves_and_rollback() {
 
 #[test]
 fn project_alias_rename_keeps_all_history_and_provenance_rows_identical() {
+    // Recovered from the historical Weakling rename verification: prove that
+    // every existing row and its content survive, not merely that counts agree.
+    // All fixtures are local and synthetic; never read an operator's database.
     let (_tmp, mut conn, ws, project) = fresh_db();
-    seed_session(&mut conn, ws, project, "legacy");
+    let (sid, _) = seed_session(&mut conn, ws, project, "legacy");
     seed_handoff(&conn, ws, project, None, true, None, 1);
-    upsert_page(
+    let session = hook_session(sid, ws, project, None);
+    crate::session_events::begin_session_with_provenance(
         &mut conn,
-        &page(ws, project, "notes/history.md", "version one"),
+        &session,
+        &sessionmunch_core::SessionProvenance {
+            native_session_id: Some("native-legacy".into()),
+            machine_id: Some("fixture-node".into()),
+            git_branch: Some("main".into()),
+            import_cursor: Some("cursor-1".into()),
+            ..Default::default()
+        },
     )
     .unwrap();
-    upsert_page(
+    crate::session_events::replace_summary_jobs(
         &mut conn,
-        &page(ws, project, "notes/history.md", "version two"),
+        &sid,
+        &[("job-1".into(), "fixture-model".into(), "{}".into())],
     )
     .unwrap();
+    let mut note = page(ws, project, "notes/history.md", "version one");
+    note.evidence = vec![PageEvidence {
+        kind: PageEvidenceKind::Session,
+        source_id: sid.to_string(),
+    }];
+    upsert_page(&mut conn, &note).unwrap();
+    note.body = "version two".into();
+    let latest = upsert_page(&mut conn, &note).unwrap();
+    let other = get_or_create_project(&mut conn, &ws, "other", None).unwrap();
+    let mut link = page(ws, other, "notes/reference.md", "reference to history");
+    link.links = vec![LinkTarget {
+        workspace: None,
+        project: Some("scratch".into()),
+        path: PagePath::new("notes/history.md").unwrap(),
+        relation: None,
+    }];
+    let link_id = upsert_page(&mut conn, &link).unwrap();
     let tables = [
         "pages",
         "sessions",
@@ -6319,15 +6348,25 @@ fn project_alias_rename_keeps_all_history_and_provenance_rows_identical() {
         "handoffs",
         "links",
         "page_evidence",
+        "session_summary_jobs",
     ];
     let snapshot = |conn: &Connection| -> Vec<Vec<Vec<rusqlite::types::Value>>> {
         tables
             .iter()
             .map(|table| {
+                // Order on every column: composite keys and WITHOUT ROWID
+                // tables must compare deterministically too.
+                let width = conn
+                    .prepare(&format!("SELECT * FROM {table} LIMIT 0"))
+                    .unwrap()
+                    .column_count();
+                let order = (1..=width)
+                    .map(|column| column.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 let mut stmt = conn
-                    .prepare(&format!("SELECT * FROM {table} ORDER BY 1"))
+                    .prepare(&format!("SELECT * FROM {table} ORDER BY {order}"))
                     .unwrap();
-                let width = stmt.column_count();
                 stmt.query_map([], |row| (0..width).map(|i| row.get(i)).collect())
                     .unwrap()
                     .map(Result::unwrap)
@@ -6336,16 +6375,38 @@ fn project_alias_rename_keeps_all_history_and_provenance_rows_identical() {
             .collect()
     };
     let before = snapshot(&conn);
-    assert!(before[0].len() >= 3, "includes superseded versions");
-    assert!(!before[3].is_empty(), "includes captured provenance ledger");
+    assert!(before[0].len() >= 4, "includes superseded versions");
+    for (table, rows) in tables.iter().zip(&before) {
+        assert!(!rows.is_empty(), "fixture must exercise {table}");
+    }
+    let assert_link = |conn: &Connection| {
+        let target: Option<Vec<u8>> = conn
+            .query_row(
+                "SELECT to_page_id FROM links WHERE from_page_id = ?1",
+                params![link_id.as_bytes()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(target.as_deref(), Some(&latest.as_bytes()[..]));
+    };
+    assert_link(&conn);
     rename_project(&mut conn, &ws, &project, "sessionmunch", None).unwrap();
     assert_eq!(before, snapshot(&conn));
+    assert_link(&conn);
     for name in ["scratch", "sessionmunch"] {
         assert_eq!(
             get_or_create_project(&mut conn, &ws, name, None).unwrap(),
             project
         );
     }
+    // Returning to the former canonical name must also be lossless.
+    rename_project(&mut conn, &ws, &project, "scratch", None).unwrap();
+    assert_eq!(before, snapshot(&conn));
+    assert_link(&conn);
+    assert_eq!(
+        get_or_create_project(&mut conn, &ws, "sessionmunch", None).unwrap(),
+        project
+    );
 }
 
 /// Era-appropriate project seed for migration fixtures predating V68.
