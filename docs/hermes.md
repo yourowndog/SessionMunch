@@ -47,6 +47,17 @@ variables:
 | Bearer token file | `token_file` | `SESSIONMUNCH_TOKEN_FILE` | none (loopback servers need no token) |
 | Default scope | `default_workspace`, `default_project` | `SESSIONMUNCH_DEFAULT_WORKSPACE`, `SESSIONMUNCH_DEFAULT_PROJECT` | empty |
 
+Worker profiles may opt in to `scope_from_cwd: true` in their provider
+sidecar. The provider freezes a complete marker pair from the owning session's
+cwd, falling back to that profile's read-only native session metadata if the
+host omits cwd. Linked worktree metadata must point back to its checkout.
+Missing, invalid or symlinked markers do not fall through to a configured
+profile default or the server's active-project pointer. Explicit complete
+workspace/project pairs and global or multi-scope queries remain available.
+`require_explicit_scope: true` also rejects unscoped calls when using static
+profile defaults. These options are source capabilities, not a migration of
+existing profile configurations.
+
 Set the default workspace and project. With an empty scope, the server
 resolves calls to the credential's active project, which on a shared server is
 rarely the one you meant. Reads then come back empty instead of failing.

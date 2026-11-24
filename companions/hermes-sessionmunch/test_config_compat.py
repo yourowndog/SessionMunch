@@ -130,5 +130,91 @@ class ConfigCompatibility(unittest.TestCase):
                 p.save_config({}, str(self.home))
         self.assertEqual(canonical.read_text(), "[]")
 
+    def test_gateway_scope_uses_own_durable_session_metadata(self):
+        import sqlite3
+        (self.home/"sessionmunch.json").write_text(json.dumps({"scope_from_cwd":True,"require_explicit_scope":True}))
+        cwd=self.home/"repo";cwd.mkdir();(cwd/".sessionmunch.toml").write_text('workspace="default"\nproject="existing"\n')
+        db=sqlite3.connect(self.home/"state.db")
+        db.execute("CREATE TABLE sessions(id TEXT PRIMARY KEY,cwd TEXT)")
+        db.execute("INSERT INTO sessions VALUES (?,?)",("native",str(cwd)));db.commit();db.close()
+        p=companion.SessionMunchProvider();p.initialize("native",hermes_home=str(self.home))
+        args={};p._apply_default_scope(args);self.assertEqual(args,{"workspace":"default","project":"existing"})
+        db=sqlite3.connect(self.home/"state.db");db.execute("UPDATE sessions SET cwd='/missing'");db.commit();db.close()
+        args={};p._apply_default_scope(args);self.assertEqual(args["project"],"existing")
+        self.assertEqual(companion.scope.native_session_cwd(str(self.home),"another-session"),"")
+        other=self.home/"other-profile";other.mkdir()
+        self.assertEqual(companion.scope.native_session_cwd(str(other),"native"),"")
+        self.assertFalse((other/"state.db").exists())
+
+    def test_cwd_markers_are_session_local_and_explicit_calls_win(self):
+        (self.home/"sessionmunch.json").write_text(json.dumps({
+            "scope_from_cwd":True,"require_explicit_scope":True}))
+        providers=[]
+        for name in ("first", "second"):
+            cwd=self.home/name;cwd.mkdir()
+            (cwd/".sessionmunch.toml").write_text(f'workspace="default"\nproject="{name}"\n')
+            provider=companion.SessionMunchProvider()
+            provider.initialize(name,hermes_home=str(self.home),cwd=str(cwd))
+            providers.append(provider)
+        for provider, expected in ((providers[0],"first"),(providers[1],"second"),(providers[0],"first")):
+            args={};provider._apply_default_scope(args)
+            self.assertEqual(args,{"workspace":"default","project":expected})
+            explicit={"workspace":"other","project":"explicit"};provider._apply_default_scope(explicit)
+            self.assertEqual(explicit,{"workspace":"other","project":"explicit"})
+            global_args={"global":True};provider._apply_default_scope(global_args)
+            self.assertEqual(global_args,{"global":True})
+
+    def test_missing_and_partial_marker_never_use_server_active_pointer(self):
+        (self.home/"sessionmunch.json").write_text(json.dumps({
+            "scope_from_cwd":True,"require_explicit_scope":True}))
+        provider=self.provider()
+        with self.assertRaises(companion.scope.ScopeError):provider._apply_default_scope({})
+        (self.home/".sessionmunch.toml").write_text('workspace="default"\n')
+        provider=companion.SessionMunchProvider()
+        provider.initialize("partial",hermes_home=str(self.home),cwd=str(self.home))
+        with self.assertRaises(companion.scope.ScopeError):provider._apply_default_scope({})
+        args={"workspace":"default","project":"explicit"};provider._apply_default_scope(args)
+        self.assertEqual(args["project"],"explicit")
+
+    def test_linked_worktree_uses_verified_primary_marker_without_parent_escape(self):
+        primary=self.home/"primary";primary.mkdir()
+        git=primary/".git";git.mkdir()
+        linked=self.home/"linked";linked.mkdir()
+        metadata=git/"worktrees/worker";metadata.mkdir(parents=True)
+        (linked/".git").write_text(f"gitdir: {metadata}\n")
+        (metadata/"commondir").write_text("../..\n")
+        (metadata/"gitdir").write_text(str(linked/".git")+"\n")
+        (primary/".sessionmunch.toml").write_text('workspace="default"\nproject="existing-history"\n')
+        (self.home/".sessionmunch.toml").write_text('workspace="default"\nproject="wrong-parent"\n')
+        self.assertEqual(companion.scope.scope_from_cwd(str(linked)),("default","existing-history"))
+        (primary/".sessionmunch.toml").unlink()
+        self.assertIsNone(companion.scope.scope_from_cwd(str(linked)))
+        self.assertIsNone(companion.scope.scope_from_cwd(str(primary)))
+        (primary/".sessionmunch.toml").write_text('workspace="default"\nproject="existing-history"\n')
+        (metadata/"gitdir").write_text(str(self.home/"foreign/.git"))
+        self.assertIsNone(companion.scope.scope_from_cwd(str(linked)))
+
+    def test_missing_marker_does_not_inherit_profile_defaults(self):
+        (self.home/"sessionmunch.json").write_text(json.dumps({
+            "scope_from_cwd": True, "default_workspace": "default",
+            "default_project": "wrong-profile"}))
+        p = self.provider()
+        with self.assertRaises(companion.scope.ScopeError):
+            p._apply_default_scope({})
+        with self.assertRaises(companion.scope.ScopeError):
+            p._apply_default_scope({"project": "partial"})
+        args = {"global": True}
+        p._apply_default_scope(args)
+        self.assertEqual(args, {"global": True})
+
+    def test_symlink_marker_rejected(self):
+        external = self.home/"elsewhere.toml"
+        external.write_text('workspace="default"\nproject="foreign"\n')
+        repo = self.home/"repo"
+        repo.mkdir()
+        (repo/".sessionmunch.toml").symlink_to(external)
+        with self.assertRaises(companion.scope.ScopeError):
+            companion.scope.scope_from_cwd(str(repo))
+
 if __name__ == "__main__":
     unittest.main()

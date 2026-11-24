@@ -143,6 +143,7 @@ jobs:
       - run: cargo fmt --check --manifest-path companions/sessionmunch-importer/Cargo.toml
       - run: cargo clippy --manifest-path companions/sessionmunch-importer/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path companions/sessionmunch-importer/Cargo.toml
+      - run: python3 -B companions/hermes-sessionmunch/test_config_compat.py
 
   # Build the release binary on its own so a release-only failure
   # (LTO crash, codegen issue, dead-code-with-debug-assertions) doesn't

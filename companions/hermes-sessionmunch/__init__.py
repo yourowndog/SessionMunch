@@ -518,6 +518,7 @@ class SessionMunchProvider(MemoryProvider):
         self._agent_workspace: str = ""
 
         # Scope hints for sessionmunch calls.
+        self._scope_error = ""
         self._default_project: str = ""
         self._default_workspace: str = ""
 
@@ -565,6 +566,21 @@ class SessionMunchProvider(MemoryProvider):
 
         # Load config.
         self._load_config()
+        self._scope_error = ""
+        if self._config.get("scope_from_cwd") is True:
+            # The gateway process cwd is not the owning session cwd.
+            # Never inherit a profile default when marker routing is requested.
+            self._default_workspace = self._default_project = ""
+            try:
+                cwd = kwargs.get("cwd") or scope.native_session_cwd(
+                    self._hermes_home, session_id
+                )
+                pair = scope.scope_from_cwd(cwd) if isinstance(cwd, str) else None
+                if pair is None:
+                    raise scope.ScopeError("No complete marker for the owning session cwd")
+                self._default_workspace, self._default_project = pair
+            except (scope.ScopeError, OSError, ValueError, RuntimeError) as exc:
+                self._scope_error = str(exc)
 
         # Build MCP client (lazy — no connection attempt).
         mcp_url = (
@@ -1007,11 +1023,23 @@ class SessionMunchProvider(MemoryProvider):
         Raises:
             scope.ScopeError: the combination is one the server rejects.
         """
+        explicit = bool(args.get("global") or args.get("scopes") or (
+            args.get("workspace") and args.get("project")
+        ))
+        strict = self._config.get("require_explicit_scope") is True or (
+            self._config.get("scope_from_cwd") is True
+        )
+        if self._scope_error and not explicit:
+            raise scope.ScopeError(self._scope_error)
+        if strict and bool(args.get("workspace")) != bool(args.get("project")):
+            raise scope.ScopeError("Supply workspace and project together")
         resolution = scope.resolve_scope(
             args,
             default_project=self._default_project,
             default_workspace=self._default_workspace,
         )
+        if strict and resolution.is_unscoped:
+            raise scope.ScopeError("No explicit SessionMunch scope: supply workspace/project or a complete repository marker.")
         for warning in resolution.warnings:
             logger.debug("sessionmunch scope (%s): %s", resolution.mode, warning)
 
