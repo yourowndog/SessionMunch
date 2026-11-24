@@ -269,6 +269,41 @@ pub enum ImportCommand {
     /// sanitized, queued in a crash-safe local spool, and delivered to the hub
     /// idempotently; unsupported or unreadable stores are reported by name.
     Sessions(ImportSessionsArgs),
+    /// Import selected ChatGPT or Claude account conversation JSON exports.
+    /// The desktop and web chat surfaces share account-level conversation IDs.
+    Chats(ImportChatsArgs),
+}
+
+/// Hosted conversation JSON export provider.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum ChatExportProvider {
+    #[value(name = "chatgpt")]
+    ChatGpt,
+    Claude,
+}
+
+#[derive(Debug, Args)]
+pub struct ImportChatsArgs {
+    #[arg(long, value_enum)]
+    pub provider: ChatExportProvider,
+    /// Stable non-secret account label, reused across desktop and web exports.
+    #[arg(long)]
+    pub account: String,
+    /// Explicit destination workspace; do not mix private account history with shared projects.
+    #[arg(long)]
+    pub workspace: String,
+    /// Explicit destination project.
+    #[arg(long)]
+    pub project: String,
+    /// Count selected visible conversations without sending or writing import state.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Emit a JSON report without conversation bodies.
+    #[arg(long)]
+    pub json: bool,
+    /// Extracted conversation JSON file(s), not the entire personal data archive.
+    #[arg(required = true, num_args = 1..)]
+    pub files: Vec<PathBuf>,
 }
 
 /// Arguments for `import sessions`.

@@ -342,3 +342,121 @@ fn history_import_lock_refuses_concurrent_writer_but_allows_dry_run() {
     assert!(!import_dir.join("spool").exists());
     assert!(!import_dir.join("cursors.json").exists());
 }
+
+/// Hosted chat files enter the same real ledger and artifact pipeline as native
+/// transcripts. Replay from another machine's local state remains idempotent.
+#[test]
+fn hosted_chat_exports_are_searchable_and_account_scoped() {
+    let tmp = tempfile::tempdir().unwrap();
+    let hub_data = tmp.path().join("hub");
+    let node_data = tmp.path().join("node");
+    let second_data = tmp.path().join("second-node");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let (hub, url) = start_hub(&hub_data, &home);
+    let file = tmp.path().join("conversations.json");
+    let user = "22222222-2222-4222-8222-222222222222";
+    let assistant = "33333333-3333-4333-8333-333333333333";
+    let cid = "11111111-1111-4111-8111-111111111111";
+    let visible = format!("hostedchatcanary {} tail", "z".repeat(40 * 1024));
+    std::fs::write(&file, serde_json::to_vec(&serde_json::json!([{
+        "id":cid, "title":"synthetic chat", "current_node":assistant,
+        "mapping":{
+            (user):{"parent":null,"message":{"id":user,"author":{"role":"user"},"content":{"content_type":"text","parts":["private fixture question"]}}},
+            (assistant):{"parent":user,"message":{"id":assistant,"author":{"role":"assistant"},"recipient":"all","content":{"content_type":"text","parts":[visible]}}}
+        }
+    }])).unwrap()).unwrap();
+    let import = |data: &Path, account: &str, dry: bool| {
+        let mut cmd = child(data, &home, &url);
+        cmd.args([
+            "import",
+            "chats",
+            "--provider",
+            "chatgpt",
+            "--account",
+            account,
+            "--workspace",
+            "private-history",
+            "--project",
+            "hosted",
+            "--json",
+        ])
+        .arg(&file);
+        if dry {
+            cmd.arg("--dry-run");
+        }
+        run_json(&mut cmd)
+    };
+    let dry = import(&node_data, "fixture", true);
+    assert_eq!(dry["harnesses"][0]["events_queued"], 2, "{dry}");
+    assert_eq!(dry["events_delivered"], 0, "{dry}");
+    assert!(!node_data.join("history-import").exists());
+    let first = import(&node_data, "fixture", false);
+    assert_eq!(first["events_delivered"], 2, "{first}");
+    assert_eq!(first["harnesses"][0]["artifacts_uploaded"], 1, "{first}");
+    let replay = import(&second_data, "fixture", false);
+    assert_eq!(replay["events_delivered"], 0, "{replay}");
+    assert_eq!(replay["events_already_known"], 2, "{replay}");
+    let same = import(&node_data, "fixture", false);
+    assert_eq!(same["harnesses"][0]["events_queued"], 0, "{same}");
+    let separate = import(&node_data, "other-account", false);
+    assert_eq!(separate["events_delivered"], 2, "{separate}");
+    let hits = run_json(child(&node_data, &home, &url).args([
+        "search-events",
+        "hostedchatcanary",
+        "--harness",
+        "chatgpt",
+        "--json",
+    ]));
+    let hits = hits.as_array().unwrap();
+    assert_eq!(hits.len(), 2, "{hits:?}");
+    assert_ne!(hits[0]["session_id"], hits[1]["session_id"]);
+    let digest = hits[0]["metadata"]["artifact_sha256"].as_str().unwrap();
+    let output = child(&node_data, &home, &url)
+        .args(["artifact", "get", digest])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), visible);
+
+    let claude = tmp.path().join("claude-conversations.json");
+    std::fs::write(&claude,serde_json::to_vec(&serde_json::json!([{
+        "uuid":cid,"name":"synthetic Claude","chat_messages":[
+            {"uuid":user,"sender":"human","text":"claudehostedcanary"},
+            {"uuid":assistant,"sender":"assistant","content":[{"type":"text","text":"claudehostedcanary response"},{"type":"thinking","thinking":"hiddenreasoningcanary"}]}
+        ]
+    }])).unwrap()).unwrap();
+    let claude_result = run_json(
+        child(&node_data, &home, &url)
+            .args([
+                "import",
+                "chats",
+                "--provider",
+                "claude",
+                "--account",
+                "fixture",
+                "--workspace",
+                "private-history",
+                "--project",
+                "hosted",
+                "--json",
+            ])
+            .arg(claude),
+    );
+    assert_eq!(claude_result["events_delivered"], 2, "{claude_result}");
+    let hits = run_json(child(&node_data, &home, &url).args([
+        "search-events",
+        "claudehostedcanary",
+        "--harness",
+        "claude-chat",
+        "--json",
+    ]));
+    assert_eq!(hits.as_array().unwrap().len(), 2, "{hits}");
+    let hidden = run_json(child(&node_data, &home, &url).args([
+        "search-events",
+        "hiddenreasoningcanary",
+        "--json",
+    ]));
+    assert_eq!(hidden.as_array().unwrap().len(), 0, "{hidden}");
+    drop(hub);
+}

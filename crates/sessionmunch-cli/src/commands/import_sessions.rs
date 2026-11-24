@@ -25,10 +25,12 @@ use sessionmunch_workstream::{
     export_discovered, export_hermes_session, stage_snapshot_home, to_session_events,
 };
 
-use crate::cli::ImportSessionsArgs;
+use crate::cli::{ChatExportProvider, ImportChatsArgs, ImportSessionsArgs};
 use crate::config::Config;
 use crate::host_env::HostEnv;
 use crate::http_client::ServerEndpoint;
+use sessionmunch_workstream::{HostedChatProvider, read_hosted_chat_export};
+use sha2::{Digest as _, Sha256};
 
 /// Events per spooled batch; well under the hub's 4096-event cap so one
 /// batch stays a bounded request.
@@ -205,6 +207,7 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
         };
         let sources = discovery.sessions.iter().map(|session| SessionSourceRef {
             native_session_id: &session.native_session_id,
+            hosted: None,
             cwd: session.cwd.as_deref(),
             agent: AgentKind::Hermes,
             export: Box::new(move |cursor| export_hermes_session(session, cursor)),
@@ -232,6 +235,185 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
             .with_context(|| format!("removing {}", path.display()))?;
     }
 
+    finish_import(
+        spool,
+        &cursor_path,
+        &cursors,
+        &import_dir,
+        &hub_url,
+        token,
+        machine,
+        args.since,
+        args.dry_run,
+        args.json,
+        reports,
+        staging_losses,
+    )
+    .await
+}
+
+/// Import explicit hosted-chat exports through the same event/artifact spool.
+pub async fn run_chats(config: &Config, args: ImportChatsArgs) -> Result<()> {
+    let provider = match args.provider {
+        ChatExportProvider::ChatGpt => HostedChatProvider::ChatGpt,
+        ChatExportProvider::Claude => HostedChatProvider::Claude,
+    };
+    for value in [&args.workspace, &args.project] {
+        if value.trim() != value
+            || value.is_empty()
+            || value.len() > 128
+            || value.contains('/')
+            || value.chars().any(char::is_control)
+            || value == "_global"
+        {
+            return Err(anyhow!(
+                "hosted chat history requires an explicit non-global workspace/project"
+            ));
+        }
+    }
+    let sanitizer = Sanitizer::new(&config.sanitize).context("building canonical sanitizer")?;
+    let machine = machine_identity();
+    let label = provider.agent().as_str();
+    // No auth lookup, directory creation, upload or network activity on preview.
+    let (hub_url, token) = if args.dry_run {
+        ("http://127.0.0.1:1".into(), None)
+    } else {
+        hub_target(config).await
+    };
+    // Unlike native history, this is an explicit privacy boundary. A change
+    // of destination, account, scope or credential cannot drain a previous
+    // account's queued messages to the new destination.
+    let destination_key = serde_json::to_vec(&(
+        &hub_url,
+        &token,
+        label,
+        &args.account,
+        &args.workspace,
+        &args.project,
+    ))?;
+    let key = format!("{:x}", Sha256::digest(destination_key));
+    let import_dir = config
+        .data_dir
+        .join("history-import")
+        .join("hosted")
+        .join(key);
+    let _lock = if args.dry_run {
+        None
+    } else {
+        std::fs::create_dir_all(&import_dir)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&import_dir, std::fs::Permissions::from_mode(0o700))?;
+        }
+        Some(acquire_import_lock(&import_dir)?)
+    };
+    let cursor_path = import_dir.join("cursors.json");
+    let mut cursors = read_cursors(&cursor_path);
+    let spool = if args.dry_run {
+        None
+    } else {
+        Some(Spool::open(&SpoolConfig {
+            dir: import_dir.join("spool"),
+            max_spool_bytes: MAX_SPOOL_BYTES,
+        })?)
+    };
+    let artifacts = ArtifactClient::new(&hub_url, token.clone());
+    let mut report = HarnessReport {
+        harness: label.into(),
+        store: StoreStatus::Found,
+        sessions_found: 0,
+        sessions_with_new_events: 0,
+        events_queued: 0,
+        artifacts_uploaded: 0,
+        losses: Vec::new(),
+    };
+    let mut failed = false;
+    for path in &args.files {
+        let decoded = match read_hosted_chat_export(path, provider, &args.account, &sanitizer) {
+            Ok(value) => value,
+            Err(error) => {
+                report.losses.push(format!("{}: {error}", path.display()));
+                failed = true;
+                continue;
+            }
+        };
+        if !decoded.losses.is_empty() {
+            failed = true;
+        }
+        report.losses.extend(decoded.losses);
+        report.sessions_found += decoded.chats.len();
+        let sources = decoded.chats.iter().map(|chat| SessionSourceRef {
+            native_session_id: &chat.transcript.native_session_id,
+            hosted: Some((chat.session_id, &args.workspace, &args.project)),
+            cwd: None,
+            agent: provider.agent(),
+            export: Box::new(move |cursor| {
+                let mut transcript = chat.transcript.clone();
+                if cursor == transcript.source_cursor.as_deref() && !args.dry_run {
+                    transcript.events.clear();
+                }
+                Ok(transcript)
+            }),
+        });
+        import_sessions(
+            config,
+            label,
+            sources,
+            &machine,
+            &sanitizer,
+            spool.as_ref(),
+            &artifacts,
+            &mut cursors,
+            &mut report,
+            args.dry_run,
+        )
+        .await;
+    }
+    // Explicitly surface incomplete large-payload uploads/queue failures.
+    failed |= report.losses.iter().any(|s| {
+        s.contains("not uploaded:")
+            || s.contains("could not queue events:")
+            || s.contains("unreadable transcript:")
+    });
+    finish_import(
+        spool,
+        &cursor_path,
+        &cursors,
+        &import_dir,
+        &hub_url,
+        token,
+        machine,
+        "selected hosted exports".into(),
+        args.dry_run,
+        args.json,
+        vec![report],
+        Vec::new(),
+    )
+    .await?;
+    if failed {
+        return Err(anyhow!(
+            "hosted history import had incomplete or malformed inputs; inspect the report"
+        ));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn finish_import(
+    spool: Option<Spool>,
+    cursor_path: &Path,
+    cursors: &CursorFile,
+    import_dir: &Path,
+    hub_url: &str,
+    token: Option<String>,
+    machine: String,
+    since: String,
+    dry_run: bool,
+    json: bool,
+    reports: Vec<HarnessReport>,
+    staging_losses: Vec<String>,
+) -> Result<()> {
     let mut events_delivered = 0;
     let mut events_already_known = 0;
     let mut delivery_problem = None;
@@ -239,10 +421,10 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
     if let Some(spool) = spool {
         // Cursors advance only once their events sit durably in the spool,
         // so a crash after this point loses nothing and repeats nothing.
-        write_cursors(&cursor_path, &cursors)?;
+        write_cursors(cursor_path, cursors)?;
         let queued: usize = reports.iter().map(|report| report.events_queued).sum();
         let drainer =
-            SpoolDrainer::new(spool.clone(), Arc::new(HttpEventSink::new(&hub_url, token)))
+            SpoolDrainer::new(spool.clone(), Arc::new(HttpEventSink::new(hub_url, token)))
                 .with_batches_per_pass(64);
         let mut transient_retries = 0u32;
         loop {
@@ -287,9 +469,9 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
 
     let report = ImportReport {
         machine,
-        since: args.since.clone(),
-        dry_run: args.dry_run,
-        hub: (!args.dry_run).then_some(hub_url),
+        since,
+        dry_run,
+        hub: (!dry_run).then(|| hub_url.to_owned()),
         harnesses: reports,
         snapshot_losses: staging_losses,
         events_delivered,
@@ -297,14 +479,14 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
         batches_pending,
         delivery_problem,
     };
-    if args.json {
+    if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         print_report(&report);
     }
-    if report.delivery_problem.is_some() && report.batches_pending > 0 {
+    if report.delivery_problem.is_some() {
         return Err(anyhow!(
-            "{} batch(es) remain queued; re-run `sessionmunch import sessions` once the hub is reachable",
+            "history import did not fully deliver; {} batch(es) remain queued; inspect the report and retry",
             report.batches_pending
         ));
     }
@@ -317,6 +499,7 @@ type ExportFn<'a> = dyn Fn(Option<&str>) -> Result<ExportedTranscript> + 'a;
 /// One session to import, whatever store it came from.
 struct SessionSourceRef<'a> {
     native_session_id: &'a str,
+    hosted: Option<(SessionId, &'a str, &'a str)>,
     cwd: Option<&'a Path>,
     agent: AgentKind,
     export: Box<ExportFn<'a>>,
@@ -337,6 +520,7 @@ async fn import_harness(
 ) {
     let sources = discovery.sessions.iter().map(|session| SessionSourceRef {
         native_session_id: &session.native_session_id,
+        hosted: None,
         cwd: session.cwd.as_deref(),
         agent: discovery.harness.agent_kind(),
         export: Box::new(move |cursor| export_discovered(session, home, cursor)),
@@ -371,10 +555,16 @@ async fn import_sessions<'a>(
 ) {
     for session in sources {
         let native = session.native_session_id;
+        let session_id = session
+            .hosted
+            .map_or_else(|| hook_session_id(native), |(id, _, _)| id);
+        let cursor_key = session
+            .hosted
+            .map_or_else(|| native.to_owned(), |_| session_id.to_string());
         let cursor = cursors
             .cursors
             .get(label)
-            .and_then(|by_id| by_id.get(native))
+            .and_then(|by_id| by_id.get(&cursor_key))
             .cloned();
         let export = match (session.export)(cursor.as_deref()) {
             Ok(export) => export,
@@ -396,17 +586,25 @@ async fn import_sessions<'a>(
         // machine when a transcript store was copied between them.
         for event in &mut events {
             if let serde_json::Value::Object(metadata) = &mut event.metadata {
-                metadata.insert("machine".into(), machine.into());
+                metadata.insert(
+                    if session.hosted.is_some() {
+                        "imported_on"
+                    } else {
+                        "machine"
+                    }
+                    .into(),
+                    machine.into(),
+                );
             }
         }
         report.sessions_with_new_events += 1;
-        report.events_queued += events.len();
         if dry_run {
+            report.events_queued += events.len();
             continue;
         }
         let Some(spool) = spool else { continue };
 
-        let session_id = hook_session_id(native);
+        let mut artifact_failure = false;
         for payload in oversized {
             let upload = ArtifactUpload {
                 content: payload.content,
@@ -424,17 +622,28 @@ async fn import_sessions<'a>(
                 Ok(_) => report.artifacts_uploaded += 1,
                 // The inline head/tail and the digest still reach the hub, so
                 // the loss is the middle of one payload, named here.
-                Err(error) => report.losses.push(format!(
-                    "{native}: artifact {} not uploaded: {error}",
-                    payload.sha256
-                )),
+                Err(error) => {
+                    artifact_failure = true;
+                    report.losses.push(format!(
+                        "{native}: artifact {} not uploaded: {error}",
+                        payload.sha256
+                    ));
+                }
             }
         }
 
-        let (workspace, project) = scope_for(config, session.cwd);
+        // For hosted imports, do not commit an incomplete first-write ledger
+        // if a large payload failed to arrive. Retain the export for retry.
+        if session.hosted.is_some() && artifact_failure {
+            continue;
+        }
+        let (workspace, project) = session.hosted.map_or_else(
+            || scope_for(config, session.cwd),
+            |(_, workspace, project)| (workspace.to_owned(), project.to_owned()),
+        );
         let provenance = SessionProvenance {
             native_session_id: Some(native.to_owned()),
-            machine_id: Some(machine.to_owned()),
+            machine_id: session.hosted.is_none().then(|| machine.to_owned()),
             cwd: session.cwd.map(|cwd| cwd.display().to_string()),
             source: SessionSource::Import,
             import_cursor: export.source_cursor.clone(),
@@ -458,13 +667,14 @@ async fn import_sessions<'a>(
                 queued_all = false;
                 break;
             }
+            report.events_queued += chunk.len();
         }
         if queued_all && let Some(cursor) = export.source_cursor {
             cursors
                 .cursors
                 .entry(label.to_owned())
                 .or_default()
-                .insert(native.to_owned(), cursor);
+                .insert(cursor_key, cursor);
         }
     }
 }

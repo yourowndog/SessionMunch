@@ -11,6 +11,7 @@ mod drain;
 mod harness;
 mod hermes_history;
 mod history_import;
+mod hosted_chat_history;
 mod repository;
 mod snapshot;
 mod spool;
@@ -43,6 +44,9 @@ pub use hermes_history::{
 pub use history_import::{
     DiscoveredSession, HarnessDiscovery, IMPORTABLE_HARNESSES, INLINE_EVENT_BYTES,
     OversizedPayload, StoreStatus, discover_harness_history, export_discovered, to_session_events,
+};
+pub use hosted_chat_history::{
+    HostedChat, HostedChatExport, HostedChatProvider, read_hosted_chat_export,
 };
 pub use repository::{RepositoryIdentity, inspect_repository};
 pub use snapshot::{

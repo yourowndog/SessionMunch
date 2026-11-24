@@ -38,11 +38,12 @@ pub(crate) fn begin_session_with_provenance(
     provenance: &SessionProvenance,
 ) -> StoreResult<()> {
     let tx = conn.transaction()?;
-    let existing: Option<(String, Option<String>)> = tx
+    type ExistingSession = (String, Option<String>, Option<Vec<u8>>, Option<Vec<u8>>);
+    let existing: Option<ExistingSession> = tx
         .query_row(
-            "SELECT agent_kind, actor_user FROM sessions WHERE id = ?1",
+            "SELECT agent_kind, actor_user, workspace_id, project_id FROM sessions WHERE id = ?1",
             params![session.id.as_bytes()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .optional()?;
     let created = existing.is_none();
@@ -51,7 +52,19 @@ pub(crate) fn begin_session_with_provenance(
         // for a session the hooks already recorded attaches to that session
         // (where its hook history lives) instead of failing the batch. The
         // harness and a named owner are identity; a mismatch is a collision.
-        Some((agent, owner)) => {
+        Some((agent, owner, workspace, project)) => {
+            // Hosted chat imports have an explicit operator-selected scope,
+            // not a cwd guess. Never append private history into a prior
+            // destination just because the account/session identity matches.
+            if matches!(
+                session.agent_kind,
+                sessionmunch_core::AgentKind::ChatGpt | sessionmunch_core::AgentKind::ClaudeChat
+            ) && (workspace.as_deref() != Some(&session.workspace_id.as_bytes()[..])
+                || project.as_deref() != Some(&session.project_id.as_bytes()[..])
+                || owner != session.actor_user)
+            {
+                return Err(crate::StoreError::SessionCollision);
+            }
             let owner_conflicts = session
                 .actor_user
                 .as_deref()
