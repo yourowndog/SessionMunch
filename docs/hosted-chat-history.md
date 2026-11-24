@@ -46,7 +46,9 @@ This is historical/periodic export ingestion, not automatic live capture.
 Desktop-local Claude Code/Cowork requires separate native-store validation.
 Codex desktop compressed and archived journals use the native history path,
 not the hosted-chat import command. Preview with `sessionmunch import sessions
---harness codex --since all --dry-run --json`. For live hosted capture, prefer an opt-in
+--harness codex --since 5w --dry-run --json`. This selects recently active sessions,
+not a strict per-message 35-day window; do not treat it as a message-retention
+boundary. For live hosted capture, prefer an opt-in
 provider-supported interface or local browser collector of visible messages
 that emits the same identity and event format. Do not collect authentication
 cookies, use hidden account APIs or silently upload unrelated conversations.

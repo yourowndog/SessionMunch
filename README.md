@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Your model is allowed to forget. Your project isn't.</strong><br>
-  One shared memory across sessions, agents, and machines • Local-first • MCP + HTTP • Plain Markdown source of truth
+  One shared memory across sessions, agents, and machines • Local-first • MCP + HTTP • Inspectable knowledge and durable evidence
 </p>
 
 <p align="center">
@@ -36,10 +36,10 @@ If jCodeMunch makes **code** searchable and jDocMunch makes **documentation** se
 
 | Piece | In plain English | What it gets you |
 | :--- | :--- | :--- |
-| **Evidence ledger** | Every captured or imported event is kept as sanitized evidence, with machine, harness and session attached. | "When did we run that on the build box?" gets answered from what actually happened, not from a summary that may have left it out. |
+| **Evidence ledger** | Supported captured or imported events are kept as sanitized evidence, with session and source provenance. | "When did we run that on the build box?" gets answered from what actually happened, not from a summary that may have left it out. |
 | **Shared project memory** | One SessionMunch service holds the durable state for all connected agents. | Claude Code can learn something and Codex, Hermes, OpenCode, or another MCP client can find it later. |
 | **Markdown source of truth** | The important knowledge is ordinary human-readable files, not a mystery blob. | You can inspect it, grep it, edit it, version it, back it up, and leave whenever you want. |
-| **Derived SQLite index** | SQLite is the fast card catalog over those files, not the owner of them. | Fast search without sacrificing recoverability; `sessionmunch reindex` can rebuild it. |
+| **SQLite ledger and indexes** | SQLite holds session history and operational state as well as the searchable index over Markdown. | Fast recall with durable event identities. Back up both the database and the knowledge files; reindexing is not disaster recovery. |
 | **Full-text search (FTS5)** | Looks for the actual words and phrases you used. | Excellent for error strings, filenames, commands, symbols, and exact terminology. |
 | **Embeddings** | Text is converted into coordinates where ideas with similar meaning sit near each other. | “Login token bug” can still find a note written as “authentication credential failure” even when the words do not match. |
 | **Entities + graph links** | Projects, concepts, components, causes, fixes, and contradictions can be connected. | Memory can follow relationships instead of treating every note as an isolated paragraph. |
@@ -50,17 +50,17 @@ If jCodeMunch makes **code** searchable and jDocMunch makes **documentation** se
 
 **Chat history is evidence. Durable project knowledge is the product.**
 
-The durable knowledge is yours. The database is an acceleration layer, not a hostage situation.
+Your knowledge and history belong to you. Markdown keeps the wiki inspectable; SQLite keeps structured history and indexes; content-addressed artifacts preserve oversized evidence. Back up all three.
 
 ---
 
 ## Status
 
-SessionMunch is a **v0.1.0 release candidate**, and the dashboard is finally the right colour.
+SessionMunch is under active development toward **v0.1.0**. The source is available now; release acceptance is not implied by a green historical build or by the presence of packaging files.
 
-The candidate branch passes the full CI matrix on a single commit: Linux, macOS and Windows tests, release builds for three targets, clippy, rustfmt, `cargo deny`, `cargo audit`, secret scanning, Nix, a Docker smoke test and a fresh `cargo install`. That is 3,372 passing tests. The only ones not run by default are the handful that download models or benchmark throughput, and no check was switched off to manufacture the green.
+The current development work includes stable project aliases, stronger OpenCode 2 continuity, account-export history import, compressed Codex journals, and more efficient global passage retrieval. The latest integration candidate is tracked in [PR #40](https://github.com/yourowndog/SessionMunch/pull/40). See its exact-commit checks and limitations rather than treating an older test count as a current release certificate.
 
-It already runs for real across a small cluster of machines, holding a few hundred thousand events from three of them. What it does not have yet is a tag. Prebuilt binaries, Docker images and AUR packages come from the release workflow, so they appear when `v0.1.0` does. Until then you build from source, which in Rust terms means "go make a coffee".
+Native archives, Docker and package publication are separate distribution checks. Until a channel has a verified release, use the source installation below. JEV is a planned optional reranker, not an enabled runtime provider yet.
 
 ---
 
@@ -69,34 +69,30 @@ It already runs for real across a small cluster of machines, holding a few hundr
 Think of a context window as RAM. Useful, fast, temporary. SessionMunch is the part where somebody finally remembered to add a disk.
 
 ```text
-agent work
-   │
-   ▼
-capture hooks ──▶ sanitize ──▶ session evidence
-                               │
-                               ▼
-                         Markdown knowledge
-                               │
-                               ▼
-                    rebuildable SQLite index
-                               │
-                 ┌─────────────┼─────────────┐
-                 ▼             ▼             ▼
-               FTS5       embeddings     graph/entities
-                 └─────────────┼─────────────┘
-                               ▼
-                         RRF fusion
-                               │
-                               ▼
-                    relevant passages/brief
-                               │
-                    ┌──────────┴──────────┐
-                    ▼                     ▼
-                 MCP/HTTP            startup handoff
-                    │                     │
-                    └──────────┬──────────┘
-                               ▼
-                         next agent/session
+agent work / explicit history import
+              │
+              ▼
+      sanitize and identify
+              │
+       durable client queue
+              │
+              ▼
+       SQLite event ledger ───► verified large artifacts
+              │
+              ├────► Markdown knowledge / deterministic cards
+              │                     │
+              ▼                     ▼
+       event text search      passage / lexical / vector indexes
+              │                     │
+              └──────────┬──────────┘
+                         ▼
+              bounded evidence and recall
+                         │
+                   optional reranking
+                         │
+                  MCP / HTTP / handoffs
+                         ▼
+                   next agent/session
 ```
 
 ### How does another agent know any of this?
@@ -130,7 +126,7 @@ Until the first tagged release artifacts are published, the honest install path 
 ```bash
 git clone https://github.com/yourowndog/SessionMunch.git
 cd SessionMunch
-cargo build --release --workspace
+cargo build --locked --release --bin sessionmunch
 
 install -Dm755 target/release/sessionmunch ~/.local/bin/sessionmunch
 ```
@@ -164,7 +160,7 @@ sessionmunch install-mcp --client opencode --apply
 sessionmunch install-hooks --agent opencode --apply
 ```
 
-For Hermes Agent, configure the native MemoryProvider plugin in your profile (see [`docs/hermes.md`](docs/hermes.md)).
+For Hermes Agent, configure the native MemoryProvider plugin in your profile (see [`docs/hermes.md`](docs/hermes.md)). For Muse Code, register the MCP server with `sessionmunch install-mcp --client muse --apply` and follow the [Muse setup and verification guide](docs/mcp-install.md#muse-code). Muse Code is currently MCP-only, not an automatic transcript-capture integration.
 
 ### 3. Experience Cross-Session Continuity
 
@@ -174,7 +170,7 @@ For Hermes Agent, configure the native MemoryProvider plugin in your profile (se
 4. Ask for curated knowledge while you work: *"What gotchas did we hit with auth cookies?"* (that's `memory_query`).
 5. Ask for raw history when the summary isn't enough: *"When did we last run the migration on the build box?"* (that's `memory_search_events`, which searches every preserved event across machines and harnesses).
 
-The full list of 20 MCP tools is in [`docs/mcp-reference.md`](docs/mcp-reference.md).
+The MCP tool reference is in [`docs/mcp-reference.md`](docs/mcp-reference.md).
 
 ---
 
@@ -206,11 +202,24 @@ That is the whole point of a shared memory service: **change agents without chan
 | :--- | :--- | :--- |
 | **Claude Code** | MCP + lifecycle hooks | Automatic capture, summaries, startup handoffs, search |
 | **OpenAI Codex** | MCP + lifecycle hooks | Automatic capture, summaries, startup handoffs, search |
-| **OpenCode** | MCP + generated plugin | Automatic capture, summaries, startup handoffs, search |
+| **OpenCode / OpenCode 2** | MCP + version-specific generated plugin | Lifecycle capture, recall and handoffs; OpenCode 2 preserves recall through ephemeral contexts and has an awaited pre-compaction callback |
 | **Hermes Agent** | Native `MemoryProvider` plugin ([`companions/hermes-sessionmunch`](companions/hermes-sessionmunch)) | Hermes memory backed by SessionMunch, plus history import |
+| **Muse Code** | Native streamable-HTTP MCP ([setup guide](docs/mcp-install.md#muse-code)) | Explicit search, read, write and handoffs; no automatic lifecycle capture claimed |
 | **Anything else that speaks MCP** | `sessionmunch install-mcp` or a hand-written MCP entry | Search, read, write and handoff tools. You bring the discipline; it brings the memory. |
 
-The first four are the ones we use every day and test on purpose. Hook bundles for other harnesses also ship in the repo and are listed in [`docs/support-matrix.md`](docs/support-matrix.md). Treat those as community-grade until someone with that harness tells us otherwise.
+Coverage differs by harness and version. The [support matrix](docs/support-matrix.md) distinguishes MCP-only clients from hook, native-import and managed-workstream adapters. An installed connector is not evidence that every conversation is captured.
+
+---
+
+## Bring your existing history
+
+Native coding-agent history and hosted account conversations are different sources. Preview a bounded native import before transferring anything:
+
+```bash
+sessionmunch import sessions --harness codex --since 5w --dry-run --json
+```
+
+The native path includes supported compressed and archived Codex journals. The time window above selects recently active sessions; it does not yet guarantee a strict per-message cutoff. For account-level ChatGPT or Claude history, use an explicit provider export and the [hosted history guide](docs/hosted-chat-history.md). Hosted MCP access does not automatically collect chat transcripts. Preview counts and omissions, use a private authorized destination, and keep the original exports. Real export compatibility and continuous hosted capture still require acceptance testing.
 
 ---
 
@@ -231,13 +240,14 @@ sessionmunch legacy-import --path /path/to/old/data --apply
 The legacy source is not moved or deleted. SessionMunch also includes backup, restore, reindex, Git checkpoints, and page recovery:
 
 ```bash
-sessionmunch backup
-sessionmunch restore <backup.tar.gz>
+sessionmunch backup --to ~/sessionmunch-backup.tar.gz
+# Stop the target server before restoring into an empty data directory.
+sessionmunch restore --from ~/sessionmunch-backup.tar.gz
 sessionmunch reindex
 sessionmunch checkpoints
 ```
 
-See [`docs/legacy-import.md`](docs/legacy-import.md) and [`docs/upgrade-backup.md`](docs/upgrade-backup.md).
+The built-in archive currently contains the SQLite snapshot, wiki and configuration, not every artifact, native snapshot or client outbox. Preserve those separately for complete recovery. Never delete SQLite expecting reindex to reconstruct session history. See [`docs/legacy-import.md`](docs/legacy-import.md) and [`docs/upgrade-backup.md`](docs/upgrade-backup.md).
 
 ---
 
@@ -271,6 +281,8 @@ See [`docs/privacy-security.md`](docs/privacy-security.md).
 - **[MCP Interface Reference](docs/mcp-reference.md):** MCP tool descriptions, schemas, arguments, and Gemini/Bedrock compatibility.
 - **[HTTP & Frontend API](docs/http-api.md):** Read-only `/api/v1` REST endpoints, dual authentication, and web UI hosting.
 - **[Hermes Agent Integration](docs/hermes.md):** The SessionMunch MemoryProvider plugin for Hermes: install, configuration and lifecycle.
+- **[Muse Code Integration](docs/mcp-install.md#muse-code):** Native MCP configuration, safe connection and a read-only verification exercise.
+- **[Hosted History Import](docs/hosted-chat-history.md):** Explicit account exports, identity, redaction, preview and limitations.
 - **[Support Matrix](docs/support-matrix.md):** Every platform, harness and provider, including the community-grade hook bundles.
 - **[Service & Supervision](docs/service-supervision.md):** Running via systemd user/system services, launchd, or Docker.
 - **[Privacy, Security & Threat Model](docs/privacy-security.md):** Zero-telemetry guarantees, secret sanitization, and network boundaries.
