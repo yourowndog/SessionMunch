@@ -84,6 +84,16 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
         .unwrap_or(SystemTime::UNIX_EPOCH);
     let import_dir = config.data_dir.join("history-import");
     let (harnesses, include_hermes) = select_sources(args.harness.as_deref())?;
+    // Cursors and spool sequences belong to one on-disk import state.
+    // The spool's mutex only coordinates clones inside one process. Hold
+    // an OS lock across discovery, enqueue, cursor updates and draining so
+    // a timer and a manual import cannot overwrite each other's batches.
+    // A dry run never opens the spool or writes cursors, so it needs no lock.
+    let _import_lock = if args.dry_run {
+        None
+    } else {
+        Some(acquire_import_lock(&import_dir)?)
+    };
     let mut staging_losses = Vec::new();
     let (home, harnesses, include_hermes, staging) = match &args.from_snapshots {
         Some(dir) => {
@@ -563,6 +573,33 @@ pub(crate) fn parse_since(raw: &str) -> Result<Duration> {
     sessionmunch_core::parse_time_window(raw).map_err(|message| anyhow!("--since {message}"))
 }
 
+/// Exclusive access to a single history-import state directory.
+struct ImportLock {
+    _file: std::fs::File,
+}
+
+fn acquire_import_lock(import_dir: &Path) -> Result<ImportLock> {
+    std::fs::create_dir_all(import_dir)
+        .with_context(|| format!("creating {}", import_dir.display()))?;
+    let path = import_dir.join(".import.lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .with_context(|| format!("opening history import lock {}", path.display()))?;
+    // Never unlink a lock file: another process could hold that inode while
+    // a new importer creates a different one. The OS unlocks it on exit.
+    fs2::FileExt::try_lock_exclusive(&file).with_context(|| {
+        format!(
+            "cannot acquire history import lock {}; another import may be active; retry after it exits",
+            path.display()
+        )
+    })?;
+    Ok(ImportLock { _file: file })
+}
+
 fn read_cursors(path: &Path) -> CursorFile {
     std::fs::read_to_string(path)
         .ok()
@@ -623,6 +660,19 @@ fn print_report(report: &ImportReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concurrent_imports_cannot_share_cursor_and_spool_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = acquire_import_lock(dir.path()).unwrap();
+        let error = acquire_import_lock(dir.path())
+            .err()
+            .expect("second writer refused");
+        assert!(error.to_string().contains("history import lock"));
+        // The persistent inode is harmless after the first importer exits.
+        drop(first);
+        assert!(acquire_import_lock(dir.path()).is_ok());
+    }
 
     #[test]
     fn imported_sessions_reuse_the_hook_session_identity() {

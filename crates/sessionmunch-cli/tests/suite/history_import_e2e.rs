@@ -297,3 +297,48 @@ fn snapshot_imports_after_the_live_store_is_gone_and_artifacts_read_back() {
     assert!(output.status.success(), "{output:?}");
     assert_eq!(String::from_utf8(output.stdout).unwrap(), big_output);
 }
+
+/// A scheduled and a manual import on one machine share the same on-disk
+/// queue. A second writer must refuse before opening the spool, but a
+/// read-only preview remains available while the first holds the lock.
+#[test]
+fn history_import_lock_refuses_concurrent_writer_but_allows_dry_run() {
+    let tmp = tempfile::tempdir().unwrap();
+    let node_data = tmp.path().join("node");
+    let import_dir = node_data.join("history-import");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&import_dir).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+    write_claude_transcript(&home);
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(import_dir.join(".import.lock"))
+        .unwrap();
+    fs2::FileExt::try_lock_exclusive(&file).unwrap();
+    let url = "http://127.0.0.1:1";
+    let args = [
+        "import",
+        "sessions",
+        "--since",
+        "all",
+        "--harness",
+        "claude",
+        "--json",
+    ];
+    let refused = child(&node_data, &home, url).args(args).output().unwrap();
+    assert!(!refused.status.success(), "second writer must be refused");
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("history import lock"),
+        "{refused:?}"
+    );
+    assert!(!import_dir.join("spool").exists());
+    assert!(!import_dir.join("cursors.json").exists());
+    let dry = run_json(child(&node_data, &home, url).args(args).arg("--dry-run"));
+    assert_eq!(dry["harnesses"][0]["sessions_found"], 1, "{dry}");
+    assert_eq!(dry["events_delivered"], 0, "{dry}");
+    assert!(!import_dir.join("spool").exists());
+    assert!(!import_dir.join("cursors.json").exists());
+}
