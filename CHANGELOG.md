@@ -146,6 +146,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#t_c51f1a51).
 
 ### Fixed
+- Restore read-only legacy Hermes provider configuration compatibility and fail closed on required pre-compression checkpoints without explicit scope and a matching write receipt.
 - OpenCode 2 reuses a session’s cached handoff in each ephemeral model context without duplicate system entries.
 - History import no longer stops reading a Claude Code, Codex or other append-only transcript after the file is rewritten shorter. The stored byte cursor then pointed past the end, so the importer read nothing from that file until it grew back past the old size, reporting "0 with new events" for those sessions. A cursor past the end now re-reads the file from the start; records already imported are deduplicated by their stable event ids. (#34)
 - Claude Code runs that are a single model call, not a session (`claude -p --no-session-persistence`, as started by Hermes' Claude subscription plugin and other Agent SDK callers), are no longer recorded and get no handoff injected. Before, each call registered a fake one-message session, and the changing handoff text broke the caller's prompt cache. Detection uses the Claude process's command line, or a transcript that was never written at Stop/SessionEnd.

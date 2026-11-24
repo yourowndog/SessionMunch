@@ -37,11 +37,18 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # Default sessionmunch MCP server address.
-_DEFAULT_MCP_URL = os.environ.get("SESSIONMUNCH_MCP_URL", "http://127.0.0.1:49374/mcp")
+_DEFAULT_MCP_URL = "http://127.0.0.1:49374/mcp"
 
 # Config file basename written to $HERMES_HOME.
 _CONFIG_FILENAME = "sessionmunch.json"
-_LEGACY_CONFIG_FILENAME = "sessionmunch.json"
+_LEGACY_CONFIG_FILENAME = "ai-memory.json"
+
+def _env(suffix: str) -> Optional[str]:
+    """Canonical names win even when explicitly empty; legacy is read-only."""
+    name = "SESSIONMUNCH_" + suffix
+    if name in os.environ:
+        return os.environ[name]
+    return os.environ.get("AI_MEMORY_" + suffix)
 
 # Spill threshold for oversized prefetch output (chars).
 _SPILL_THRESHOLD = 10_000
@@ -49,6 +56,7 @@ _SPILL_THRESHOLD = 10_000
 # Default token file paths (node-local secrets, never synced via chezmoi).
 _DEFAULT_TOKEN_FILE = Path.home() / ".local" / "share" / "sessionmunch" / "auth-token"
 _FALLBACK_TOKEN_FILE = Path.home() / ".config" / "opencode" / ".sessionmunch-token"
+
 
 # Hit arrays the live server uses, in merge order, live in ``schema.py``
 # (``_HIT_ARRAY_KEYS``) — a global=true query leaves ``hits`` empty and
@@ -314,7 +322,7 @@ class _McpClient:
                 "arguments": arguments,
             },
         }
-        logger.debug("MCP call_tool(%s) args=%s", tool_name, arguments)
+        logger.debug("MCP call_tool(%s)", tool_name)
         return self._post(payload)
 
     def health(self) -> bool:
@@ -524,13 +532,13 @@ class SessionMunchProvider(MemoryProvider):
         # Check for config file existence first.
         try:
             from hermes_constants import get_hermes_home
-            config_path = Path(str(get_hermes_home())) / _CONFIG_FILENAME
-            if config_path.exists():
+            home = Path(str(get_hermes_home()))
+            if any((home / name).is_file() for name in (_CONFIG_FILENAME, _LEGACY_CONFIG_FILENAME)):
                 return True
         except Exception:
             pass
         # Fall back to env var check.
-        return bool(os.environ.get("SESSIONMUNCH_MCP_URL") or os.environ.get("SESSIONMUNCH_HOME"))
+        return bool(_env("MCP_URL") or _env("HOME"))
 
     def unavailable_reason(self) -> str:
         return (
@@ -561,12 +569,12 @@ class SessionMunchProvider(MemoryProvider):
         # Build MCP client (lazy — no connection attempt).
         mcp_url = (
             self._config.get("mcp_url")
-            or os.environ.get("SESSIONMUNCH_MCP_URL")
+            or _env("MCP_URL")
             or _DEFAULT_MCP_URL
         )
         token_file = (
             self._config.get("token_file")
-            or os.environ.get("SESSIONMUNCH_TOKEN_FILE")
+            or _env("TOKEN_FILE")
         )
         self._mcp = _McpClient(mcp_url=mcp_url, token_file=token_file)
 
@@ -599,18 +607,27 @@ class SessionMunchProvider(MemoryProvider):
         self._config = {}
         hermes_home = self._hermes_home or self._resolve_hermes_home()
         if not hermes_home:
+            self._default_project = _env("DEFAULT_PROJECT") or ""
+            self._default_workspace = _env("DEFAULT_WORKSPACE") or ""
             return
         self._hermes_home = hermes_home
         config_path = Path(self._hermes_home) / _CONFIG_FILENAME
+        if not config_path.exists():
+            legacy = Path(self._hermes_home) / _LEGACY_CONFIG_FILENAME
+            if legacy.exists():
+                config_path = legacy
         self._config_path = config_path
         if config_path.exists():
             try:
                 raw = config_path.read_text(encoding="utf-8")
-                self._config = json.loads(raw) if raw.strip() else {}
-            except (json.JSONDecodeError, OSError) as e:
+                loaded = json.loads(raw) if raw.strip() else {}
+                if not isinstance(loaded, dict):
+                    raise ValueError("config must be an object")
+                self._config = loaded
+            except (ValueError, OSError) as e:
                 logger.warning("Failed to read sessionmunch config: %s", e)
-        self._default_project = self._config.get("default_project", "")
-        self._default_workspace = self._config.get("default_workspace", "")
+        self._default_project = self._config.get("default_project") or _env("DEFAULT_PROJECT") or ""
+        self._default_workspace = self._config.get("default_workspace") or _env("DEFAULT_WORKSPACE") or ""
 
     # -- Config methods --------------------------------------------------
 
@@ -659,13 +676,16 @@ class SessionMunchProvider(MemoryProvider):
             legacy_path = Path(hermes_home) / _LEGACY_CONFIG_FILENAME
             if legacy_path.exists():
                 logger.info("sessionmunch: using legacy config %s", legacy_path)
-                config_path = legacy_path
+                read_path = legacy_path
+            else:
+                read_path = config_path
+        else:
+            read_path = config_path
         existing: Dict[str, Any] = {}
-        if config_path.exists():
-            try:
-                existing = json.loads(config_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                pass
+        if read_path.exists():
+            existing = json.loads(read_path.read_text(encoding="utf-8"))
+            if not isinstance(existing, dict):
+                raise ValueError("SessionMunch config must be an object")
 
         # Filter out secret fields — they go to .env, not the plaintext config.
         schema = {field["key"]: field for field in self.get_config_schema()}
@@ -852,8 +872,8 @@ class SessionMunchProvider(MemoryProvider):
         If checkpointing fails, it raises an exception to fail closed without
         leaving any corrupted partial history.
         """
-        if os.environ.get("SESSIONMUNCH_HOOK_ACTIVE") == "1":
-            logger.debug("sessionmunch: skipping pre-compress checkpoint to prevent double-ingest")
+        # A hook is not proof of a durable required checkpoint.
+        if _env("HOOK_ACTIVE") == "1" and not require_checkpoint:
             return ""
         if not messages:
             return ""
@@ -878,10 +898,14 @@ class SessionMunchProvider(MemoryProvider):
                 evidence_parts.append(f"{role}: {content.strip()}")
 
         if not evidence_parts:
+            if require_checkpoint:
+                raise RuntimeError("sessionmunch required checkpoint has no archivable text evidence")
             return ""
 
         joined_text = "\n\n".join(evidence_parts)
         content_digest = hashlib.sha256(joined_text.encode("utf-8")).hexdigest()[:16]
+        if require_checkpoint and not self._session_id:
+            raise RuntimeError("sessionmunch required checkpoint has no session identity")
         sid = self._session_id or "default"
         checkpoint_path = f"checkpoints/{sid}/pre-compress-{content_digest}.md"
         body = (
@@ -900,6 +924,11 @@ class SessionMunchProvider(MemoryProvider):
         }
         try:
             self._apply_default_scope(write_args)
+            if require_checkpoint and not all(
+                isinstance(write_args.get(k), str) and write_args[k].strip()
+                for k in ("workspace", "project")
+            ):
+                raise RuntimeError("sessionmunch required checkpoint has no explicit scope")
             result = self._mcp.call_tool("memory_write_page", write_args)
             if result.get("isError"):
                 err_msg = "unknown error"
@@ -908,6 +937,25 @@ class SessionMunchProvider(MemoryProvider):
                         err_msg = item.get("text", err_msg)
                         break
                 raise RuntimeError(f"sessionmunch checkpoint write failed: {err_msg}")
+            if require_checkpoint:
+                acknowledged = False
+                for item in result.get("content", []):
+                    if not isinstance(item, dict) or item.get("type") != "text":
+                        continue
+                    try:
+                        receipt = json.loads(item.get("text", ""))
+                    except (TypeError, ValueError):
+                        continue
+                    if (
+                        isinstance(receipt, dict)
+                        and receipt.get("path") == checkpoint_path
+                        and isinstance(receipt.get("page_id"), str)
+                        and receipt["page_id"]
+                    ):
+                        acknowledged = True
+                        break
+                if not acknowledged:
+                    raise RuntimeError("sessionmunch required checkpoint has no matching write receipt")
             logger.info("sessionmunch pre-compress checkpoint saved: %s", checkpoint_path)
             return f"sessionmunch checkpoint: {checkpoint_path} (digest: {content_digest})"
         except Exception as exc:
@@ -918,7 +966,7 @@ class SessionMunchProvider(MemoryProvider):
 
     def on_session_end(self, messages: List[Dict[str, Any]]) -> None:
         """Trigger sessionmunch consolidation for the session being closed."""
-        if os.environ.get("SESSIONMUNCH_HOOK_ACTIVE") == "1":
+        if _env("HOOK_ACTIVE") == "1":
             logger.debug("sessionmunch: skipping session_end consolidation to prevent double-ingest")
             return
         if not self._mcp or not self._session_id:
