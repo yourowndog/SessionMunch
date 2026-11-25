@@ -121,6 +121,10 @@ fn install_staged_restore(staged: &Path, data_dir: &Path) -> Result<()> {
                 installed.push(name.to_owned());
             }
         }
+        #[cfg(test)]
+        if TEST_INJECT_FIRST_FAILURE.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            bail!("injected first failure after staging originals");
+        }
         Ok(())
     })();
     if let Err(error) = result {
@@ -128,12 +132,28 @@ fn install_staged_restore(staged: &Path, data_dir: &Path) -> Result<()> {
         return match rollback_error {
             Ok(()) => Err(error),
             Err(rollback_error) => {
-                Err(error.context(format!("restore rollback also failed: {rollback_error}")))
+                // Custody: the rollback may have failed partway, leaving some
+                // original bytes still parked under `rollback`. Keeping the
+                // TempDir leaks it to a persisted recovery path on disk instead
+                // of letting TempDir's Drop delete those parked originals, so
+                // an operator can always retrieve the pre-restore data.
+                let preserved = rollback.keep();
+                Err(error.context(format!(
+                    "restore rollback also failed: {rollback_error}; original data preserved at {}",
+                    preserved.display()
+                )))
             }
         };
     }
     Ok(())
 }
+
+#[cfg(test)]
+static TEST_INJECT_FIRST_FAILURE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+#[cfg(test)]
+static TEST_INJECT_ROLLBACK_FAILURE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 fn rollback_install(
     data_dir: &Path,
@@ -141,6 +161,10 @@ fn rollback_install(
     installed: &[String],
     originals: &[String],
 ) -> Result<()> {
+    #[cfg(test)]
+    if TEST_INJECT_ROLLBACK_FAILURE.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        bail!("injected rollback failure (regression: parked originals must survive)");
+    }
     for name in installed.iter().rev() {
         remove_path(&data_dir.join(name))?;
     }
@@ -315,6 +339,55 @@ mod tests {
         assert_eq!(
             std::fs::read(destination.join("db/memory.sqlite")).unwrap(),
             b"old-db"
+        );
+    }
+    #[test]
+    fn rollback_failure_preserves_parked_original_bytes() {
+        // A restore that has already parked the live originals into the
+        // rollback TempDir, then fails (injected first failure), and whose
+        // compensating rollback ALSO fails (injected second failure), must not
+        // let TempDir's Drop delete the parked original bytes. The keep()
+        // recovery path must retain them byte-for-byte.
+        let staged = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(staged.path().join("db")).unwrap();
+        std::fs::write(staged.path().join("db/memory.sqlite"), b"new-db").unwrap();
+        let source_artifact = staged.path().join("artifacts/new.bin");
+        std::fs::create_dir_all(source_artifact.parent().unwrap()).unwrap();
+        std::fs::write(&source_artifact, b"new-artifact").unwrap();
+
+        let destination_parent = tempfile::tempdir().unwrap();
+        let destination = destination_parent.path().join("data");
+        std::fs::create_dir_all(destination.join("wiki")).unwrap();
+        std::fs::write(destination.join("wiki/old.md"), b"parked-wiki-bytes").unwrap();
+
+        TEST_INJECT_FIRST_FAILURE.store(true, std::sync::atomic::Ordering::SeqCst);
+        TEST_INJECT_ROLLBACK_FAILURE.store(true, std::sync::atomic::Ordering::SeqCst);
+
+        let error = install_staged_restore(staged.path(), &destination).unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("rollback also failed"),
+            "unexpected error: {message}"
+        );
+        let preserved = message
+            .rsplit_once("original data preserved at ")
+            .map(|(_, p)| p.to_owned())
+            .expect("recovery path must be reported");
+        let preserved_path = std::path::PathBuf::from(preserved);
+        // The parked original must still exist byte-for-byte at the preserved
+        // recovery path, not have been deleted by the rollback TempDir drop.
+        assert_eq!(
+            std::fs::read(preserved_path.join("wiki/old.md")).unwrap(),
+            b"parked-wiki-bytes"
+        );
+        // The original was moved aside and is no longer at the destination...
+        assert!(!destination.join("wiki/old.md").exists());
+        // ...while the rollback (bailing at its first step) leaves the staged
+        // data installed. Asserting that the staged db landed proves the
+        // install phase really ran before both failures were injected.
+        assert_eq!(
+            std::fs::read(destination.join("db/memory.sqlite")).unwrap(),
+            b"new-db"
         );
     }
 
