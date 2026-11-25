@@ -398,6 +398,7 @@ pub(crate) fn search_session_events(
            AND (?7 IS NULL OR session_events.created_at < ?7) \
            AND (?9 = 0 OR sessions.actor_user IS NULL \
                 OR (?9 = 1 AND sessions.actor_user = ?10)) \
+           AND (?11 IS NULL OR sessions.project_id = ?11) \
          ORDER BY {order} \
          LIMIT ?8"
     );
@@ -419,6 +420,7 @@ pub(crate) fn search_session_events(
             limit,
             owner_mode,
             owner_key,
+            search.project.as_ref().map(|id| id.as_bytes().to_vec()),
         ],
         |row| {
             Ok(RawHit {

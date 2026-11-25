@@ -8438,11 +8438,11 @@ async fn session_evidence_excludes_forbidden_owned_sources_for_anonymous_caller(
                     project: None,
                     scopes: Vec::new(),
                     workspace: None,
-                    global: None,
+                    global: Some(true),
                     include_expired: None,
                     explain: None,
                     as_of: None,
-                    unit: None,
+                    unit: Some(QueryUnit::Passage),
                     parent_expansion: None,
                     content_budget: None,
                     since: None,
@@ -8477,6 +8477,127 @@ async fn session_evidence_excludes_forbidden_owned_sources_for_anonymous_caller(
             .all(|row| row.get("session_id").and_then(|v| v.as_str())
                 != Some(owned.to_string().as_str())),
         "forbidden owned session leaked into evidence: {value}"
+    );
+}
+
+#[tokio::test]
+async fn global_session_evidence_respects_source_projects() {
+    let (_tmp, store, server, ws, default_proj) = setup_server().await;
+    let selected_proj = store
+        .writer
+        .get_or_create_project(ws, "selected-evidence", None)
+        .await
+        .unwrap();
+    let excluded = seed_session_with_event(
+        &store,
+        ws,
+        default_proj,
+        None,
+        "evt:excluded-project",
+        "crossstreamneedle excluded",
+    )
+    .await;
+    let selected = seed_session_with_event(
+        &store,
+        ws,
+        selected_proj,
+        None,
+        "evt:selected-project",
+        "crossstreamneedle selected",
+    )
+    .await;
+    let selected_id = selected.to_string();
+    let excluded_id = excluded.to_string();
+
+    let value = call_tool_json(
+        server
+            .memory_query(
+                Parameters(QueryArgs {
+                    query: "crossstreamneedle".into(),
+                    limit: Some(5),
+                    project: None,
+                    scopes: Vec::new(),
+                    workspace: None,
+                    global: Some(true),
+                    include_expired: None,
+                    explain: None,
+                    as_of: None,
+                    unit: Some(QueryUnit::Passage),
+                    parent_expansion: None,
+                    content_budget: None,
+                    since: None,
+                    until: None,
+                    machine: None,
+                    harness: None,
+                    kinds: None,
+                    source_projects: Some(vec![selected_proj.to_string()]),
+                }),
+                test_optional_parts(),
+            )
+            .await
+            .unwrap(),
+    );
+    let evidence = value["session_evidence"]
+        .as_array()
+        .expect("selected project evidence");
+    assert_eq!(evidence.len(), 1, "source-project filter leaked: {value}");
+    assert_eq!(
+        evidence[0].get("session_id").and_then(|v| v.as_str()),
+        Some(selected_id.as_str())
+    );
+    assert!(
+        evidence.iter().all(|row| row
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            != Some(excluded_id.as_str())),
+        "excluded project session leaked: {value}"
+    );
+}
+
+#[tokio::test]
+async fn global_session_evidence_respects_since_cutoff() {
+    let (_tmp, store, server, ws, proj) = setup_server().await;
+    seed_session_with_event(
+        &store,
+        ws,
+        proj,
+        None,
+        "evt:before-cutoff",
+        "futurecutoffneedle evidence",
+    )
+    .await;
+
+    let value = call_tool_json(
+        server
+            .memory_query(
+                Parameters(QueryArgs {
+                    query: "futurecutoffneedle".into(),
+                    limit: Some(5),
+                    project: None,
+                    scopes: Vec::new(),
+                    workspace: None,
+                    global: Some(true),
+                    include_expired: None,
+                    explain: None,
+                    as_of: None,
+                    unit: Some(QueryUnit::Passage),
+                    parent_expansion: None,
+                    content_budget: None,
+                    since: Some("2100-01-01T00:00:00Z".into()),
+                    until: None,
+                    machine: None,
+                    harness: None,
+                    kinds: None,
+                    source_projects: None,
+                }),
+                test_optional_parts(),
+            )
+            .await
+            .unwrap(),
+    );
+    assert!(
+        value.get("session_evidence").is_none(),
+        "pre-cutoff session evidence leaked into global results: {value}"
     );
 }
 
