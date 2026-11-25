@@ -636,9 +636,9 @@ async fn import_sessions<'a>(
             }
         }
 
-        // For hosted imports, do not commit an incomplete first-write ledger
-        // if a large payload failed to arrive. Retain the export for retry.
-        if session.hosted.is_some() && artifact_failure {
+        // If a large payload failed to arrive, do not commit an incomplete
+        // first-write ledger or advance the cursor. Retain the export for retry.
+        if artifact_failure {
             continue;
         }
         let (workspace, project) = session.hosted.map_or_else(
