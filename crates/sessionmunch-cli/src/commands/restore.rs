@@ -107,7 +107,12 @@ fn install_staged_restore(staged: &Path, data_dir: &Path) -> Result<()> {
     let result = (|| -> Result<()> {
         for name in RESTORED_PATHS {
             let live = data_dir.join(name);
-            if live.exists() {
+            // The wiki and ledger are always replaced as a pair. Optional
+            // paths (`config.toml`, `artifacts`) are replaced only when the
+            // archive carries them: an older or config-less backup must not
+            // delete the live configuration or content-addressed blobs.
+            let replaced = matches!(name, "wiki" | "db") || staged.join(name).exists();
+            if replaced && live.exists() {
                 std::fs::rename(&live, rollback.path().join(name))
                     .with_context(|| format!("moving existing {name} aside"))?;
                 originals.push(name.to_owned());
@@ -122,7 +127,7 @@ fn install_staged_restore(staged: &Path, data_dir: &Path) -> Result<()> {
             }
         }
         #[cfg(test)]
-        if TEST_INJECT_FIRST_FAILURE.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        if TEST_INJECT_FIRST_FAILURE.with(|flag| flag.replace(false)) {
             bail!("injected first failure after staging originals");
         }
         Ok(())
@@ -148,12 +153,12 @@ fn install_staged_restore(staged: &Path, data_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+// Per-thread so a parallel test cannot consume another test's injection.
 #[cfg(test)]
-static TEST_INJECT_FIRST_FAILURE: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-#[cfg(test)]
-static TEST_INJECT_ROLLBACK_FAILURE: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+thread_local! {
+    static TEST_INJECT_FIRST_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static TEST_INJECT_ROLLBACK_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 
 fn rollback_install(
     data_dir: &Path,
@@ -162,7 +167,7 @@ fn rollback_install(
     originals: &[String],
 ) -> Result<()> {
     #[cfg(test)]
-    if TEST_INJECT_ROLLBACK_FAILURE.swap(false, std::sync::atomic::Ordering::SeqCst) {
+    if TEST_INJECT_ROLLBACK_FAILURE.with(|flag| flag.replace(false)) {
         bail!("injected rollback failure (regression: parked originals must survive)");
     }
     for name in installed.iter().rev() {
@@ -306,6 +311,51 @@ mod tests {
     }
 
     #[test]
+    fn forced_restore_keeps_live_config_and_artifacts_the_archive_lacks() {
+        // A backup taken before artifacts were archived, or with no config,
+        // replaces the wiki and ledger but must not delete what it lacks.
+        let source = tempfile::tempdir().unwrap();
+        drop(Store::open(source.path()).unwrap());
+        std::fs::create_dir_all(source.path().join("wiki")).unwrap();
+        std::fs::write(source.path().join("wiki/new.md"), b"new-wiki").unwrap();
+        let archive_dir = tempfile::tempdir().unwrap();
+        let archive = archive_dir.path().join("backup.tar.gz");
+        write_backup(source.path(), &archive);
+
+        let destination_parent = tempfile::tempdir().unwrap();
+        let destination = destination_parent.path().join("data");
+        std::fs::create_dir_all(destination.join("wiki")).unwrap();
+        std::fs::create_dir_all(destination.join("artifacts/sha256/bb")).unwrap();
+        std::fs::write(destination.join("wiki/old.md"), b"old-wiki").unwrap();
+        std::fs::write(destination.join("config.toml"), b"live = true\n").unwrap();
+        std::fs::write(
+            destination.join("artifacts/sha256/bb/live.bin"),
+            b"live-artifact",
+        )
+        .unwrap();
+        drop(Store::open(&destination).unwrap());
+
+        restore_archive(&destination, &archive, true).unwrap();
+
+        assert_eq!(
+            std::fs::read(destination.join("wiki/new.md")).unwrap(),
+            b"new-wiki"
+        );
+        assert!(
+            !destination.join("wiki/old.md").exists(),
+            "the wiki is replaced as a whole"
+        );
+        assert_eq!(
+            std::fs::read(destination.join("config.toml")).unwrap(),
+            b"live = true\n"
+        );
+        assert_eq!(
+            std::fs::read(destination.join("artifacts/sha256/bb/live.bin")).unwrap(),
+            b"live-artifact"
+        );
+    }
+
+    #[test]
     fn failed_staged_validation_leaves_existing_restore_data_untouched() {
         let source = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(source.path().join("db")).unwrap();
@@ -360,8 +410,8 @@ mod tests {
         std::fs::create_dir_all(destination.join("wiki")).unwrap();
         std::fs::write(destination.join("wiki/old.md"), b"parked-wiki-bytes").unwrap();
 
-        TEST_INJECT_FIRST_FAILURE.store(true, std::sync::atomic::Ordering::SeqCst);
-        TEST_INJECT_ROLLBACK_FAILURE.store(true, std::sync::atomic::Ordering::SeqCst);
+        TEST_INJECT_FIRST_FAILURE.with(|flag| flag.set(true));
+        TEST_INJECT_ROLLBACK_FAILURE.with(|flag| flag.set(true));
 
         let error = install_staged_restore(staged.path(), &destination).unwrap_err();
         let message = error.to_string();
