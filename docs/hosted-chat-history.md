@@ -88,7 +88,9 @@ sessionmunch import chats --format observed --provider claude --account personal
   UTC invocation instant, original source time only, unknown times withheld
   and counted in `cutoff_excluded`, cursors held, out-of-window spool refused.
 
-SessionMunch does not ship a collector. Whether a given provider surface
+A fixture-only collector prototype lives in
+`companions/sessionmunch-visible-turn-collector` (no provider profiles; see its
+README for the per-surface requirements). Whether a given provider surface
 exposes native message UUIDs to a visible-page collector, and whether a
 collector is acceptable for an account, must be proven per surface with an
 owner-selected harmless thread before any real capture. This format is not

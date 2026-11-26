@@ -1,0 +1,11 @@
+{
+  "description": "Profile for the synthetic test fixture only. Not a ChatGPT or Claude profile.",
+  "messageSelector": "article.fixture-message",
+  "messageIdAttribute": "data-fixture-message-id",
+  "roleAttribute": "data-fixture-role",
+  "roles": { "user": "user", "assistant": "assistant" },
+  "textSelector": ".fixture-text",
+  "streamingSelector": "[data-fixture-streaming]",
+  "occurredAtAttribute": "data-fixture-time",
+  "conversationIdPattern": "#c=([0-9a-fA-F-]{36})$"
+}
