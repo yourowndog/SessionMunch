@@ -654,3 +654,188 @@ async fn a_second_machine_cannot_relabel_where_a_session_ran() {
     );
     assert_eq!(sleeper[0].event_id, "e2");
 }
+
+fn visible(id: &str, kind: WorkstreamEventKind, role: &str, text: &str) -> NewSessionEvent {
+    NewSessionEvent {
+        event_id: id.to_string(),
+        kind,
+        role: Some(role.into()),
+        content: text.to_string(),
+        occurred_at: None,
+        source: SessionSource::Import,
+        metadata: serde_json::json!({"capture": "export"}),
+    }
+}
+
+/// Wire pagination oracle: 1002 eligible turns plus interleaved ineligible
+/// rows after a fixed checkpoint, paged with a 1000-row scan bound, return
+/// every eligible turn exactly once in insertion order with a final scanned
+/// watermark; never inferred from the newest 1000.
+#[tokio::test]
+async fn visible_turn_pages_are_lossless_across_the_scan_bound() {
+    let tmp = tempfile::tempdir().unwrap();
+    let store = Store::open(tmp.path()).unwrap();
+    let (ws, proj) = scope(&store).await;
+    let session_id = SessionId::new();
+    let mut session = new_session(ws, proj, session_id);
+    session.actor_user = None;
+    store
+        .writer
+        .begin_session_with_provenance(session, SessionProvenance::default())
+        .await
+        .unwrap();
+    let mut events = Vec::new();
+    for i in 0..1002 {
+        let role = if i % 2 == 0 { "user" } else { "assistant" };
+        events.push(visible(
+            &format!("m{i}"),
+            WorkstreamEventKind::Message,
+            role,
+            "same text",
+        ));
+        if i == 500 {
+            events.push(visible(
+                "tool",
+                WorkstreamEventKind::ToolResult,
+                "tool",
+                "x",
+            ));
+            events.push(visible("sys", WorkstreamEventKind::Message, "system", "x"));
+        }
+    }
+    store
+        .writer
+        .append_session_events(session_id, events)
+        .await
+        .unwrap();
+    let owner = sessionmunch_core::OwnerFilter::Unattributed;
+    let mut cursor: Option<(i64, String)> = None;
+    let mut seen = Vec::new();
+    let mut pages = 0;
+    loop {
+        let page = store
+            .reader
+            .visible_turns_after(session_id, ws, proj, owner.clone(), cursor.clone(), 5_000)
+            .await
+            .unwrap()
+            .unwrap();
+        pages += 1;
+        assert_eq!(page.status, sessionmunch_store::VisibleTurnPageStatus::Ok);
+        assert!(page.scanned_through - cursor.as_ref().map_or(0, |c| c.0) <= 1000);
+        seen.extend(page.turns.iter().map(|t| t.event_id.clone()));
+        cursor = Some((page.scanned_through, page.scanned_event_id.clone().unwrap()));
+        if page.complete {
+            assert_eq!(page.high_water, 1004);
+            assert_eq!(page.missing_in_range, 0);
+            break;
+        }
+    }
+    assert_eq!(pages, 2);
+    let expected: Vec<String> = (0..1002).map(|i| format!("m{i}")).collect();
+    assert_eq!(seen, expected, "every eligible turn exactly once, in order");
+    // Caught up: an empty, complete page at the same watermark.
+    let idle = store
+        .reader
+        .visible_turns_after(session_id, ws, proj, owner, cursor, 10)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(idle.turns.is_empty() && idle.complete);
+}
+
+/// Purge and restore are detected: deleting the anchor row resets, deleted
+/// rows inside a scanned range are counted, a missing prefix is flagged, and
+/// another owner cannot read the session.
+#[tokio::test]
+async fn visible_turn_cursor_detects_purge_gap_and_owner() {
+    let tmp = tempfile::tempdir().unwrap();
+    let store = Store::open(tmp.path()).unwrap();
+    let (ws, proj) = scope(&store).await;
+    let session_id = SessionId::new();
+    store
+        .writer
+        .begin_session_with_provenance(
+            new_session(ws, proj, session_id),
+            SessionProvenance::default(),
+        )
+        .await
+        .unwrap();
+    let events = (1..=5)
+        .map(|i| {
+            visible(
+                &format!("e{i}"),
+                WorkstreamEventKind::Message,
+                "assistant",
+                "t",
+            )
+        })
+        .collect();
+    store
+        .writer
+        .append_session_events(session_id, events)
+        .await
+        .unwrap();
+    let alice = sessionmunch_core::OwnerFilter::User("user:alice".into());
+    let bob = sessionmunch_core::OwnerFilter::User("user:bob".into());
+    assert!(
+        store
+            .reader
+            .visible_turns_after(session_id, ws, proj, bob, None, 10)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    {
+        let conn =
+            rusqlite::Connection::open(tmp.path().join("db").join(sessionmunch_store::DB_FILENAME))
+                .unwrap();
+        conn.execute(
+            "DELETE FROM session_events WHERE session_id = ?1 AND sequence IN (1, 3)",
+            rusqlite::params![session_id.as_bytes()],
+        )
+        .unwrap();
+    }
+    let fresh = store
+        .reader
+        .visible_turns_after(session_id, ws, proj, alice.clone(), None, 10)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(fresh.gap_before_oldest);
+    assert_eq!(fresh.oldest_available, 2);
+    assert_eq!(fresh.missing_in_range, 2);
+    assert_eq!(fresh.turns.len(), 3);
+    let reset = store
+        .reader
+        .visible_turns_after(
+            session_id,
+            ws,
+            proj,
+            alice.clone(),
+            Some((3, "e3".into())),
+            10,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        reset.status,
+        sessionmunch_store::VisibleTurnPageStatus::Reset
+    );
+    assert!(reset.turns.is_empty());
+    let resumed = store
+        .reader
+        .visible_turns_after(session_id, ws, proj, alice, Some((2, "e2".into())), 10)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(resumed.missing_in_range, 1);
+    assert_eq!(
+        resumed
+            .turns
+            .iter()
+            .map(|t| t.event_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["e4", "e5"]
+    );
+}

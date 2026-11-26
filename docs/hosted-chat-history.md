@@ -93,3 +93,24 @@ exposes native message UUIDs to a visible-page collector, and whether a
 collector is acceptable for an account, must be proven per surface with an
 owner-selected harmless thread before any real capture. This format is not
 evidence of continuous coverage.
+
+## Replaying finalized visible turns (consumers such as Wire)
+
+`GET /session-events/{session_id}/visible-turns?workspace=W&project=P[&after_seq=N&after_event_id=ID][&limit=K]`
+
+Uses the same bearer authentication as other ingress and requires normal read.
+The session must belong to `W/P` and be visible to the caller's owner;
+otherwise the response is `404`, whether or not the session exists. Each call scans at
+most `K` (at most 1000) ledger rows in ascending insertion order after the
+cursor and returns only `message` rows with role `user`/`assistant` that did
+not come from hook mirrors, as `{sequence, event_id, role, content,
+occurred_at, capture}`.
+
+Checkpoint `(scanned_through, scanned_event_id)`, not the newest returned
+turn: tool and other ineligible rows advance the scan without being returned.
+Replaying the same cursor returns the same page. `status: reset` means the cursor's
+anchor row is gone or now holds a different event (purge, restore or reused
+sequence): stop and record an explicit gap instead of skipping. A
+`gap_before_oldest` or non-zero `missing_in_range` flag reports rows deleted
+before they were read. `occurred_at` is evidence only and is never a cursor.
+This is a per-session cursor; there is no global cursor.

@@ -81,7 +81,10 @@ pub use scope::{
     lookup_global_scope, resolve_many_existing_scopes,
 };
 pub use session_consolidation::{SESSION_CONSOLIDATION_MAX_ATTEMPTS, SessionConsolidationJob};
-pub use session_events::MAX_TRANSCRIPT_EVENTS;
+pub use session_events::{
+    MAX_TRANSCRIPT_EVENTS, MAX_VISIBLE_TURN_SCAN, VisibleTurn, VisibleTurnPage,
+    VisibleTurnPageStatus,
+};
 pub use sessionmunch_core::session_events::SessionEventHit;
 pub use users::{
     LoginUser, TOKEN_HASH_LEN, TOKEN_RAW_LEN, TokenPepper, generate_token, hash_token,

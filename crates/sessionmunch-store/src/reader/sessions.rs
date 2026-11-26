@@ -49,6 +49,35 @@ impl ReaderPool {
         .await
     }
 
+    /// One bounded ascending page of a session's finalized visible turns
+    /// strictly after a `(sequence, event_id)` cursor, enforcing scope and
+    /// owner server-side. `None` means not visible in this scope.
+    ///
+    /// # Errors
+    /// Propagates any SQL or pool error.
+    pub async fn visible_turns_after(
+        &self,
+        session_id: SessionId,
+        workspace_id: WorkspaceId,
+        project_id: ProjectId,
+        owner: OwnerFilter,
+        after: Option<(i64, String)>,
+        scan_limit: usize,
+    ) -> StoreResult<Option<crate::VisibleTurnPage>> {
+        self.with_conn(move |conn| {
+            crate::session_events::visible_turns_after(
+                conn,
+                &session_id,
+                &workspace_id,
+                &project_id,
+                &owner,
+                after,
+                scan_limit,
+            )
+        })
+        .await
+    }
+
     /// The session's transcript events (imported or managed, never hook
     /// mirrors), newest first, at most `limit` capped at
     /// [`crate::MAX_TRANSCRIPT_EVENTS`].
