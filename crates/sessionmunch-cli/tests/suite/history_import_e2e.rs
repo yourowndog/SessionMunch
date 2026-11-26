@@ -720,3 +720,94 @@ fn hosted_chat_since_is_a_strict_per_message_cutoff() {
     assert_eq!(replay["events_delivered"], 0, "{replay}");
     assert_eq!(search_count(&node_data, &home, &url, "hostednew"), 1);
 }
+
+/// Gate 3: when a required large-payload artifact is not acknowledged, a
+/// native import queues none of that session's events and keeps its cursor,
+/// so a later run retries the whole payload instead of committing a
+/// truncated head/tail to the ledger.
+#[test]
+fn native_artifact_failure_queues_nothing_and_retries_the_whole_payload() {
+    let tmp = tempfile::tempdir().unwrap();
+    let hub_data = tmp.path().join("hub");
+    let node_data = tmp.path().join("node");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    write_claude_transcript(&home);
+    let big_output = format!("{PROBE} {}", "y".repeat(40 * 1024));
+    let transcript = home.join(format!(
+        ".claude/projects/-work-probe-repo/{NATIVE_ID}.jsonl"
+    ));
+    let mut body = std::fs::read_to_string(&transcript).unwrap();
+    body.push_str(&format!(
+        "{}\n",
+        serde_json::json!({
+            "type": "user", "sessionId": NATIVE_ID, "cwd": "/work/probe-repo",
+            "uuid": "u2", "timestamp": "2026-10-19T00:00:02Z",
+            "message": { "role": "user", "content": [
+                { "type": "tool_result", "tool_use_id": "toolu_1", "content": big_output }
+            ]}
+        })
+    ));
+    std::fs::write(&transcript, body).unwrap();
+    let args = [
+        "import",
+        "sessions",
+        "--since",
+        "all",
+        "--harness",
+        "claude",
+        "--json",
+    ];
+
+    // Nothing listens on port 1: the artifact upload cannot be acknowledged.
+    let failed = run_json(child(&node_data, &home, "http://127.0.0.1:1").args(args));
+    let harness = &failed["harnesses"][0];
+    assert_eq!(harness["artifacts_uploaded"], 0, "{failed}");
+    assert_eq!(harness["events_queued"], 0, "{failed}");
+    assert!(
+        harness["losses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|loss| loss.as_str().unwrap().contains("not uploaded")),
+        "{failed}"
+    );
+    assert_eq!(failed["batches_pending"], 0, "{failed}");
+    let cursors =
+        std::fs::read_to_string(node_data.join("history-import/cursors.json")).unwrap_or_default();
+    assert!(!cursors.contains(NATIVE_ID), "cursor held: {cursors}");
+
+    // The hub comes back: the same run delivers the full session and payload.
+    let (_hub, url) = start_hub(&hub_data, &home);
+    let retried = run_json(child(&node_data, &home, &url).args(args));
+    assert_eq!(
+        retried["harnesses"][0]["artifacts_uploaded"], 1,
+        "{retried}"
+    );
+    let queued = retried["harnesses"][0]["events_queued"].as_u64().unwrap();
+    assert!(queued >= 3, "{retried}");
+    assert_eq!(
+        retried["events_delivered"].as_u64(),
+        Some(queued),
+        "{retried}"
+    );
+    let cursors = std::fs::read_to_string(node_data.join("history-import/cursors.json")).unwrap();
+    assert!(
+        cursors.contains(NATIVE_ID),
+        "cursor advances after ack: {cursors}"
+    );
+    let hits = run_json(child(&node_data, &home, &url).args(["search-events", PROBE, "--json"]));
+    let digest = hits
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|hit| hit["metadata"]["artifact_sha256"].as_str())
+        .unwrap_or_else(|| panic!("the cut event names its artifact: {hits}"))
+        .to_owned();
+    let output = child(&node_data, &home, &url)
+        .args(["artifact", "get", &digest])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), big_output);
+}
