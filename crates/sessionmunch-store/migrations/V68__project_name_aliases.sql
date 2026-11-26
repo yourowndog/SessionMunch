@@ -16,7 +16,7 @@ CREATE VIEW project_names AS
 
 -- Guard every SQL insertion, including rebuild/import and future writer paths.
 CREATE TRIGGER project_alias_collision BEFORE INSERT ON project_aliases
-WHEN NEW.name = '_global' OR EXISTS (
+WHEN EXISTS (
     SELECT 1 FROM projects owner JOIN projects other
       ON other.workspace_id = owner.workspace_id
     WHERE owner.id = NEW.project_id AND other.name = NEW.name
@@ -41,7 +41,7 @@ BEGIN
 END;
 
 CREATE TRIGGER project_rename_alias_collision BEFORE UPDATE OF name, workspace_id ON projects
-WHEN (OLD.name != NEW.name AND (OLD.name = '_global' OR NEW.name = '_global')) OR EXISTS (
+WHEN EXISTS (
     SELECT 1 FROM project_aliases a JOIN projects p ON p.id = a.project_id
     WHERE p.workspace_id = NEW.workspace_id AND a.name = NEW.name AND p.id != NEW.id
 ) OR EXISTS (
@@ -63,10 +63,4 @@ WHEN OLD.name != NEW.name
 BEGIN
     DELETE FROM project_aliases WHERE project_id = NEW.id AND name = NEW.name;
     INSERT OR IGNORE INTO project_aliases(project_id, name) VALUES (NEW.id, OLD.name);
-END;
-
--- Aliases are immutable names; rename changes them via insert/delete only.
-CREATE TRIGGER project_alias_no_update BEFORE UPDATE ON project_aliases
-BEGIN
-    SELECT RAISE(ABORT, 'project aliases cannot be updated');
 END;

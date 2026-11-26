@@ -116,6 +116,25 @@ mod tests {
     /// this binary embeds) must fail to open with the actionable
     /// `DataSchemaAhead` error, not refinery's raw "missing from the
     /// filesystem" wording.
+    /// Applied migrations are immutable: refinery refuses to open a store whose
+    /// recorded checksum differs from the embedded file. These are the values the
+    /// canonical hub recorded in `refinery_schema_history` (V67/V68, binary
+    /// aa29bd19). Change behaviour in a new migration, never by editing these.
+    #[test]
+    fn applied_migration_checksums_match_the_canonical_hub() {
+        let runner = migrations::runner();
+        let checksum = |version: i64| {
+            runner
+                .get_migrations()
+                .iter()
+                .find(|m| i64::from(m.version()) == version)
+                .map(refinery::Migration::checksum)
+                .expect("migration is embedded")
+        };
+        assert_eq!(checksum(67), 1_267_863_849_395_752_260);
+        assert_eq!(checksum(68), 14_478_166_101_890_634_647);
+    }
+
     #[test]
     fn data_ahead_of_binary_reports_schema_ahead_not_raw_refinery() {
         let tmp = tempfile::TempDir::new().unwrap();
