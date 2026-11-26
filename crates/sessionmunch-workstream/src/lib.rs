@@ -47,7 +47,8 @@ pub use history_import::{
     discover_harness_history, export_discovered, retain_within_cutoff, to_session_events,
 };
 pub use hosted_chat_history::{
-    HostedChat, HostedChatExport, HostedChatProvider, read_hosted_chat_export,
+    HostedChat, HostedChatExport, HostedChatProvider, OBSERVED_TURN_SCHEMA,
+    read_hosted_chat_export, read_observed_visible_turns,
 };
 pub use repository::{RepositoryIdentity, inspect_repository};
 pub use snapshot::{

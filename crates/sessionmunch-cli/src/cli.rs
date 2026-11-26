@@ -269,9 +269,21 @@ pub enum ImportCommand {
     /// sanitized, queued in a crash-safe local spool, and delivered to the hub
     /// idempotently; unsupported or unreadable stores are reported by name.
     Sessions(ImportSessionsArgs),
-    /// Import selected ChatGPT or Claude account conversation JSON exports.
+    /// Import selected ChatGPT or Claude account conversation JSON exports,
+    /// or live finalized visible turns observed by a cooperative collector.
     /// The desktop and web chat surfaces share account-level conversation IDs.
     Chats(ImportChatsArgs),
+}
+
+/// Hosted chat input kind: historical account export or live observation.
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
+pub enum ChatInputFormat {
+    /// Provider account export conversation JSON (historical, not live).
+    #[default]
+    Export,
+    /// `sessionmunch.observed-visible-turn.v1` NDJSON from a user-enrolled
+    /// live collector; same identity as the export, finalized turns only.
+    Observed,
 }
 
 /// Hosted conversation JSON export provider.
@@ -289,6 +301,9 @@ pub struct ImportChatsArgs {
     /// Stable non-secret account label, reused across desktop and web exports.
     #[arg(long)]
     pub account: String,
+    /// Input kind: `export` (account export JSON) or `observed` (live NDJSON).
+    #[arg(long, value_enum, default_value_t = ChatInputFormat::Export)]
+    pub format: ChatInputFormat,
     /// Explicit destination workspace; do not mix private account history with shared projects.
     #[arg(long)]
     pub workspace: String,

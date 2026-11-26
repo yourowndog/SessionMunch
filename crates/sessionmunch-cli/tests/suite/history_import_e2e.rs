@@ -867,3 +867,185 @@ fn bounded_since_retries_its_own_aged_batches_but_refuses_wider_ones() {
     );
     assert_eq!(search_count(&wide, &home, &url, "widequeued"), 0);
 }
+
+/// MUNCH-022: live finalized visible turns from a user-enrolled collector use
+/// the export identity. Restart replay, a second node and a later account
+/// export deduplicate; an edit is one new revision; partial, identity-less and
+/// pre-cutoff turns are excluded with counts. Synthetic fixture only.
+#[test]
+fn observed_visible_turns_converge_with_export_and_replay() {
+    let tmp = tempfile::tempdir().unwrap();
+    let hub_data = tmp.path().join("hub");
+    let node_data = tmp.path().join("node");
+    let restart_data = tmp.path().join("restart-node");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let (hub, url) = start_hub(&hub_data, &home);
+    let cid = "61616161-6161-4161-8161-616161616161";
+    let user = "62626262-6262-4262-8262-626262626262";
+    let assistant = "63636363-6363-4363-8363-636363636363";
+    let twin = "64646464-6464-4464-8464-646464646464";
+    let now = jiff::Timestamp::now();
+    let at = |secs: i64| (now - jiff::SignedDuration::from_secs(secs)).to_string();
+    let (t0, t1, t2, t3, t4) = (at(3600), at(3590), at(3580), at(3570), at(3560));
+    let ancient = at(60 * 86_400);
+    let turn = |msg: Option<&str>, role: &str, text: &str, fin: bool, at: Option<&str>| {
+        let mut v = serde_json::json!({"schema":"sessionmunch.observed-visible-turn.v1",
+            "provider":"claude","surface":"desktop","conversation_id":cid,"role":role,
+            "final":fin,"text":text,"observed_at":now.to_string()});
+        if let Some(m) = msg {
+            v["message_id"] = serde_json::json!(m);
+        }
+        if let Some(t) = at {
+            v["occurred_at"] = serde_json::json!(t);
+        }
+        format!("{v}\n")
+    };
+    let live = tmp.path().join("observed.ndjson");
+    std::fs::write(
+        &live,
+        [
+            turn(
+                Some(user),
+                "human",
+                "observedlivecanary question",
+                true,
+                Some(&t0),
+            ),
+            turn(
+                Some(assistant),
+                "assistant",
+                "observedlivecanary partial",
+                false,
+                Some(&t1),
+            ),
+            turn(
+                Some(assistant),
+                "assistant",
+                "observedlivecanary answer",
+                true,
+                Some(&t2),
+            ),
+            turn(
+                Some(twin),
+                "assistant",
+                "observedlivecanary answer",
+                true,
+                Some(&t3),
+            ),
+            turn(
+                None,
+                "assistant",
+                "observedlivecanary unidentified",
+                true,
+                Some(&t4),
+            ),
+            turn(
+                Some("65656565-6565-4565-8565-656565656565"),
+                "human",
+                "observedlivecanary ancient",
+                true,
+                Some(&ancient),
+            ),
+        ]
+        .concat(),
+    )
+    .unwrap();
+    let import = |data: &Path, format: &str, file: &Path| {
+        run_json(
+            child(data, &home, &url)
+                .args([
+                    "import",
+                    "chats",
+                    "--provider",
+                    "claude",
+                    "--account",
+                    "fixture",
+                    "--workspace",
+                    "private-history",
+                    "--project",
+                    "hosted",
+                    "--json",
+                    "--format",
+                    format,
+                    "--since",
+                    "35d",
+                ])
+                .arg(file),
+        )
+    };
+    let first = import(&node_data, "observed", &live);
+    assert_eq!(first["events_delivered"], 3, "{first}");
+    let notes = first["harnesses"][0]["losses"].to_string();
+    for expected in ["1 non-final", "1 turns without a native message UUID"] {
+        assert!(notes.contains(expected), "{expected}: {first}");
+    }
+    let excluded = &first["harnesses"][0]["cutoff_excluded"];
+    assert_eq!(excluded["before_cutoff"], 1, "{first}");
+    assert!(first["cutoff"].is_string(), "{first}");
+    assert!(!notes.contains("observedlivecanary"), "{first}");
+    // Restart on the same node: nothing new reaches the hub (the cutoff holds
+    // this session's cursor, so known events may be re-queued and deduplicated).
+    let same = import(&node_data, "observed", &live);
+    assert_eq!(same["events_delivered"], 0, "{same}");
+    // Fresh local state (crash/state loss): hub deduplicates by native identity.
+    let replay = import(&restart_data, "observed", &live);
+    assert_eq!(replay["events_delivered"], 0, "{replay}");
+    assert_eq!(replay["events_already_known"], 3, "{replay}");
+    // A later account export of the same conversation converges.
+    let export = tmp.path().join("claude-export.json");
+    std::fs::write(
+        &export,
+        serde_json::to_vec(&serde_json::json!([{
+        "uuid":cid,"name":"synthetic","chat_messages":[
+            {"uuid":user,"sender":"human","text":"observedlivecanary question","created_at":t0},
+            {"uuid":assistant,"sender":"assistant","created_at":t2,
+             "content":[{"type":"text","text":"observedlivecanary answer"}]},
+            {"uuid":twin,"sender":"assistant","created_at":t3,
+             "content":[{"type":"text","text":"observedlivecanary answer"}]}
+        ]}]))
+        .unwrap(),
+    )
+    .unwrap();
+    // Same node: nothing new reaches the hub.
+    let converged = import(&node_data, "export", &export);
+    assert_eq!(converged["events_delivered"], 0, "{converged}");
+    // Another node: the hub recognizes every exported event as already known.
+    let other = tmp.path().join("export-node");
+    let converged = import(&other, "export", &export);
+    assert_eq!(converged["events_delivered"], 0, "{converged}");
+    assert_eq!(converged["events_already_known"], 3, "{converged}");
+    // An edit of the same native message is exactly one new revision.
+    let edit = tmp.path().join("edit.ndjson");
+    std::fs::write(
+        &edit,
+        turn(
+            Some(assistant),
+            "assistant",
+            "observedlivecanary answer revised",
+            true,
+            Some(&t2),
+        ),
+    )
+    .unwrap();
+    let edited = import(&node_data, "observed", &edit);
+    assert_eq!(edited["events_delivered"], 1, "{edited}");
+    let hits = run_json(child(&node_data, &home, &url).args([
+        "search-events",
+        "observedlivecanary",
+        "--harness",
+        "claude-chat",
+        "--json",
+    ]));
+    let hits = hits.as_array().unwrap();
+    assert_eq!(hits.len(), 4, "{hits:?}");
+    assert!(
+        hits.iter()
+            .all(|h| h["session_id"] == hits[0]["session_id"])
+    );
+    let text = serde_json::to_string(hits).unwrap();
+    assert!(
+        !text.contains("partial") && !text.contains("unidentified") && !text.contains("ancient")
+    );
+    drop(hub);
+}

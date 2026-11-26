@@ -52,3 +52,44 @@ boundary. For live hosted capture, prefer an opt-in
 provider-supported interface or local browser collector of visible messages
 that emits the same identity and event format. Do not collect authentication
 cookies, use hidden account APIs or silently upload unrelated conversations.
+
+## Live finalized visible turns (observed format)
+
+Exports are historical. For live capture, a separately approved,
+user-enrolled collector of the visible page of a selected thread (or another
+provider-supported interface) writes one JSON object per line:
+
+```json
+{"schema":"sessionmunch.observed-visible-turn.v1","provider":"claude","surface":"desktop",
+ "conversation_id":"<native conversation UUID>","message_id":"<native message UUID>",
+ "role":"assistant","final":true,"text":"<visible text>",
+ "occurred_at":"2026-11-26T12:00:02Z","observed_at":"2026-11-26T12:00:05Z"}
+```
+
+```bash
+sessionmunch import chats --format observed --provider claude --account personal \
+  --workspace private-history --project hosted --since 5w \
+  --dry-run --json observed.ndjson
+```
+
+- Identity is identical to the export path: session UUIDv5 over
+  (provider, account label, native conversation UUID); event
+  `hosted:<native message UUID>:<sha256(role, sanitized text)>`. Replays,
+  restarts with lost local state and later exports of the same final text
+  deduplicate at the hub. An edit with the same message UUID is a new revision.
+- Only `final: true` turns are imported; streaming/interrupted turns and turns
+  without a native message UUID are excluded and counted, never given a
+  guessed identity from title, URL, time or text. Equal text under distinct
+  message UUIDs stays distinct.
+- Unknown fields are rejected, so raw page markup, tool payloads, hidden
+  reasoning or credentials cannot pass through this boundary. Errors report
+  line numbers only.
+- `--since` applies the same strict per-message cutoff as exports: a fixed
+  UTC invocation instant, original source time only, unknown times withheld
+  and counted in `cutoff_excluded`, cursors held, out-of-window spool refused.
+
+SessionMunch does not ship a collector. Whether a given provider surface
+exposes native message UUIDs to a visible-page collector, and whether a
+collector is acceptable for an account, must be proven per surface with an
+owner-selected harmless thread before any real capture. This format is not
+evidence of continuous coverage.
