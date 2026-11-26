@@ -2031,7 +2031,19 @@ pub(crate) fn export_opencode(
             losses.push(format!("malformed OpenCode part {id}"));
             continue;
         };
-        parse_opencode(&message, &part, session, &id, &mut events, &mut losses);
+        let occurred_at = sql_occurrence(
+            message.pointer("/time/created").and_then(Value::as_i64),
+            updated,
+        );
+        parse_opencode(
+            &message,
+            &part,
+            session,
+            &id,
+            occurred_at,
+            &mut events,
+            &mut losses,
+        );
     }
     Ok(ExportedTranscript {
         native_session_id: session.to_string(),
@@ -2095,6 +2107,7 @@ fn export_crush(
             is_summary != 0,
             session,
             &id,
+            sql_occurrence(None, updated),
             &mut events,
             &mut losses,
         );
@@ -2113,6 +2126,7 @@ fn parse_crush_parts(
     is_summary: bool,
     session: &str,
     message_id: &str,
+    occurred_at: Option<String>,
     events: &mut Vec<NewWorkstreamEvent>,
     losses: &mut Vec<String>,
 ) {
@@ -2135,7 +2149,7 @@ fn parse_crush_parts(
                         },
                         Some(role),
                         content,
-                        None,
+                        occurred_at.clone(),
                         json!({}),
                     );
                 }
@@ -2156,7 +2170,7 @@ fn parse_crush_parts(
                     WorkstreamEventKind::ToolCall,
                     Some("assistant"),
                     &format!("{name}: {input}"),
-                    None,
+                    occurred_at.clone(),
                     json!({"tool": name}),
                 );
             }
@@ -2176,7 +2190,7 @@ fn parse_crush_parts(
                     WorkstreamEventKind::ToolResult,
                     Some("tool"),
                     &content,
-                    None,
+                    occurred_at.clone(),
                     json!({
                         "tool": name,
                         "is_error": data.get("is_error").and_then(Value::as_bool)
@@ -2195,6 +2209,7 @@ fn parse_opencode(
     part: &Value,
     session: &str,
     id: &str,
+    occurred_at: Option<String>,
     events: &mut Vec<NewWorkstreamEvent>,
     losses: &mut Vec<String>,
 ) {
@@ -2221,7 +2236,7 @@ fn parse_opencode(
                     WorkstreamEventKind::Message,
                     Some(role),
                     text,
-                    None,
+                    occurred_at.clone(),
                     json!({}),
                 );
             }
@@ -2239,7 +2254,7 @@ fn parse_opencode(
                 WorkstreamEventKind::ToolCall,
                 Some("assistant"),
                 &format!("{name}: {input}"),
-                None,
+                occurred_at.clone(),
                 json!({"tool": name}),
             );
             if let Some(output) = state
@@ -2256,7 +2271,7 @@ fn parse_opencode(
                     WorkstreamEventKind::ToolResult,
                     Some("tool"),
                     &output,
-                    None,
+                    occurred_at.clone(),
                     json!({"status": state.get("status").and_then(Value::as_str)}),
                 );
             }
@@ -2272,7 +2287,7 @@ fn parse_opencode(
                 WorkstreamEventKind::Compaction,
                 Some("assistant"),
                 body,
-                None,
+                occurred_at.clone(),
                 json!({}),
             );
         }
@@ -3024,6 +3039,17 @@ pub(crate) fn crush_db(cwd: &Path, session_dir: Option<&Path>) -> PathBuf {
     session_dir.unwrap_or(&cwd.join(".crush")).join("crush.db")
 }
 
+/// RFC 3339 source occurrence for a SQLite-backed record: the record's own
+/// creation time when its JSON carries one, else the row's update time (never
+/// earlier than creation, so a strict cutoff can only over-include an edited
+/// record, never drop a recent one). Seconds or milliseconds, as stored.
+fn sql_occurrence(created: Option<i64>, updated: i64) -> Option<String> {
+    let at = created
+        .and_then(native_timestamp)
+        .or_else(|| native_timestamp(updated))?;
+    jiff::Timestamp::try_from(at).ok().map(|at| at.to_string())
+}
+
 fn native_timestamp(value: i64) -> Option<SystemTime> {
     let value = u64::try_from(value).ok()?;
     if value < 100_000_000_000 {
@@ -3115,7 +3141,19 @@ pub(crate) fn export_opencode2(
             losses.push(format!("malformed OpenCode 2 message {id}"));
             continue;
         };
-        parse_opencode2(&message_type, &data, session, &id, &mut events, &mut losses);
+        let occurred_at = sql_occurrence(
+            data.pointer("/time/created").and_then(Value::as_i64),
+            updated,
+        );
+        parse_opencode2(
+            &message_type,
+            &data,
+            session,
+            &id,
+            occurred_at,
+            &mut events,
+            &mut losses,
+        );
     }
     Ok(ExportedTranscript {
         native_session_id: session.to_string(),
@@ -3130,6 +3168,7 @@ fn parse_opencode2(
     data: &Value,
     session: &str,
     id: &str,
+    occurred_at: Option<String>,
     events: &mut Vec<NewWorkstreamEvent>,
     losses: &mut Vec<String>,
 ) {
@@ -3145,7 +3184,7 @@ fn parse_opencode2(
                     WorkstreamEventKind::Message,
                     Some("user"),
                     text,
-                    None,
+                    occurred_at.clone(),
                     json!({}),
                 );
             }
@@ -3174,7 +3213,7 @@ fn parse_opencode2(
                                 WorkstreamEventKind::Message,
                                 Some("assistant"),
                                 text,
-                                None,
+                                occurred_at.clone(),
                                 json!({}),
                             );
                         }
@@ -3192,7 +3231,7 @@ fn parse_opencode2(
                             WorkstreamEventKind::ToolCall,
                             Some("assistant"),
                             &format!("{name}: {input}"),
-                            None,
+                            occurred_at.clone(),
                             json!({"tool": name}),
                         );
                         let status = state
@@ -3221,7 +3260,7 @@ fn parse_opencode2(
                                     WorkstreamEventKind::ToolResult,
                                     Some("tool"),
                                     &output,
-                                    None,
+                                    occurred_at.clone(),
                                     json!({"status": status}),
                                 );
                             }
