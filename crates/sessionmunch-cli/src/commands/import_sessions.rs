@@ -19,10 +19,11 @@ use secrecy::ExposeSecret as _;
 use serde::{Deserialize, Serialize};
 use sessionmunch_core::{AgentKind, Sanitizer, SessionId, SessionProvenance, SessionSource};
 use sessionmunch_workstream::{
-    ArtifactClient, ArtifactProvenance, ArtifactUpload, ExportedTranscript, HarnessDiscovery,
-    HttpEventSink, IMPORTABLE_HARNESSES, ManagedHarness, Spool, SpoolBatch, SpoolConfig,
-    SpoolDrainer, StoreStatus, discover_harness_history, discover_hermes_history,
-    export_discovered, export_hermes_session, stage_snapshot_home, to_session_events,
+    ArtifactClient, ArtifactProvenance, ArtifactUpload, CutoffExclusions, ExportedTranscript,
+    HarnessDiscovery, HttpEventSink, IMPORTABLE_HARNESSES, ManagedHarness, Spool, SpoolBatch,
+    SpoolConfig, SpoolDrainer, StoreStatus, cutoff_exclusion, discover_harness_history,
+    discover_hermes_history, export_discovered, export_hermes_session, retain_within_cutoff,
+    stage_snapshot_home, to_session_events,
 };
 
 use crate::cli::{ChatExportProvider, ImportChatsArgs, ImportSessionsArgs};
@@ -53,6 +54,11 @@ struct HarnessReport {
     sessions_with_new_events: usize,
     events_queued: usize,
     artifacts_uploaded: usize,
+    /// Events withheld by the strict per-event cutoff, by reason.
+    cutoff_excluded: CutoffExclusions,
+    /// Sessions whose cursor stayed put because the cutoff withheld some of
+    /// their events, so a later wider window can still import them.
+    cursors_held: usize,
     losses: Vec<String>,
 }
 
@@ -60,6 +66,10 @@ struct HarnessReport {
 struct ImportReport {
     machine: String,
     since: String,
+    /// Fixed UTC invocation cutoff applied to each event's original source
+    /// occurrence; absent for `--since all`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cutoff: Option<String>,
     dry_run: bool,
     hub: Option<String>,
     harnesses: Vec<HarnessReport>,
@@ -80,10 +90,14 @@ struct CursorFile {
 }
 
 pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> Result<()> {
+    // One invocation instant for both session discovery and the strict
+    // per-event cutoff, so they cannot disagree.
+    let invoked = SystemTime::now();
     let since_window = parse_since(&args.since)?;
-    let since = SystemTime::now()
+    let since = invoked
         .checked_sub(since_window)
         .unwrap_or(SystemTime::UNIX_EPOCH);
+    let cutoff = strict_cutoff(&args.since, invoked)?;
     let import_dir = config.data_dir.join("history-import");
     let (harnesses, include_hermes) = select_sources(args.harness.as_deref())?;
     // Cursors and spool sequences belong to one on-disk import state.
@@ -154,10 +168,12 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
     } else {
         std::fs::create_dir_all(&import_dir)
             .with_context(|| format!("creating {}", import_dir.display()))?;
-        Some(Spool::open(&SpoolConfig {
+        let spool = Spool::open(&SpoolConfig {
             dir: import_dir.join("spool"),
             max_spool_bytes: MAX_SPOOL_BYTES,
-        })?)
+        })?;
+        refuse_out_of_window_pending(&spool, cutoff, &import_dir)?;
+        Some(spool)
     };
     let artifacts = ArtifactClient::new(&hub_url, token.clone());
 
@@ -171,6 +187,8 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
             sessions_with_new_events: 0,
             events_queued: 0,
             artifacts_uploaded: 0,
+            cutoff_excluded: CutoffExclusions::default(),
+            cursors_held: 0,
             losses: Vec::new(),
         };
         report.losses.extend(
@@ -189,6 +207,7 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
             &artifacts,
             &mut cursors,
             &mut report,
+            cutoff,
             args.dry_run,
         )
         .await;
@@ -203,6 +222,8 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
             sessions_with_new_events: 0,
             events_queued: 0,
             artifacts_uploaded: 0,
+            cutoff_excluded: CutoffExclusions::default(),
+            cursors_held: 0,
             losses: discovery
                 .unreadable
                 .iter()
@@ -226,6 +247,7 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
             &artifacts,
             &mut cursors,
             &mut report,
+            cutoff,
             args.dry_run,
         )
         .await;
@@ -248,6 +270,7 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
         token,
         machine,
         args.since,
+        cutoff,
         args.dry_run,
         args.json,
         reports,
@@ -275,6 +298,10 @@ pub async fn run_chats(config: &Config, args: ImportChatsArgs) -> Result<()> {
             ));
         }
     }
+    let cutoff = match &args.since {
+        Some(since) => strict_cutoff(since, SystemTime::now())?,
+        None => None,
+    };
     let sanitizer = Sanitizer::new(&config.sanitize).context("building canonical sanitizer")?;
     let machine = machine_identity();
     let label = provider.agent().as_str();
@@ -317,10 +344,12 @@ pub async fn run_chats(config: &Config, args: ImportChatsArgs) -> Result<()> {
     let spool = if args.dry_run {
         None
     } else {
-        Some(Spool::open(&SpoolConfig {
+        let spool = Spool::open(&SpoolConfig {
             dir: import_dir.join("spool"),
             max_spool_bytes: MAX_SPOOL_BYTES,
-        })?)
+        })?;
+        refuse_out_of_window_pending(&spool, cutoff, &import_dir)?;
+        Some(spool)
     };
     let artifacts = ArtifactClient::new(&hub_url, token.clone());
     let mut report = HarnessReport {
@@ -330,6 +359,8 @@ pub async fn run_chats(config: &Config, args: ImportChatsArgs) -> Result<()> {
         sessions_with_new_events: 0,
         events_queued: 0,
         artifacts_uploaded: 0,
+        cutoff_excluded: CutoffExclusions::default(),
+        cursors_held: 0,
         losses: Vec::new(),
     };
     let mut failed = false;
@@ -370,6 +401,7 @@ pub async fn run_chats(config: &Config, args: ImportChatsArgs) -> Result<()> {
             &artifacts,
             &mut cursors,
             &mut report,
+            cutoff,
             args.dry_run,
         )
         .await;
@@ -388,7 +420,10 @@ pub async fn run_chats(config: &Config, args: ImportChatsArgs) -> Result<()> {
         &hub_url,
         token,
         machine,
-        "selected hosted exports".into(),
+        args.since
+            .clone()
+            .unwrap_or_else(|| "selected hosted exports".into()),
+        cutoff,
         args.dry_run,
         args.json,
         vec![report],
@@ -413,6 +448,7 @@ async fn finish_import(
     token: Option<String>,
     machine: String,
     since: String,
+    cutoff: Option<jiff::Timestamp>,
     dry_run: bool,
     json: bool,
     reports: Vec<HarnessReport>,
@@ -474,6 +510,7 @@ async fn finish_import(
     let report = ImportReport {
         machine,
         since,
+        cutoff: cutoff.map(|cutoff| cutoff.to_string()),
         dry_run,
         hub: (!dry_run).then(|| hub_url.to_owned()),
         harnesses: reports,
@@ -520,6 +557,7 @@ async fn import_harness(
     artifacts: &ArtifactClient,
     cursors: &mut CursorFile,
     report: &mut HarnessReport,
+    cutoff: Option<jiff::Timestamp>,
     dry_run: bool,
 ) {
     let sources = discovery.sessions.iter().map(|session| SessionSourceRef {
@@ -539,6 +577,7 @@ async fn import_harness(
         artifacts,
         cursors,
         report,
+        cutoff,
         dry_run,
     )
     .await;
@@ -555,6 +594,7 @@ async fn import_sessions<'a>(
     artifacts: &ArtifactClient,
     cursors: &mut CursorFile,
     report: &mut HarnessReport,
+    cutoff: Option<jiff::Timestamp>,
     dry_run: bool,
 ) {
     for session in sources {
@@ -570,7 +610,7 @@ async fn import_sessions<'a>(
             .get(label)
             .and_then(|by_id| by_id.get(&cursor_key))
             .cloned();
-        let export = match (session.export)(cursor.as_deref()) {
+        let mut export = match (session.export)(cursor.as_deref()) {
             Ok(export) => export,
             Err(error) => {
                 report
@@ -582,6 +622,18 @@ async fn import_sessions<'a>(
         report
             .losses
             .extend(export.losses.iter().map(|loss| format!("{native}: {loss}")));
+        // Strict window on each event's original source occurrence. A session
+        // that straddles the cutoff keeps its prior cursor: the withheld events
+        // stay importable by a later, wider window, and the hub dedups the
+        // in-window events it already holds by their stable ids.
+        let excluded = cutoff.map_or_else(CutoffExclusions::default, |cutoff| {
+            retain_within_cutoff(&mut export.events, cutoff)
+        });
+        report.cutoff_excluded.add(excluded);
+        let hold_cursor = excluded.total() > 0;
+        if hold_cursor {
+            report.cursors_held += 1;
+        }
         if export.events.is_empty() {
             continue;
         }
@@ -673,7 +725,10 @@ async fn import_sessions<'a>(
             }
             report.events_queued += chunk.len();
         }
-        if queued_all && let Some(cursor) = export.source_cursor {
+        if queued_all
+            && !hold_cursor
+            && let Some(cursor) = export.source_cursor
+        {
             cursors
                 .cursors
                 .entry(label.to_owned())
@@ -787,6 +842,56 @@ pub(crate) fn parse_since(raw: &str) -> Result<Duration> {
     sessionmunch_core::parse_time_window(raw).map_err(|message| anyhow!("--since {message}"))
 }
 
+/// The fixed UTC instant a bounded `--since` window starts at, measured from
+/// `invoked`; `None` for `all`. Applied to each event's original source
+/// occurrence, never to file times, import time or ledger insertion.
+fn strict_cutoff(raw: &str, invoked: SystemTime) -> Result<Option<jiff::Timestamp>> {
+    if raw.trim().eq_ignore_ascii_case("all") {
+        return Ok(None);
+    }
+    let window = parse_since(raw)?;
+    let start = invoked
+        .checked_sub(window)
+        .ok_or_else(|| anyhow!("--since {raw:?} reaches before the Unix epoch; use `all`"))?;
+    let cutoff = jiff::Timestamp::try_from(start)
+        .map_err(|error| anyhow!("--since {raw:?} is out of range: {error}"))?;
+    Ok(Some(cutoff))
+}
+
+/// Refuse to deliver batches an earlier import queued with a wider window.
+/// A bounded run drains the whole spool, so without this an old, unrelated
+/// backlog would ride along. Nothing is enqueued, drained or deleted here.
+fn refuse_out_of_window_pending(
+    spool: &Spool,
+    cutoff: Option<jiff::Timestamp>,
+    import_dir: &Path,
+) -> Result<()> {
+    let Some(cutoff) = cutoff else {
+        return Ok(());
+    };
+    let pending = spool
+        .pending()
+        .with_context(|| format!("reading queued batches in {}", import_dir.display()))?;
+    let outside = pending
+        .iter()
+        .filter(|record| {
+            record
+                .batch
+                .events
+                .iter()
+                .any(|event| cutoff_exclusion(event.occurred_at.as_deref(), cutoff).is_some())
+        })
+        .count();
+    if outside > 0 {
+        return Err(anyhow!(
+            "{outside} of {} queued batch(es) in {} hold events outside the --since window (before {cutoff} or with unknown time); refusing to deliver them with this import. Deliver them with the window that queued them, or inspect the spool first",
+            pending.len(),
+            import_dir.join("spool").display()
+        ));
+    }
+    Ok(())
+}
+
 /// Exclusive access to a single history-import state directory.
 struct ImportLock {
     _file: std::fs::File,
@@ -830,9 +935,14 @@ fn write_cursors(path: &Path, cursors: &CursorFile) -> Result<()> {
 
 fn print_report(report: &ImportReport) {
     println!(
-        "History import on {} (changed in the last {}){}",
+        "History import on {} ({}{}){}",
         report.machine,
         report.since,
+        report
+            .cutoff
+            .as_deref()
+            .map(|cutoff| format!("; events occurring at or after {cutoff}"))
+            .unwrap_or_default(),
         if report.dry_run { " — dry run" } else { "" }
     );
     for harness in &report.harnesses {
@@ -850,6 +960,13 @@ fn print_report(report: &ImportReport) {
             harness.events_queued,
             harness.artifacts_uploaded
         );
+        let excluded = harness.cutoff_excluded;
+        if excluded.total() > 0 {
+            println!(
+                "      outside window: {} before cutoff, {} with unknown time; {} session cursor(s) held",
+                excluded.before_cutoff, excluded.unknown_time, harness.cursors_held
+            );
+        }
         for loss in harness.losses.iter().take(5) {
             println!("      lost: {loss}");
         }

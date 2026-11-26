@@ -42,8 +42,9 @@ pub use hermes_history::{
     HermesDiscovery, HermesSession, discover_hermes_history, export_hermes_session,
 };
 pub use history_import::{
-    DiscoveredSession, HarnessDiscovery, IMPORTABLE_HARNESSES, INLINE_EVENT_BYTES,
-    OversizedPayload, StoreStatus, discover_harness_history, export_discovered, to_session_events,
+    CutoffExclusionReason, CutoffExclusions, DiscoveredSession, HarnessDiscovery,
+    IMPORTABLE_HARNESSES, INLINE_EVENT_BYTES, OversizedPayload, StoreStatus, cutoff_exclusion,
+    discover_harness_history, export_discovered, retain_within_cutoff, to_session_events,
 };
 pub use hosted_chat_history::{
     HostedChat, HostedChatExport, HostedChatProvider, read_hosted_chat_export,

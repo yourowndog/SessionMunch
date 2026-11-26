@@ -353,10 +353,139 @@ fn head_tail_excerpt(content: &str, head: usize, tail: usize) -> String {
     )
 }
 
+/// Events a strict historical cutoff withheld, by reason.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct CutoffExclusions {
+    /// Original source occurrence strictly before the cutoff.
+    pub before_cutoff: usize,
+    /// No original source occurrence, or one that is not an RFC 3339
+    /// instant with an offset. Never inferred from neighbours, file times,
+    /// import time or ledger insertion.
+    pub unknown_time: usize,
+}
+
+impl CutoffExclusions {
+    /// Total withheld events.
+    #[must_use]
+    pub const fn total(self) -> usize {
+        self.before_cutoff + self.unknown_time
+    }
+
+    /// Accumulate another session's exclusions.
+    pub fn add(&mut self, other: Self) {
+        self.before_cutoff += other.before_cutoff;
+        self.unknown_time += other.unknown_time;
+    }
+}
+
+/// Why an event is outside a strict historical window, if it is.
+#[must_use]
+pub fn cutoff_exclusion(
+    occurred_at: Option<&str>,
+    cutoff: jiff::Timestamp,
+) -> Option<CutoffExclusionReason> {
+    match occurred_at.and_then(|raw| raw.trim().parse::<jiff::Timestamp>().ok()) {
+        None => Some(CutoffExclusionReason::UnknownTime),
+        Some(at) if at < cutoff => Some(CutoffExclusionReason::BeforeCutoff),
+        Some(_) => None,
+    }
+}
+
+/// Reason [`cutoff_exclusion`] withheld an event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CutoffExclusionReason {
+    /// Original occurrence strictly before the cutoff.
+    BeforeCutoff,
+    /// Missing or unparseable original occurrence.
+    UnknownTime,
+}
+
+/// Keep only events whose original source occurrence is at or after
+/// `cutoff`. The cutoff is one fixed UTC instant chosen at invocation, so
+/// dry run, retry and import of the same source select the same events.
+pub fn retain_within_cutoff(
+    events: &mut Vec<NewWorkstreamEvent>,
+    cutoff: jiff::Timestamp,
+) -> CutoffExclusions {
+    let mut excluded = CutoffExclusions::default();
+    events.retain(
+        |event| match cutoff_exclusion(event.occurred_at.as_deref(), cutoff) {
+            None => true,
+            Some(CutoffExclusionReason::BeforeCutoff) => {
+                excluded.before_cutoff += 1;
+                false
+            }
+            Some(CutoffExclusionReason::UnknownTime) => {
+                excluded.unknown_time += 1;
+                false
+            }
+        },
+    );
+    excluded
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use sessionmunch_core::{AgentKind, WorkstreamEventKind};
+
+    fn at(id: &str, occurred_at: Option<&str>) -> NewWorkstreamEvent {
+        NewWorkstreamEvent {
+            occurred_at: occurred_at.map(str::to_owned),
+            ..event(id, id)
+        }
+    }
+
+    #[test]
+    fn strict_cutoff_keeps_only_known_events_at_or_after_the_instant() {
+        let cutoff: jiff::Timestamp = "2026-10-22T00:00:00Z".parse().unwrap();
+        let mut events = vec![
+            at("old", Some("2026-10-21T23:59:59.999Z")),
+            at("edge", Some("2026-10-22T00:00:00Z")),
+            at("offset", Some("2026-10-22T01:00:00+02:00")),
+            at("new", Some("2026-11-20T08:00:00Z")),
+            at("missing", None),
+            at("naive", Some("2026-11-20T08:00:00")),
+            at("garbage", Some("yesterday")),
+        ];
+        let excluded = retain_within_cutoff(&mut events, cutoff);
+        let kept: Vec<_> = events.iter().map(|e| e.event_id.as_str()).collect();
+        // `offset` is 2026-10-21T23:00Z: before the cutoff despite its
+        // local date. Unknown and offset-less instants are never guessed.
+        assert_eq!(kept, ["edge", "new"]);
+        assert_eq!(
+            excluded,
+            CutoffExclusions {
+                before_cutoff: 2,
+                unknown_time: 3
+            }
+        );
+        assert_eq!(excluded.total(), 5);
+    }
+
+    #[test]
+    fn strict_cutoff_is_deterministic_for_replays() {
+        let cutoff: jiff::Timestamp = "2026-10-22T00:00:00Z".parse().unwrap();
+        let source = vec![
+            at("a", Some("2026-10-01T00:00:00Z")),
+            at("b", Some("2026-11-01T00:00:00Z")),
+            at("c", None),
+        ];
+        let mut first = source.clone();
+        let mut second = source;
+        assert_eq!(
+            retain_within_cutoff(&mut first, cutoff),
+            retain_within_cutoff(&mut second, cutoff)
+        );
+        let ids = |events: &[NewWorkstreamEvent]| {
+            events
+                .iter()
+                .map(|e| e.event_id.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&first), ids(&second));
+        assert_eq!(ids(&first), ["b"]);
+    }
 
     fn event(id: &str, content: &str) -> NewWorkstreamEvent {
         NewWorkstreamEvent {
