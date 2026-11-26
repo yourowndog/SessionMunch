@@ -152,6 +152,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#t_c51f1a51).
 
 ### Fixed
+- Global `memory_query` hard filters (`source_projects`, `machine`, `harness`, `since`, `until`) now also constrain the response's `session_evidence`, with owner isolation kept. Filters a stream cannot enforce are rejected instead of broadened: `kinds` with global evidence, and any hard filter outside `unit=passage`. Evidence time bounds apply to ledger record time (`created_at`), not original occurrence.
+- `backup` now includes `artifacts/`. `restore` extracts and validates in isolated staging, then installs with rollback. If the rollback also fails, the parked originals are kept and their path is reported. A forced restore replaces `wiki/` and `db/` and leaves live `config.toml` and `artifacts/` alone when the archive lacks them.
+- A native history import whose large-payload artifact upload fails no longer queues truncated events or advances the session cursor. The next run retries the whole payload.
+- A bounded `import sessions --since` is now a strict per-event cutoff on each event's original timestamp, from one fixed UTC invocation instant. Before, it selected whole sessions by file activity. Older events and events with no usable timestamp are counted and withheld. A session that straddles the cutoff keeps its cursor, so a later wider window can still import them. `import chats` gains the same `--since`. A bounded run refuses to drain spool batches that an earlier wider import left with out-of-window events.
 - Recover opt-in Hermes owning-session marker routing with linked-worktree verification and fail-closed missing or invalid scope.
 - Restore read-only legacy Hermes provider configuration compatibility and fail closed on required pre-compression checkpoints without explicit scope and a matching write receipt.
 - OpenCode 2 reuses a session’s cached handoff in each ephemeral model context without duplicate system entries.
