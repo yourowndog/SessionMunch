@@ -17,7 +17,7 @@
 use anyhow::{Context, Result, bail};
 use flate2::read::GzDecoder;
 use sessionmunch_store::Store;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 use tracing::info;
 
 use crate::cli::RestoreArgs;
@@ -40,19 +40,26 @@ pub fn run(config: &Config, args: RestoreArgs) -> Result<()> {
         bail!("source tarball {} not found", args.from.display());
     }
 
-    restore_archive(&config.data_dir, &args.from, args.force)?;
+    let replaced = restore_archive(&config.data_dir, &args.from, args.force)?;
     info!("restore complete");
     println!(
         "restored {} -> {}",
         args.from.display(),
         config.data_dir.display()
     );
+    if let Some(replaced) = replaced {
+        println!(
+            "previous data kept at {}; delete it once the restored store is verified",
+            replaced.display()
+        );
+    }
     Ok(())
 }
 
 const RESTORED_PATHS: [&str; 4] = ["wiki", "db", "artifacts", "config.toml"];
 
-fn restore_archive(data_dir: &Path, archive_path: &Path, force: bool) -> Result<()> {
+/// Returns where the replaced live data was kept, if anything was replaced.
+fn restore_archive(data_dir: &Path, archive_path: &Path, force: bool) -> Result<Option<PathBuf>> {
     if has_existing_restore_data(data_dir)? && !force {
         bail!(
             "refusing to restore: data dir at {} is non-empty (pass --force to overwrite)",
@@ -80,9 +87,9 @@ fn restore_archive(data_dir: &Path, archive_path: &Path, force: bool) -> Result<
     {
         let _store = Store::open(staging.path()).context("opening staged restored store")?;
     }
-    install_staged_restore(staging.path(), data_dir)?;
+    let replaced = install_staged_restore(staging.path(), data_dir)?;
     info!(from = %archive_path.display(), into = %data_dir.display(), "validated staged restore installed");
-    Ok(())
+    Ok(replaced)
 }
 
 fn has_existing_restore_data(data_dir: &Path) -> Result<bool> {
@@ -95,7 +102,7 @@ fn has_existing_restore_data(data_dir: &Path) -> Result<bool> {
     Ok(false)
 }
 
-fn install_staged_restore(staged: &Path, data_dir: &Path) -> Result<()> {
+fn install_staged_restore(staged: &Path, data_dir: &Path) -> Result<Option<PathBuf>> {
     std::fs::create_dir_all(data_dir)?;
     let parent = data_dir.parent().unwrap_or_else(|| Path::new("."));
     let rollback = tempfile::Builder::new()
@@ -150,7 +157,20 @@ fn install_staged_restore(staged: &Path, data_dir: &Path) -> Result<()> {
             }
         };
     }
-    Ok(())
+    if originals.is_empty() {
+        return Ok(None);
+    }
+    // A forced restore never discards the only copy of the data it replaced:
+    // keep it beside the data dir under a dated name for the operator.
+    let kept = rollback.keep();
+    let stamp = jiff::Timestamp::now()
+        .strftime("%Y%m%dT%H%M%SZ")
+        .to_string();
+    let named = parent.join(format!(".sessionmunch-replaced-{stamp}"));
+    Ok(Some(match std::fs::rename(&kept, &named) {
+        Ok(()) => named,
+        Err(_) => kept,
+    }))
 }
 
 // Per-thread so a parallel test cannot consume another test's injection.
@@ -335,7 +355,19 @@ mod tests {
         .unwrap();
         drop(Store::open(&destination).unwrap());
 
-        restore_archive(&destination, &archive, true).unwrap();
+        let replaced = restore_archive(&destination, &archive, true)
+            .unwrap()
+            .expect("a forced restore reports where the replaced data was kept");
+        assert_eq!(
+            std::fs::read(replaced.join("wiki/old.md")).unwrap(),
+            b"old-wiki",
+            "the replaced wiki is kept, not discarded"
+        );
+        assert!(replaced.join("db/memory.sqlite").is_file());
+        assert!(
+            !replaced.join("config.toml").exists(),
+            "paths the archive lacked were never moved"
+        );
 
         assert_eq!(
             std::fs::read(destination.join("wiki/new.md")).unwrap(),
