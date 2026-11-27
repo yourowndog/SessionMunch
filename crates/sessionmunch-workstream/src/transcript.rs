@@ -2120,6 +2120,7 @@ fn export_crush(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_crush_parts(
     role: &str,
     parts: &[Value],

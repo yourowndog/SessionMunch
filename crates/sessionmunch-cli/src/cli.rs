@@ -84,7 +84,7 @@ pub enum Command {
     /// database, so every write blocks until it finishes and it needs free
     /// disk space of roughly the database's own size.
     Compact(CompactArgs),
-    /// Snapshot wiki/, db/, and config.toml into a gzipped tarball.
+    /// Snapshot wiki/, db/, artifacts/ and config.toml into a gzipped tarball.
     Backup(BackupArgs),
     /// Export one project's wiki as an OKF v0.2 bundle tarball.
     ExportOkf(ExportOkfArgs),
