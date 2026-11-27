@@ -87,6 +87,11 @@ struct ImportReport {
 struct CursorFile {
     #[serde(default)]
     cursors: BTreeMap<String, BTreeMap<String, String>>,
+    /// Window (seconds; `null` = `all`) each still-queued spool batch was
+    /// selected with, keyed by spool sequence. Written with the cursors before
+    /// draining, so a batch is never recorded wider than it was selected.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    queued_windows: BTreeMap<u64, Option<u64>>,
 }
 
 pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> Result<()> {
@@ -98,6 +103,7 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
         .checked_sub(since_window)
         .unwrap_or(SystemTime::UNIX_EPOCH);
     let cutoff = strict_cutoff(&args.since, invoked)?;
+    let window = cutoff.map(|_| since_window.as_secs());
     let import_dir = config.data_dir.join("history-import");
     let (harnesses, include_hermes) = select_sources(args.harness.as_deref())?;
     // Cursors and spool sequences belong to one on-disk import state.
@@ -172,7 +178,7 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
             dir: import_dir.join("spool"),
             max_spool_bytes: MAX_SPOOL_BYTES,
         })?;
-        refuse_out_of_window_pending(&spool, cutoff, &import_dir)?;
+        refuse_out_of_window_pending(&spool, cutoff, window, &cursors, &import_dir)?;
         Some(spool)
     };
     let artifacts = ArtifactClient::new(&hub_url, token.clone());
@@ -208,6 +214,7 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
             &mut cursors,
             &mut report,
             cutoff,
+            window,
             args.dry_run,
         )
         .await;
@@ -248,6 +255,7 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
             &mut cursors,
             &mut report,
             cutoff,
+            window,
             args.dry_run,
         )
         .await;
@@ -302,6 +310,10 @@ pub async fn run_chats(config: &Config, args: ImportChatsArgs) -> Result<()> {
         Some(since) => strict_cutoff(since, SystemTime::now())?,
         None => None,
     };
+    let window = match &args.since {
+        Some(since) if cutoff.is_some() => Some(parse_since(since)?.as_secs()),
+        _ => None,
+    };
     let sanitizer = Sanitizer::new(&config.sanitize).context("building canonical sanitizer")?;
     let machine = machine_identity();
     let label = provider.agent().as_str();
@@ -348,7 +360,7 @@ pub async fn run_chats(config: &Config, args: ImportChatsArgs) -> Result<()> {
             dir: import_dir.join("spool"),
             max_spool_bytes: MAX_SPOOL_BYTES,
         })?;
-        refuse_out_of_window_pending(&spool, cutoff, &import_dir)?;
+        refuse_out_of_window_pending(&spool, cutoff, window, &cursors, &import_dir)?;
         Some(spool)
     };
     let artifacts = ArtifactClient::new(&hub_url, token.clone());
@@ -402,6 +414,7 @@ pub async fn run_chats(config: &Config, args: ImportChatsArgs) -> Result<()> {
             &mut cursors,
             &mut report,
             cutoff,
+            window,
             args.dry_run,
         )
         .await;
@@ -501,6 +514,16 @@ async fn finish_import(
             }
         }
         batches_pending = spool.metrics().pending_batches;
+        if let Ok(pending) = spool.pending() {
+            let queued: std::collections::BTreeSet<u64> =
+                pending.iter().map(|record| record.seq).collect();
+            let mut pruned = CursorFile {
+                cursors: cursors.cursors.clone(),
+                queued_windows: cursors.queued_windows.clone(),
+            };
+            pruned.queued_windows.retain(|seq, _| queued.contains(seq));
+            write_cursors(cursor_path, &pruned)?;
+        }
         // Only meaningful once everything queued has been answered.
         if batches_pending == 0 {
             events_already_known = queued.saturating_sub(events_delivered);
@@ -558,6 +581,7 @@ async fn import_harness(
     cursors: &mut CursorFile,
     report: &mut HarnessReport,
     cutoff: Option<jiff::Timestamp>,
+    window: Option<u64>,
     dry_run: bool,
 ) {
     let sources = discovery.sessions.iter().map(|session| SessionSourceRef {
@@ -578,6 +602,7 @@ async fn import_harness(
         cursors,
         report,
         cutoff,
+        window,
         dry_run,
     )
     .await;
@@ -595,6 +620,7 @@ async fn import_sessions<'a>(
     cursors: &mut CursorFile,
     report: &mut HarnessReport,
     cutoff: Option<jiff::Timestamp>,
+    window: Option<u64>,
     dry_run: bool,
 ) {
     for session in sources {
@@ -716,12 +742,17 @@ async fn import_sessions<'a>(
             );
             batch.cwd = provenance.cwd.clone();
             batch.provenance = provenance.clone();
-            if let Err(error) = spool.enqueue(&batch) {
-                report
-                    .losses
-                    .push(format!("{native}: could not queue events: {error}"));
-                queued_all = false;
-                break;
+            match spool.enqueue(&batch) {
+                Ok(seq) => {
+                    cursors.queued_windows.insert(seq, window);
+                }
+                Err(error) => {
+                    report
+                        .losses
+                        .push(format!("{native}: could not queue events: {error}"));
+                    queued_all = false;
+                    break;
+                }
             }
             report.events_queued += chunk.len();
         }
@@ -864,6 +895,8 @@ fn strict_cutoff(raw: &str, invoked: SystemTime) -> Result<Option<jiff::Timestam
 fn refuse_out_of_window_pending(
     spool: &Spool,
     cutoff: Option<jiff::Timestamp>,
+    window: Option<u64>,
+    cursors: &CursorFile,
     import_dir: &Path,
 ) -> Result<()> {
     let Some(cutoff) = cutoff else {
@@ -874,17 +907,25 @@ fn refuse_out_of_window_pending(
         .with_context(|| format!("reading queued batches in {}", import_dir.display()))?;
     let outside = pending
         .iter()
-        .filter(|record| {
-            record
+        .filter(|record| match cursors.queued_windows.get(&record.seq) {
+            // Selected by a window no wider than this one: it was in scope
+            // when queued, even if a hub outage has since aged it past the
+            // cutoff. Retrying it is this import's own unfinished work.
+            Some(Some(queued)) => window.is_none_or(|current| *queued > current),
+            // Queued by `--since all`.
+            Some(None) => true,
+            // No record (older binary, or a crash before the cursor write):
+            // judge the events themselves, failing closed.
+            None => record
                 .batch
                 .events
                 .iter()
-                .any(|event| cutoff_exclusion(event.occurred_at.as_deref(), cutoff).is_some())
+                .any(|event| cutoff_exclusion(event.occurred_at.as_deref(), cutoff).is_some()),
         })
         .count();
     if outside > 0 {
         return Err(anyhow!(
-            "{outside} of {} queued batch(es) in {} hold events outside the --since window (before {cutoff} or with unknown time); refusing to deliver them with this import. Deliver them with the window that queued them, or inspect the spool first",
+            "{outside} of {} queued batch(es) in {} are outside the --since window: queued by a wider window, or holding events before {cutoff} or with unknown time; refusing to deliver them with this import. Deliver them with the window that queued them, or inspect the spool first",
             pending.len(),
             import_dir.join("spool").display()
         ));

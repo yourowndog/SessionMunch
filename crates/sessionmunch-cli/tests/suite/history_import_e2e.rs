@@ -575,7 +575,7 @@ fn bounded_since_is_a_strict_per_event_cutoff() {
     assert_eq!(search_count(&node_data, &home, &url, "windowrecent"), 1);
 }
 
-fn queue_batch(node_data: &Path, occurred_at: Option<String>, text: &str) {
+fn queue_batch(node_data: &Path, occurred_at: Option<String>, text: &str) -> u64 {
     let spool = sessionmunch_workstream::Spool::open(&sessionmunch_workstream::SpoolConfig {
         dir: node_data.join("history-import/spool"),
         max_spool_bytes: 0,
@@ -597,7 +597,7 @@ fn queue_batch(node_data: &Path, occurred_at: Option<String>, text: &str) {
         "claude-code",
         vec![event],
     );
-    spool.enqueue(&batch).unwrap();
+    spool.enqueue(&batch).unwrap()
 }
 
 /// Gate 4: a bounded import drains the whole spool, so it must refuse,
@@ -810,4 +810,60 @@ fn native_artifact_failure_queues_nothing_and_retries_the_whole_payload() {
         .unwrap();
     assert!(output.status.success(), "{output:?}");
     assert_eq!(String::from_utf8(output.stdout).unwrap(), big_output);
+}
+
+/// A batch the same window queued stays this import's own work even after a
+/// hub outage ages its events past the cutoff: the hourly timer must keep
+/// retrying it rather than fail forever. A batch recorded as queued by
+/// `--since all` is still refused.
+#[test]
+fn bounded_since_retries_its_own_aged_batches_but_refuses_wider_ones() {
+    let tmp = tempfile::tempdir().unwrap();
+    let hub_data = tmp.path().join("hub");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let (_hub, url) = start_hub(&hub_data, &home);
+    let args = [
+        "import",
+        "sessions",
+        "--since",
+        "2d",
+        "--harness",
+        "claude",
+        "--json",
+    ];
+    let record = |node: &Path, seq: u64, window: serde_json::Value| {
+        std::fs::write(
+            node.join("history-import/cursors.json"),
+            serde_json::json!({"cursors": {}, "queued_windows": {seq.to_string(): window}})
+                .to_string(),
+        )
+        .unwrap();
+    };
+
+    // Queued by an earlier `--since 2d` run three days ago; the hub was down.
+    let own = tmp.path().join("own");
+    let seq = queue_batch(&own, Some(days_ago(3).to_string()), "agedown canary");
+    record(&own, seq, serde_json::json!(2 * 86_400));
+    let delivered = run_json(child(&own, &home, &url).args(args));
+    assert_eq!(delivered["events_delivered"], 1, "{delivered}");
+    assert_eq!(delivered["batches_pending"], 0, "{delivered}");
+    assert_eq!(search_count(&own, &home, &url, "agedown"), 1);
+    let cursors = std::fs::read_to_string(own.join("history-import/cursors.json")).unwrap();
+    assert!(
+        !cursors.contains("queued_windows"),
+        "delivered records are pruned: {cursors}"
+    );
+
+    // Queued by `--since all`: a bounded run must not deliver it.
+    let wide = tmp.path().join("wide");
+    let seq = queue_batch(&wide, Some(days_ago(1).to_string()), "widequeued canary");
+    record(&wide, seq, serde_json::Value::Null);
+    let refused = child(&wide, &home, &url).args(args).output().unwrap();
+    assert!(!refused.status.success(), "{refused:?}");
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("wider window"),
+        "{refused:?}"
+    );
+    assert_eq!(search_count(&wide, &home, &url, "widequeued"), 0);
 }
