@@ -2,9 +2,12 @@
 //
 // Drives a headless Chromium over the DevTools protocol on a PIPE
 // (--remote-debugging-pipe): no TCP listener is opened. Each run uses a fresh
-// temporary profile that is deleted afterwards, a proxy that refuses all
-// traffic, and a resolver that maps every hostname to NOTFOUND, so a page
-// cannot reach the network. Node built-ins only; no npm dependencies.
+// temporary profile that is deleted afterwards. HTTP(S) and WebSocket traffic,
+// loopback and IP literals included, goes to a proxy that refuses it; every
+// hostname resolves to NOTFOUND; WebRTC may not send non-proxied UDP. The
+// test suite asserts these against local listeners (HTTP, WebSocket, STUN
+// over UDP). Other egress paths are not claimed beyond what is tested.
+// Node built-ins only; no npm dependencies.
 //
 // This prototype is for synthetic fixtures. Pointing it at an authenticated
 // provider page is out of scope until the owner approves a specific surface
@@ -37,6 +40,10 @@ export const ISOLATION_FLAGS = [
   "--proxy-server=http://127.0.0.1:9",
   "--proxy-bypass-list=<-loopback>",
   "--host-resolver-rules=MAP * ~NOTFOUND",
+  // The proxy covers HTTP(S)/WebSocket only (IP literals included) and the
+  // resolver rules do not apply to IP literals; WebRTC could still send UDP
+  // (e.g. STUN) to any address. Forbid all non-proxied UDP.
+  "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
 ];
 
 class Cdp {

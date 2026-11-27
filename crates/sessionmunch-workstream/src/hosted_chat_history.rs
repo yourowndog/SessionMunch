@@ -407,7 +407,8 @@ pub fn read_observed_visible_turns(
     let mut order: Vec<String> = Vec::new();
     let mut by_conversation: HashMap<String, HostedChat> = HashMap::new();
     let mut seen_events = HashSet::new();
-    let (mut non_final, mut no_message_id, mut duplicate) = (0usize, 0usize, 0usize);
+    let (mut non_final, mut no_message_id, mut duplicate, mut empty) =
+        (0usize, 0usize, 0usize, 0usize);
     for (index, line) in raw.lines().enumerate() {
         let line_no = index + 1;
         if line.trim().is_empty() {
@@ -472,6 +473,7 @@ pub fn read_observed_visible_turns(
         };
         let content = sanitizer.scrub(&turn.text);
         if content.trim().is_empty() {
+            empty += 1;
             continue;
         }
         let occurred_at = turn
@@ -541,6 +543,11 @@ pub fn read_observed_visible_turns(
     if duplicate > 0 {
         out.notes.push(format!(
             "{duplicate} repeated observations of an identical revision collapsed"
+        ));
+    }
+    if empty > 0 {
+        out.notes.push(format!(
+            "{empty} turns with no visible text after sanitizing excluded"
         ));
     }
     Ok(out)
@@ -819,6 +826,7 @@ mod tests {
             turn("chatgpt", None, "assistant", "no identity", true),
             turn("claude", Some(A), "assistant", "wrong provider", true),
             turn("chatgpt", Some(A), "tool", "tool output", true),
+            turn("chatgpt", Some(M2), "assistant", "   ", true),
             smuggled,
             schema,
             json!("not an object"),
@@ -828,6 +836,11 @@ mod tests {
         assert!(out.chats.is_empty());
         assert_eq!(out.losses.len(), 5, "{:?}", out.losses);
         assert!(out.notes.iter().any(|n| n.contains("1 non-final")));
+        assert!(
+            out.notes
+                .iter()
+                .any(|n| n.contains("1 turns with no visible text"))
+        );
         assert!(
             out.notes
                 .iter()

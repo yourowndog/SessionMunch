@@ -5,6 +5,8 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import dgram from "node:dgram";
+import http from "node:http";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -110,6 +112,48 @@ test("isolated profile has no outside network", async () => {
     "fetch('http://example.com/').then(() => 'reached', (e) => 'blocked: ' + e.name)",
   );
   assert.match(outcome, /^blocked/);
+});
+
+// Local listeners only: proves a page cannot reach an IP literal over HTTP or
+// WebSocket, or send WebRTC/STUN UDP, without sending anything off-host.
+test("no HTTP, WebSocket or WebRTC UDP egress to IP literals", async () => {
+  let httpHits = 0;
+  const server = http.createServer((_, res) => { httpHits += 1; res.end("reached"); });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  let udpHits = 0;
+  const udp = dgram.createSocket("udp4");
+  udp.on("message", () => { udpHits += 1; });
+  await new Promise((resolve) => udp.bind(0, "127.0.0.1", resolve));
+  try {
+    const httpPort = server.address().port;
+    const udpPort = udp.address().port;
+    const page = await openPage(browser, withIds);
+    const ipFetch = await page.evaluate(
+      `fetch('http://127.0.0.1:${httpPort}/').then(() => 'reached', (e) => 'blocked: ' + e.name)`,
+    );
+    const ws = await page.evaluate(`new Promise((resolve) => {
+      const s = new WebSocket('ws://127.0.0.1:${httpPort}/');
+      s.onopen = () => resolve('open'); s.onerror = () => resolve('blocked');
+      setTimeout(() => resolve('timeout'), 3000);
+    })`);
+    const rtc = await page.evaluate(`new Promise(async (resolve) => {
+      try {
+        const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:127.0.0.1:${udpPort}' }] });
+        pc.createDataChannel('x');
+        await pc.setLocalDescription(await pc.createOffer());
+        setTimeout(() => { pc.close(); resolve('gathered'); }, 3000);
+      } catch (e) { resolve('rtc-unavailable: ' + e.name); }
+    })`);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.match(ipFetch, /^blocked/);
+    assert.notEqual(ws, "open");
+    assert.ok(rtc === "gathered" || rtc.startsWith("rtc-unavailable"), rtc);
+    assert.equal(httpHits, 0, "HTTP/WebSocket reached a local IP literal");
+    assert.equal(udpHits, 0, "WebRTC sent UDP to a local IP literal");
+  } finally {
+    server.close();
+    udp.close();
+  }
 });
 
 test("emitted NDJSON imports with stable identity (dry run)", { skip: !process.env.SESSIONMUNCH_BIN }, () => {

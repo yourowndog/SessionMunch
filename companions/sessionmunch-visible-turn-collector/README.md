@@ -16,7 +16,7 @@ later exports deduplicate.
 |---|---|
 | `collector.js` | In-page collector. A surface profile selects message elements. It reads rendered visible text (`innerText`), which skips hidden DOM. Records stay in memory until the runner drains them. The collector sends nothing itself. |
 | `profiles/fixture.json` | Profile for the synthetic fixture only. |
-| `run.mjs` | Local runner. Drives headless Chromium over `--remote-debugging-pipe` (no TCP listener). Each run gets a fresh temporary profile that is deleted afterwards, a refusing proxy and a NOTFOUND resolver, and no display variables are passed through. Uses Node built-ins only. |
+| `run.mjs` | Local runner. Drives headless Chromium over `--remote-debugging-pipe` (no TCP listener). Each run gets a fresh temporary profile that is deleted afterwards; HTTP(S) and WebSocket traffic (loopback and IP literals included) goes to a refusing proxy, every hostname resolves to NOTFOUND, WebRTC may not send non-proxied UDP, and no display variables are passed through. Tests assert HTTP, WebSocket and STUN/UDP egress against local listeners; nothing beyond those paths is claimed. Uses Node built-ins only. |
 | `test/` | Synthetic fixture page and `node --test` suite. |
 
 ## Fail-closed rules (same as the importer)
@@ -48,7 +48,7 @@ SESSIONMUNCH_BIN=/path/to/sessionmunch \
 node --test test/
 ```
 
-`SESSIONMUNCH_BIN` is optional. When set, the emitted NDJSON is checked with
+`SESSIONMUNCH_BIN` is optional; without it the importer round trip is skipped (7 tests: 6 pass, 1 skip). When set, the emitted NDJSON is checked with
 `import chats --format observed --dry-run` under an isolated `HOME` and data
 directory.
 

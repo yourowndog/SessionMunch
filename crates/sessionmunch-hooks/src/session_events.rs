@@ -511,6 +511,68 @@ mod tests {
         }
     }
 
+    /// An owned session is invisible to another authenticated owner and to an
+    /// unattributed caller: the same 404 as a missing session, no leak.
+    #[tokio::test]
+    async fn visible_turns_hide_another_owners_session() {
+        let temp = TempDir::new().unwrap();
+        let store = Store::open(temp.path()).unwrap();
+        let state = test_state(&store);
+        let session_id = SessionId::new().to_string();
+        let mut body = request_body(
+            "private-history",
+            "hosted",
+            &session_id,
+            "claude-chat",
+            vec![visible_event(
+                "hosted:a:1",
+                WorkstreamEventKind::Message,
+                "user",
+                "q1",
+            )],
+        );
+        body.actor_user = Some("user:alice".into());
+        let ingest = ingest_batch(State(state.clone()), None, Json(body)).await;
+        assert_eq!(ingest.status(), StatusCode::ACCEPTED);
+        let call = |user: Option<&str>| {
+            let actor = user.map(|u| {
+                Extension(ActorContext {
+                    user: Some(u.to_string()),
+                    ..ActorContext::default()
+                })
+            });
+            visible_turns(
+                State(state.clone()),
+                Path(session_id.clone()),
+                None,
+                actor,
+                Query(query("private-history", "hosted", None)),
+            )
+        };
+        assert_eq!(call(Some("alice")).await.status(), StatusCode::OK);
+        let foreign = call(Some("bob")).await;
+        assert_eq!(foreign.status(), StatusCode::NOT_FOUND);
+        let foreign_body = to_bytes(foreign.into_body(), 4096).await.unwrap();
+        let missing = visible_turns(
+            State(state.clone()),
+            Path(SessionId::new().to_string()),
+            None,
+            Some(Extension(ActorContext {
+                user: Some("bob".into()),
+                ..ActorContext::default()
+            })),
+            Query(query("private-history", "hosted", None)),
+        )
+        .await;
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+        let missing_body = to_bytes(missing.into_body(), 4096).await.unwrap();
+        assert_eq!(
+            foreign_body, missing_body,
+            "foreign owner must look like a missing session"
+        );
+        assert_eq!(call(None).await.status(), StatusCode::NOT_FOUND);
+    }
+
     /// Ascending scoped pages: ineligible rows advance the scan watermark,
     /// replays of the same cursor are identical, a foreign scope is 404, a
     /// half cursor is 400 and a mismatched anchor resets instead of skipping.
