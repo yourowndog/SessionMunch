@@ -140,7 +140,10 @@ winapi-util = "0.1"
 # `aws_lc_rs`, which is exactly the C/JNI toolchain the bridge avoids by using
 # rmcp's `reqwest-tls-no-provider`. `ring` is already in the lockfile via reqwest 0.12.
 rustls = { version = "0.23.45", default-features = false, features = ["ring", "logging", "std", "tls12"] }
-rmcp = { version = "3.11", features = ["server", "macros", "transport-io", "transport-streamable-http-server", "schemars"] }
+# rmcp >= 3.12 makes chrono optional (rust-sdk#1474); opting out of the default
+# chrono feature removes the unmaintained crate (RUSTSEC-2026-0543). The other
+# defaults (base64, server, macros) stay enabled explicitly.
+rmcp = { version = "3.12", default-features = false, features = ["base64", "server", "macros", "transport-io", "transport-streamable-http-server", "schemars"] }
 schemars = "1"
 axum = "0.8"
 # Same `http` 1.x rmcp/axum use, so handlers can read the injected

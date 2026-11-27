@@ -38,15 +38,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
-name = "android_system_properties"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "819e7219dbd41043ac279b19830f2efc897156490d7fd6ea916720117ee66311"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "anstream"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -469,18 +460,6 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.3.0",
  "rand_core 0.10.1",
-]
-
-[[package]]
-name = "chrono"
-version = "0.4.44"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c673075a2e0e5f4a1dde27ce9dee1ea4558c7ffe648f576438a20ca1d2acc4b0"
-dependencies = [
- "iana-time-zone",
- "num-traits",
- "serde",
- "windows-link",
 ]
 
 [[package]]
@@ -1633,30 +1612,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "iana-time-zone"
-version = "0.1.65"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e31bc9ad994ba00e440a8aa5c9ef0ec67d5cb5e5cb0cc7f8b744a35b389cc470"
-dependencies = [
- "android_system_properties",
- "core-foundation-sys",
- "iana-time-zone-haiku",
- "js-sys",
- "log",
- "wasm-bindgen",
- "windows-core",
-]
-
-[[package]]
-name = "iana-time-zone-haiku"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
-dependencies = [
- "cc",
-]
-
-[[package]]
 name = "icu_collections"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1842,13 +1797,36 @@ version = "0.2.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f00b5dbd620d61dfdcb6007c9c1f6054ebd75319f163d886a9055cec1155073d"
 dependencies = [
- "jiff-static",
+ "jiff-static 0.2.24",
  "jiff-tzdb-platform",
  "log",
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "jiff"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "107f2e89536b6818514025f6787b0d94d819e54fe3b40365275fc753de485b3f"
+dependencies = [
+ "jiff-core",
+ "jiff-static 1.0.3",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+ "serde_core",
+]
+
+[[package]]
+name = "jiff-core"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d44c923edf2bf456a982253f1a9ee1f6e89e421dffd0065d9b9a581da0def58f"
+dependencies = [
+ "log",
 ]
 
 [[package]]
@@ -1860,6 +1838,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "jiff-static"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4996f71e569e3a3e32b925c28ef8f0027dc30bb1d594b33eeda409eea185f5c8"
+dependencies = [
+ "jiff-core",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -2956,19 +2946,19 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "3.11.0"
+version = "3.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "391f153431ab68664d946513ea0cb3edbca78eaf99c5a983036cacab6220d85b"
+checksum = "fc4fa9a7558c480e1817c0f02e9a73782001ac1f47fb9d26cc073915963282ea"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
  "bytes",
- "chrono",
  "futures",
  "http",
  "http-body",
  "http-body-util",
  "indexmap",
+ "jiff 1.0.3",
  "libc",
  "pastey",
  "percent-encoding",
@@ -2994,9 +2984,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp-macros"
-version = "3.11.0"
+version = "3.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3598e3f36f4af2b5219b133baf7d97a2197039225adc3d4acf3dd8805b5a2aef"
+checksum = "43c1bf063ba32333267a8bc282ec33ae0edf56bf74890118cb0c7bf910a7a1c0"
 dependencies = [
  "darling 0.24.1",
  "proc-macro2",
@@ -3210,7 +3200,6 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc"
 dependencies = [
- "chrono",
  "dyn-clone",
  "ref-cast",
  "schemars_derive",
@@ -3404,7 +3393,7 @@ dependencies = [
  "figment",
  "flate2",
  "fs2",
- "jiff",
+ "jiff 0.2.24",
  "jsonc-parser",
  "reqwest 0.12.28",
  "rmcp",
@@ -3446,7 +3435,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "git2",
- "jiff",
+ "jiff 0.2.24",
  "rusqlite",
  "schemars",
  "serde",
@@ -3469,7 +3458,7 @@ dependencies = [
 name = "sessionmunch-core"
 version = "0.1.0"
 dependencies = [
- "jiff",
+ "jiff 0.2.24",
  "pulldown-cmark",
  "regex",
  "schemars",
@@ -3487,7 +3476,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "jiff",
+ "jiff 0.2.24",
  "reqwest 0.12.28",
  "secrecy",
  "serde",
@@ -3511,7 +3500,7 @@ dependencies = [
  "async-trait",
  "axum",
  "git2",
- "jiff",
+ "jiff 0.2.24",
  "rusqlite",
  "serde",
  "serde_json",
@@ -3539,7 +3528,7 @@ dependencies = [
  "candle-core",
  "candle-nn",
  "candle-transformers",
- "jiff",
+ "jiff 0.2.24",
  "regex",
  "reqwest 0.12.28",
  "rstest",
@@ -3569,7 +3558,7 @@ dependencies = [
  "flate2",
  "getrandom 0.3.4",
  "http",
- "jiff",
+ "jiff 0.2.24",
  "rmcp",
  "schemars",
  "serde",
@@ -3599,7 +3588,7 @@ dependencies = [
  "base64 0.22.1",
  "fs2",
  "getrandom 0.3.4",
- "jiff",
+ "jiff 0.2.24",
  "parking_lot",
  "refinery",
  "refinery-core",
@@ -3629,7 +3618,7 @@ dependencies = [
  "anyhow",
  "askama",
  "axum",
- "jiff",
+ "jiff 0.2.24",
  "pulldown-cmark",
  "serde",
  "serde_json",
@@ -3655,7 +3644,7 @@ dependencies = [
  "fs2",
  "futures-util",
  "git2",
- "jiff",
+ "jiff 0.2.24",
  "notify",
  "notify-debouncer-full",
  "reqwest 0.12.28",
@@ -3683,7 +3672,7 @@ dependencies = [
  "async-trait",
  "dirs",
  "flate2",
- "jiff",
+ "jiff 0.2.24",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",

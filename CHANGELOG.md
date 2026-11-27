@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Upgrade rmcp to 3.12 with its new optional `chrono` feature disabled, removing the unmaintained `chrono` crate from the dependency graph (RUSTSEC-2026-0543). rmcp's other defaults (base64, server, macros) stay enabled.
 - Recover dense passage ranking efficiency: normalize a query once and select the required top-k before sorting, retaining checked floating-point operations and stable UUID tie-breaks in scoped and global searches.
 - Restore OpenCode 2 native pre-compaction capture with a bounded drain, using lifecycle events only when hook registration is unavailable.
 - Serialize history-import writers per data directory so overlapping scheduled and manual imports cannot overwrite spool batches or cursors; read-only previews remain available.
