@@ -215,6 +215,190 @@ pub(crate) fn list_session_events(
     query_session_events(conn, session_id, limit.clamp(1, 1000), false)
 }
 
+/// Most ledger rows one ascending visible-turn page scans.
+pub const MAX_VISIBLE_TURN_SCAN: usize = 1_000;
+
+/// One finalized visible message returned by [`VisibleTurnPage`]. Only the
+/// sanitized text and the capture kind leave the store: no tool payloads, raw
+/// metadata or hook mirrors.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct VisibleTurn {
+    /// Insertion sequence within the session (the replay cursor axis).
+    pub sequence: i64,
+    /// Stable source-derived event id (native message id plus revision).
+    pub event_id: String,
+    /// `user` or `assistant`.
+    pub role: String,
+    /// Sanitized visible text.
+    pub content: String,
+    /// Original source occurrence when known (never used as a cursor).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurred_at: Option<String>,
+    /// `export`, `observed` or another importer label when recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture: Option<String>,
+}
+
+/// Whether the caller's cursor still names the same ledger row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VisibleTurnPageStatus {
+    /// The cursor anchor matched; `turns` continue strictly after it.
+    Ok,
+    /// The anchor row is gone or now holds a different event (purge, restore
+    /// or sequence reuse). Nothing is returned and nothing may be skipped:
+    /// the consumer must stop and record an explicit reset/gap.
+    Reset,
+}
+
+/// One bounded ascending page of a session's finalized visible turns after a
+/// `(sequence, event_id)` cursor. Ineligible rows (tool calls, hook mirrors,
+/// system records) advance `scanned_through` without being returned, so a
+/// consumer checkpoints the scan position, never the newest returned row.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct VisibleTurnPage {
+    /// Session read.
+    pub session_id: SessionId,
+    /// Cursor validation result.
+    pub status: VisibleTurnPageStatus,
+    /// Eligible visible turns in ascending insertion order.
+    pub turns: Vec<VisibleTurn>,
+    /// Last sequence examined; the next cursor's sequence.
+    pub scanned_through: i64,
+    /// Event id at `scanned_through`; the next cursor's anchor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scanned_event_id: Option<String>,
+    /// Highest sequence currently stored for the session.
+    pub high_water: i64,
+    /// Lowest sequence currently stored (0 when empty).
+    pub oldest_available: i64,
+    /// Starting without a cursor while earlier rows are no longer stored.
+    pub gap_before_oldest: bool,
+    /// Missing sequence numbers inside the scanned range (deleted rows).
+    pub missing_in_range: i64,
+    /// `scanned_through` reached `high_water`.
+    pub complete: bool,
+}
+
+/// Read finalized visible turns strictly after `after` for a session that
+/// belongs to `(workspace_id, project_id)` and is admitted by `owner`.
+/// Returns `None` when the session is not visible in that scope, without
+/// distinguishing "absent" from "not yours".
+pub(crate) fn visible_turns_after(
+    conn: &Connection,
+    session_id: &SessionId,
+    workspace_id: &WorkspaceId,
+    project_id: &ProjectId,
+    owner: &OwnerFilter,
+    after: Option<(i64, String)>,
+    scan_limit: usize,
+) -> StoreResult<Option<VisibleTurnPage>> {
+    let actor: Option<Option<String>> = conn
+        .query_row(
+            "SELECT actor_user FROM sessions \
+             WHERE id = ?1 AND workspace_id = ?2 AND project_id = ?3",
+            params![
+                session_id.as_bytes(),
+                workspace_id.as_bytes(),
+                project_id.as_bytes()
+            ],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(actor) = actor else {
+        return Ok(None);
+    };
+    if !owner.admits(actor.as_deref()) {
+        return Ok(None);
+    }
+    let (oldest_available, high_water): (i64, i64) = conn.query_row(
+        "SELECT COALESCE(MIN(sequence), 0), COALESCE(MAX(sequence), 0) \
+         FROM session_events WHERE session_id = ?1",
+        params![session_id.as_bytes()],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let mut page = VisibleTurnPage {
+        session_id: *session_id,
+        status: VisibleTurnPageStatus::Ok,
+        turns: Vec::new(),
+        scanned_through: 0,
+        scanned_event_id: None,
+        high_water,
+        oldest_available,
+        gap_before_oldest: false,
+        missing_in_range: 0,
+        complete: false,
+    };
+    let after_seq = match after {
+        None => {
+            page.gap_before_oldest = oldest_available > 1;
+            0
+        }
+        Some((sequence, event_id)) => {
+            let anchor: Option<String> = conn
+                .query_row(
+                    "SELECT event_id FROM session_events \
+                     WHERE session_id = ?1 AND sequence = ?2",
+                    params![session_id.as_bytes(), sequence],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            page.scanned_through = sequence;
+            let matched = anchor.as_deref() == Some(event_id.as_str());
+            page.scanned_event_id = Some(event_id);
+            if !matched {
+                page.status = VisibleTurnPageStatus::Reset;
+                return Ok(Some(page));
+            }
+            sequence
+        }
+    };
+    let limit = i64::try_from(scan_limit.clamp(1, MAX_VISIBLE_TURN_SCAN)).unwrap_or(1);
+    let mut statement = conn.prepare(
+        "SELECT sequence, event_id, kind, role, content, occurred_at, metadata_json, source \
+         FROM session_events WHERE session_id = ?1 AND sequence > ?2 \
+         ORDER BY sequence ASC LIMIT ?3",
+    )?;
+    let rows = statement.query_map(params![session_id.as_bytes(), after_seq, limit], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, Option<String>>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, String>(7)?,
+        ))
+    })?;
+    let mut previous = after_seq;
+    for row in rows {
+        let (sequence, event_id, kind, role, content, occurred_at, metadata, source) = row?;
+        page.missing_in_range += (sequence - previous - 1).max(0);
+        previous = sequence;
+        page.scanned_through = sequence;
+        page.scanned_event_id = Some(event_id.clone());
+        // Hook mirrors carry observation ids, not native message identity.
+        let role = match role.as_deref() {
+            Some(r @ ("user" | "assistant")) if kind == "message" && source != "hook" => r,
+            _ => continue,
+        };
+        let capture = serde_json::from_str::<serde_json::Value>(&metadata)
+            .ok()
+            .and_then(|m| m.get("capture").and_then(|c| c.as_str()).map(str::to_owned));
+        page.turns.push(VisibleTurn {
+            sequence,
+            event_id,
+            role: role.to_owned(),
+            content,
+            occurred_at,
+            capture,
+        });
+    }
+    page.complete = page.scanned_through >= high_water;
+    Ok(Some(page))
+}
+
 /// Most transcript events (imported or managed, not hook mirrors) one read
 /// returns. Content is bounded per event, so this bounds the read.
 pub const MAX_TRANSCRIPT_EVENTS: usize = 5_000;

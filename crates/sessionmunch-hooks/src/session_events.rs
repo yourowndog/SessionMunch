@@ -26,15 +26,15 @@
 use std::path::PathBuf;
 use std::str::FromStr as _;
 
-use axum::extract::State;
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use serde::{Deserialize, Serialize};
 use sessionmunch_core::{
-    AgentKind, AuthLevel, Capability, NewSession, NewSessionEvent, Sanitizer, SessionId,
-    SessionProvenance,
+    ActorContext, AgentKind, AuthLevel, Capability, NewSession, NewSessionEvent, OwnerFilter,
+    Sanitizer, SessionId, SessionProvenance,
 };
 use sessionmunch_store::{ReaderPool, WriterHandle, create_explicit_scope};
 use tracing::debug;
@@ -70,6 +70,10 @@ pub struct SessionEventState {
 pub fn session_events_router(state: SessionEventState) -> Router {
     Router::new()
         .route("/session-events", post(ingest_batch))
+        .route(
+            "/session-events/{session_id}/visible-turns",
+            get(visible_turns),
+        )
         .with_state(state)
 }
 
@@ -259,6 +263,93 @@ async fn ingest_batch(
         .into_response()
 }
 
+/// Query for `GET /session-events/{session_id}/visible-turns`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct VisibleTurnsQuery {
+    /// Workspace the caller is enrolled for; must own the session.
+    pub workspace: String,
+    /// Project the caller is enrolled for; must own the session.
+    pub project: String,
+    /// Cursor sequence from a previous page's `scanned_through`.
+    #[serde(default)]
+    pub after_seq: Option<i64>,
+    /// Cursor anchor from a previous page's `scanned_event_id`.
+    #[serde(default)]
+    pub after_event_id: Option<String>,
+    /// Maximum ledger rows to scan (capped at the store maximum).
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+/// `GET /session-events/{session_id}/visible-turns`
+///
+/// Lossless, bounded, ascending replay of one enrolled session's finalized
+/// visible turns after a `(sequence, event_id)` cursor. Scope and owner are
+/// enforced server-side; a session outside the named scope is reported as not
+/// found. A cursor whose anchor no longer matches returns `status: reset` and
+/// no turns, so consumers stop instead of skipping. Never returns tool
+/// payloads, hook mirrors or raw metadata.
+async fn visible_turns(
+    State(state): State<SessionEventState>,
+    Path(session_id): Path<String>,
+    level: Option<Extension<AuthLevel>>,
+    actor: Option<Extension<ActorContext>>,
+    Query(query): Query<VisibleTurnsQuery>,
+) -> Response {
+    if let Err(response) = authorize(level, Capability::NormalRead) {
+        return response.into_response();
+    }
+    let Ok(session_id) = SessionId::from_str(session_id.trim()) else {
+        return error(StatusCode::BAD_REQUEST, "invalid session_id");
+    };
+    let after = match (query.after_seq, query.after_event_id) {
+        (None, None) => None,
+        (Some(seq), Some(id)) if seq >= 1 && !id.is_empty() && id.len() <= MAX_EVENT_ID_BYTES => {
+            Some((seq, id))
+        }
+        _ => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "after_seq and after_event_id must be supplied together",
+            );
+        }
+    };
+    let not_found = || error(StatusCode::NOT_FOUND, "session not visible in this scope");
+    let workspace = match state
+        .reader
+        .find_workspace(query.workspace.trim().to_owned())
+        .await
+    {
+        Ok(Some(id)) => id,
+        Ok(None) => return not_found(),
+        Err(failure) => return error(StatusCode::INTERNAL_SERVER_ERROR, failure.to_string()),
+    };
+    let project = match state
+        .reader
+        .find_project(workspace, query.project.trim().to_owned())
+        .await
+    {
+        Ok(Some(id)) => id,
+        Ok(None) => return not_found(),
+        Err(failure) => return error(StatusCode::INTERNAL_SERVER_ERROR, failure.to_string()),
+    };
+    let owner = actor.map_or(OwnerFilter::Unattributed, |Extension(actor)| {
+        OwnerFilter::for_actor_context(&actor)
+    });
+    let limit = query
+        .limit
+        .unwrap_or(sessionmunch_store::MAX_VISIBLE_TURN_SCAN);
+    match state
+        .reader
+        .visible_turns_after(session_id, workspace, project, owner, after, limit)
+        .await
+    {
+        Ok(Some(page)) => (StatusCode::OK, Json(page)).into_response(),
+        Ok(None) => not_found(),
+        Err(failure) => error(StatusCode::INTERNAL_SERVER_ERROR, failure.to_string()),
+    }
+}
+
 /// Validate and scrub an untrusted remote batch before it reaches the store.
 ///
 /// This is the typed privacy boundary for session-event ingest: every
@@ -373,6 +464,209 @@ mod tests {
             source: sessionmunch_core::SessionSource::Hook,
             metadata: serde_json::json!({"model": "deepseek-v4"}),
         }
+    }
+
+    fn visible_event(
+        id: &str,
+        kind: WorkstreamEventKind,
+        role: &str,
+        text: &str,
+    ) -> NewSessionEvent {
+        NewSessionEvent {
+            event_id: id.to_string(),
+            kind,
+            role: Some(role.into()),
+            content: text.to_string(),
+            occurred_at: None,
+            source: sessionmunch_core::SessionSource::Import,
+            metadata: serde_json::json!({"capture": "observed", "tool_input": "never returned"}),
+        }
+    }
+
+    async fn page_json(
+        state: &SessionEventState,
+        session_id: &str,
+        query: VisibleTurnsQuery,
+    ) -> (StatusCode, serde_json::Value) {
+        let response = visible_turns(
+            State(state.clone()),
+            Path(session_id.to_string()),
+            None,
+            None,
+            Query(query),
+        )
+        .await;
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    fn query(workspace: &str, project: &str, after: Option<(i64, &str)>) -> VisibleTurnsQuery {
+        VisibleTurnsQuery {
+            workspace: workspace.into(),
+            project: project.into(),
+            after_seq: after.map(|a| a.0),
+            after_event_id: after.map(|a| a.1.to_string()),
+            limit: Some(2),
+        }
+    }
+
+    /// An owned session is invisible to another authenticated owner and to an
+    /// unattributed caller: the same 404 as a missing session, no leak.
+    #[tokio::test]
+    async fn visible_turns_hide_another_owners_session() {
+        let temp = TempDir::new().unwrap();
+        let store = Store::open(temp.path()).unwrap();
+        let state = test_state(&store);
+        let session_id = SessionId::new().to_string();
+        let mut body = request_body(
+            "private-history",
+            "hosted",
+            &session_id,
+            "claude-chat",
+            vec![visible_event(
+                "hosted:a:1",
+                WorkstreamEventKind::Message,
+                "user",
+                "q1",
+            )],
+        );
+        body.actor_user = Some("user:alice".into());
+        let ingest = ingest_batch(State(state.clone()), None, Json(body)).await;
+        assert_eq!(ingest.status(), StatusCode::ACCEPTED);
+        let call = |user: Option<&str>| {
+            let actor = user.map(|u| {
+                Extension(ActorContext {
+                    user: Some(u.to_string()),
+                    ..ActorContext::default()
+                })
+            });
+            visible_turns(
+                State(state.clone()),
+                Path(session_id.clone()),
+                None,
+                actor,
+                Query(query("private-history", "hosted", None)),
+            )
+        };
+        assert_eq!(call(Some("alice")).await.status(), StatusCode::OK);
+        let foreign = call(Some("bob")).await;
+        assert_eq!(foreign.status(), StatusCode::NOT_FOUND);
+        let foreign_body = to_bytes(foreign.into_body(), 4096).await.unwrap();
+        let missing = visible_turns(
+            State(state.clone()),
+            Path(SessionId::new().to_string()),
+            None,
+            Some(Extension(ActorContext {
+                user: Some("bob".into()),
+                ..ActorContext::default()
+            })),
+            Query(query("private-history", "hosted", None)),
+        )
+        .await;
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+        let missing_body = to_bytes(missing.into_body(), 4096).await.unwrap();
+        assert_eq!(
+            foreign_body, missing_body,
+            "foreign owner must look like a missing session"
+        );
+        assert_eq!(call(None).await.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Ascending scoped pages: ineligible rows advance the scan watermark,
+    /// replays of the same cursor are identical, a foreign scope is 404, a
+    /// half cursor is 400 and a mismatched anchor resets instead of skipping.
+    #[tokio::test]
+    async fn visible_turns_page_ascending_with_scope_and_anchor_checks() {
+        let temp = TempDir::new().unwrap();
+        let store = Store::open(temp.path()).unwrap();
+        let state = test_state(&store);
+        let session_id = SessionId::new().to_string();
+        let mut hook = sample_event("hook-1", "hook mirror text");
+        hook.role = Some("assistant".into());
+        let body = request_body(
+            "private-history",
+            "hosted",
+            &session_id,
+            "claude-chat",
+            vec![
+                visible_event("hosted:a:1", WorkstreamEventKind::Message, "user", "q1"),
+                visible_event("tool-1", WorkstreamEventKind::ToolCall, "assistant", "tool"),
+                hook,
+                visible_event(
+                    "hosted:b:1",
+                    WorkstreamEventKind::Message,
+                    "assistant",
+                    "a1",
+                ),
+                visible_event("hosted:c:1", WorkstreamEventKind::Message, "user", "q2"),
+            ],
+        );
+        let ingest = ingest_batch(State(state.clone()), None, Json(body)).await;
+        assert_eq!(ingest.status(), StatusCode::ACCEPTED);
+
+        let (status, first) = page_json(
+            &state,
+            &session_id,
+            query("private-history", "hosted", None),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{first}");
+        assert_eq!(first["status"], "ok");
+        assert_eq!(first["turns"].as_array().unwrap().len(), 1, "{first}");
+        assert_eq!(first["turns"][0]["event_id"], "hosted:a:1");
+        assert_eq!(first["turns"][0]["capture"], "observed");
+        assert!(first["turns"][0].get("metadata").is_none());
+        assert_eq!(first["scanned_through"], 2);
+        assert_eq!(first["high_water"], 5);
+        assert_eq!(first["complete"], false);
+        let anchor = first["scanned_event_id"].as_str().unwrap().to_string();
+        let mut next = query("private-history", "hosted", Some((2, &anchor)));
+        next.limit = Some(10);
+        let (_, second) = page_json(&state, &session_id, next.clone()).await;
+        let ids: Vec<_> = second["turns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["event_id"].clone())
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["hosted:b:1", "hosted:c:1"],
+            "hook mirror skipped: {second}"
+        );
+        assert_eq!(second["scanned_through"], 5);
+        assert_eq!(second["complete"], true);
+        let (_, replay) = page_json(&state, &session_id, next).await;
+        assert_eq!(replay, second, "same cursor must replay identically");
+        let text = second.to_string();
+        assert!(!text.contains("never returned") && !text.contains("hook mirror"));
+
+        let (status, _) =
+            page_json(&state, &session_id, query("private-history", "other", None)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _) = page_json(&state, &session_id, query("nope", "hosted", None)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _) = page_json(
+            &state,
+            &SessionId::new().to_string(),
+            query("private-history", "hosted", None),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let mut half = query("private-history", "hosted", None);
+        half.after_seq = Some(2);
+        let (status, _) = page_json(&state, &session_id, half).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, reset) = page_json(
+            &state,
+            &session_id,
+            query("private-history", "hosted", Some((2, "someone-else"))),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(reset["status"], "reset");
+        assert_eq!(reset["turns"].as_array().unwrap().len(), 0);
     }
 
     #[tokio::test]

@@ -26,11 +26,13 @@ use sessionmunch_workstream::{
     stage_snapshot_home, to_session_events,
 };
 
-use crate::cli::{ChatExportProvider, ImportChatsArgs, ImportSessionsArgs};
+use crate::cli::{ChatExportProvider, ChatInputFormat, ImportChatsArgs, ImportSessionsArgs};
 use crate::config::Config;
 use crate::host_env::HostEnv;
 use crate::http_client::ServerEndpoint;
-use sessionmunch_workstream::{HostedChatProvider, read_hosted_chat_export};
+use sessionmunch_workstream::{
+    HostedChatProvider, read_hosted_chat_export, read_observed_visible_turns,
+};
 use sha2::{Digest as _, Sha256};
 
 /// Events per spooled batch; well under the hub's 4096-event cap so one
@@ -377,7 +379,11 @@ pub async fn run_chats(config: &Config, args: ImportChatsArgs) -> Result<()> {
     };
     let mut failed = false;
     for path in &args.files {
-        let decoded = match read_hosted_chat_export(path, provider, &args.account, &sanitizer) {
+        let read = match args.format {
+            ChatInputFormat::Export => read_hosted_chat_export,
+            ChatInputFormat::Observed => read_observed_visible_turns,
+        };
+        let decoded = match read(path, provider, &args.account, &sanitizer) {
             Ok(value) => value,
             Err(error) => {
                 report.losses.push(format!("{}: {error}", path.display()));
@@ -389,6 +395,8 @@ pub async fn run_chats(config: &Config, args: ImportChatsArgs) -> Result<()> {
             failed = true;
         }
         report.losses.extend(decoded.losses);
+        // Counted coverage exclusions are reported but are not input failures.
+        report.losses.extend(decoded.notes);
         report.sessions_found += decoded.chats.len();
         let sources = decoded.chats.iter().map(|chat| SessionSourceRef {
             native_session_id: &chat.transcript.native_session_id,

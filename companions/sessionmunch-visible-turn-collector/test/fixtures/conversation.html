@@ -1,0 +1,80 @@
+<!doctype html>
+<!--
+  SYNTHETIC fixture. Models a chat page's message structure only; it is not a
+  copy of any provider's markup. No external resources, no scripts beyond the
+  step driver below. Query `?ids=0` removes native message ids; the
+  conversation id comes from the `#c=<uuid>` fragment.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>synthetic conversation fixture</title>
+<style>.hidden-reasoning { display: none; }</style>
+</head>
+<body>
+<main id="thread"></main>
+<script>
+"use strict";
+const withIds = new URLSearchParams(location.search).get("ids") !== "0";
+const thread = document.getElementById("thread");
+const T = "2026-11-26T12:00:00Z";
+
+function message({ id, role, text, streaming = false, extra = "" }) {
+  const el = document.createElement("article");
+  el.className = "fixture-message";
+  if (withIds) el.setAttribute("data-fixture-message-id", id);
+  el.setAttribute("data-fixture-role", role);
+  el.setAttribute("data-fixture-time", T);
+  if (streaming) el.setAttribute("data-fixture-streaming", "");
+  el.innerHTML = `<div class="fixture-text"></div>${extra}`;
+  el.querySelector(".fixture-text").textContent = text;
+  thread.appendChild(el);
+  return el;
+}
+
+const ids = {
+  user: "a1a1a1a1-0000-4000-8000-000000000001",
+  first: "a1a1a1a1-0000-4000-8000-000000000002",
+  regen: "a1a1a1a1-0000-4000-8000-000000000003",
+  tool: "a1a1a1a1-0000-4000-8000-000000000004",
+};
+let assistant = null;
+
+const steps = [
+  // 1: user asks; assistant starts streaming a partial answer.
+  () => {
+    message({ id: ids.user, role: "user", text: "fixture question" });
+    assistant = message({ id: ids.first, role: "assistant", text: "fixture partial", streaming: true });
+  },
+  // 2: assistant finishes. Hidden reasoning and a tool block are present but
+  //    must never be captured.
+  () => {
+    const text = assistant.querySelector(".fixture-text");
+    text.textContent = "fixture answer";
+    text.insertAdjacentHTML("beforeend",
+      '<span class="hidden-reasoning">fixture hidden reasoning</span>');
+    assistant.removeAttribute("data-fixture-streaming");
+    const tool = message({ id: ids.tool, role: "tool", text: "fixture tool output" });
+    tool.setAttribute("data-fixture-role", "tool");
+  },
+  // 3: the user edits their visible message in place (same native id).
+  () => {
+    thread.querySelector(".fixture-message .fixture-text").textContent = "fixture question (edited)";
+  },
+  // 4: regenerate: old answer replaced by a new native message, streaming.
+  () => {
+    assistant.remove();
+    assistant = message({ id: ids.regen, role: "assistant", text: "fixture regen partial", streaming: true });
+  },
+  // 5: regenerated answer finalizes with text equal to the first answer.
+  () => {
+    assistant.querySelector(".fixture-text").textContent = "fixture answer";
+    assistant.removeAttribute("data-fixture-streaming");
+  },
+];
+
+window.__fixtureStep = (n) => { steps[n - 1](); return n; };
+window.__fixtureSteps = steps.length;
+</script>
+</body>
+</html>
