@@ -227,6 +227,9 @@ pub struct SessionEventSearch {
     pub limit: usize,
     /// Restrict to one workspace and project.
     pub scope: Option<(WorkspaceId, ProjectId)>,
+    /// Restrict to one project regardless of workspace. Used by global
+    /// cross-project retrieval filters where project ids are authoritative.
+    pub project: Option<ProjectId>,
     /// Restrict to sessions recorded on this machine (exact, case-insensitive).
     pub machine: Option<String>,
     /// Restrict to one harness (exact `agent_kind`, case-insensitive).

@@ -19,3 +19,8 @@ d8361d3c3a86f870f74841b53c568c64fe42ab1f:crates/ai-memory-core/src/sanitize.rs:g
 d8361d3c3a86f870f74841b53c568c64fe42ab1f:crates/ai-memory-core/src/sanitize.rs:generic-api-key:257
 747c32d50f824cae665f2e35bbd62c8502438903:crates/ai-memory-hooks/src/sanitize.rs:generic-api-key:125
 747c32d50f824cae665f2e35bbd62c8502438903:crates/ai-memory-hooks/src/sanitize.rs:jwt:107
+
+# Synthetic compressed-Codex archive redaction regression. The historical
+# commit contains a hand-authored repeated-hex fake key; the test verifies
+# it is absent from restored snapshots. Exempt only this exact finding.
+6e184dfc7d73dfde9b66e8e8576424e247ae8fab:crates/sessionmunch-workstream/src/snapshot.rs:generic-api-key:974

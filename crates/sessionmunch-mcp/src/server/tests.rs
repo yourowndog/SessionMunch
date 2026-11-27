@@ -8438,11 +8438,11 @@ async fn session_evidence_excludes_forbidden_owned_sources_for_anonymous_caller(
                     project: None,
                     scopes: Vec::new(),
                     workspace: None,
-                    global: None,
+                    global: Some(true),
                     include_expired: None,
                     explain: None,
                     as_of: None,
-                    unit: None,
+                    unit: Some(QueryUnit::Passage),
                     parent_expansion: None,
                     content_budget: None,
                     since: None,
@@ -8478,6 +8478,245 @@ async fn session_evidence_excludes_forbidden_owned_sources_for_anonymous_caller(
                 != Some(owned.to_string().as_str())),
         "forbidden owned session leaked into evidence: {value}"
     );
+}
+
+#[tokio::test]
+async fn global_session_evidence_respects_source_projects() {
+    let (_tmp, store, server, ws, default_proj) = setup_server().await;
+    let selected_proj = store
+        .writer
+        .get_or_create_project(ws, "selected-evidence", None)
+        .await
+        .unwrap();
+    let excluded = seed_session_with_event(
+        &store,
+        ws,
+        default_proj,
+        None,
+        "evt:excluded-project",
+        "crossstreamneedle excluded",
+    )
+    .await;
+    let selected = seed_session_with_event(
+        &store,
+        ws,
+        selected_proj,
+        None,
+        "evt:selected-project",
+        "crossstreamneedle selected",
+    )
+    .await;
+    let selected_id = selected.to_string();
+    let excluded_id = excluded.to_string();
+
+    let value = call_tool_json(
+        server
+            .memory_query(
+                Parameters(QueryArgs {
+                    query: "crossstreamneedle".into(),
+                    limit: Some(5),
+                    project: None,
+                    scopes: Vec::new(),
+                    workspace: None,
+                    global: Some(true),
+                    include_expired: None,
+                    explain: None,
+                    as_of: None,
+                    unit: Some(QueryUnit::Passage),
+                    parent_expansion: None,
+                    content_budget: None,
+                    since: None,
+                    until: None,
+                    machine: None,
+                    harness: None,
+                    kinds: None,
+                    source_projects: Some(vec![selected_proj.to_string()]),
+                }),
+                test_optional_parts(),
+            )
+            .await
+            .unwrap(),
+    );
+    let evidence = value["session_evidence"]
+        .as_array()
+        .expect("selected project evidence");
+    assert_eq!(evidence.len(), 1, "source-project filter leaked: {value}");
+    assert_eq!(
+        evidence[0].get("session_id").and_then(|v| v.as_str()),
+        Some(selected_id.as_str())
+    );
+    assert!(
+        evidence.iter().all(|row| row
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            != Some(excluded_id.as_str())),
+        "excluded project session leaked: {value}"
+    );
+}
+
+#[tokio::test]
+async fn global_session_evidence_respects_since_cutoff() {
+    let (_tmp, store, server, ws, proj) = setup_server().await;
+    seed_session_with_event(
+        &store,
+        ws,
+        proj,
+        None,
+        "evt:before-cutoff",
+        "futurecutoffneedle evidence",
+    )
+    .await;
+
+    let value = call_tool_json(
+        server
+            .memory_query(
+                Parameters(QueryArgs {
+                    query: "futurecutoffneedle".into(),
+                    limit: Some(5),
+                    project: None,
+                    scopes: Vec::new(),
+                    workspace: None,
+                    global: Some(true),
+                    include_expired: None,
+                    explain: None,
+                    as_of: None,
+                    unit: Some(QueryUnit::Passage),
+                    parent_expansion: None,
+                    content_budget: None,
+                    since: Some("2100-01-01T00:00:00Z".into()),
+                    until: None,
+                    machine: None,
+                    harness: None,
+                    kinds: None,
+                    source_projects: None,
+                }),
+                test_optional_parts(),
+            )
+            .await
+            .unwrap(),
+    );
+    assert!(
+        value.get("session_evidence").is_none(),
+        "pre-cutoff session evidence leaked into global results: {value}"
+    );
+}
+
+fn global_passage_args(
+    query: &str,
+    unit: Option<QueryUnit>,
+    harness: Option<Vec<String>>,
+    kinds: Option<Vec<String>>,
+) -> QueryArgs {
+    QueryArgs {
+        query: query.into(),
+        limit: Some(5),
+        project: None,
+        scopes: Vec::new(),
+        workspace: None,
+        global: Some(true),
+        include_expired: None,
+        explain: None,
+        as_of: None,
+        unit,
+        parent_expansion: None,
+        content_budget: None,
+        since: None,
+        until: None,
+        machine: None,
+        harness,
+        kinds,
+        source_projects: None,
+    }
+}
+
+#[tokio::test]
+async fn global_session_evidence_respects_harness_allowlist() {
+    let (_tmp, store, server, ws, proj) = setup_server().await;
+    // seed_session_with_event records the session as OpenCode.
+    let seeded = seed_session_with_event(
+        &store,
+        ws,
+        proj,
+        None,
+        "evt:harness-allowlist",
+        "harnessfilterneedle evidence",
+    )
+    .await;
+
+    let excluded = call_tool_json(
+        server
+            .memory_query(
+                Parameters(global_passage_args(
+                    "harnessfilterneedle",
+                    Some(QueryUnit::Passage),
+                    Some(vec!["claude-code".into()]),
+                    None,
+                )),
+                test_optional_parts(),
+            )
+            .await
+            .unwrap(),
+    );
+    assert!(
+        excluded.get("session_evidence").is_none(),
+        "out-of-allowlist harness evidence leaked: {excluded}"
+    );
+
+    let included = call_tool_json(
+        server
+            .memory_query(
+                Parameters(global_passage_args(
+                    "harnessfilterneedle",
+                    Some(QueryUnit::Passage),
+                    Some(vec![AgentKind::OpenCode.as_str().into()]),
+                    None,
+                )),
+                test_optional_parts(),
+            )
+            .await
+            .unwrap(),
+    );
+    let evidence = included["session_evidence"]
+        .as_array()
+        .unwrap_or_else(|| panic!("allowlisted harness evidence: {included}"));
+    assert_eq!(evidence.len(), 1, "{included}");
+    assert_eq!(
+        evidence[0]["session_id"].as_str(),
+        Some(seeded.to_string().as_str())
+    );
+}
+
+#[tokio::test]
+async fn global_filters_reject_streams_that_cannot_enforce_them() {
+    let (_tmp, _store, server, _ws, _proj) = setup_server().await;
+    // Page kinds have no event-kind equivalent: reject, never broaden.
+    let kinds = server
+        .memory_query(
+            Parameters(global_passage_args(
+                "anything",
+                Some(QueryUnit::Passage),
+                None,
+                Some(vec!["decision".into()]),
+            )),
+            test_optional_parts(),
+        )
+        .await
+        .expect_err("kinds with global evidence must be rejected");
+    assert!(kinds.message.contains("kinds"), "{kinds:?}");
+    // Page-granularity global search cannot apply hard filters.
+    let page = server
+        .memory_query(
+            Parameters(global_passage_args(
+                "anything",
+                None,
+                Some(vec!["codex".into()]),
+                None,
+            )),
+            test_optional_parts(),
+        )
+        .await
+        .expect_err("hard filters without passage granularity must be rejected");
+    assert!(page.message.contains("passage"), "{page:?}");
 }
 
 #[tokio::test]

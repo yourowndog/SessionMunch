@@ -150,7 +150,7 @@ pub(super) async fn handle_purge_project(
 
     // Look up workspace and project IDs without auto-creating.
     let (ws_id, proj_id) =
-        match lookup_ws_proj_no_create(&state, &req.workspace, &req.project).await {
+        match lookup_ws_proj_canonical(&state, &req.workspace, &req.project).await {
             Ok(ids) => ids,
             Err(e) => return e,
         };

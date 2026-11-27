@@ -96,14 +96,18 @@ pub(super) struct QueryArgs {
     /// ISO-8601 instant (e.g. `2026-06-01T00:00:00Z`); parsed with jiff.
     /// **Applies only to** `global=true` with `unit=passage` (cross-project
     /// passage search). Supplying it in any other mode is a caller error.
-    /// Must not be later than `until` when both are given.
+    /// Must not be later than `until` when both are given. The response's
+    /// `session_evidence` is bounded by when each event was recorded in the
+    /// ledger (`created_at`), not by its original occurrence: imported
+    /// history counts from its import time.
     #[serde(default)]
     pub(super) since: Option<String>,
     /// Upper bound on page `updated_at` — the latest instant a page may
     /// have been updated to be eligible. **Type:** string. **Format:**
     /// ISO-8601 instant (e.g. `2026-06-01T00:00:00Z`); parsed with jiff.
     /// **Applies only to** `global=true` with `unit=passage`. An error if
-    /// it precedes `since`.
+    /// it precedes `since`. Bounds `session_evidence` by ledger record
+    /// time (`created_at`), as for `since`.
     #[serde(default)]
     pub(super) until: Option<String>,
     /// Allowlist of `$.machine` frontmatter values; a page must match at

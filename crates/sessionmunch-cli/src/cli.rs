@@ -84,7 +84,7 @@ pub enum Command {
     /// database, so every write blocks until it finishes and it needs free
     /// disk space of roughly the database's own size.
     Compact(CompactArgs),
-    /// Snapshot wiki/, db/, and config.toml into a gzipped tarball.
+    /// Snapshot wiki/, db/, artifacts/ and config.toml into a gzipped tarball.
     Backup(BackupArgs),
     /// Export one project's wiki as an OKF v0.2 bundle tarball.
     ExportOkf(ExportOkfArgs),
@@ -269,12 +269,56 @@ pub enum ImportCommand {
     /// sanitized, queued in a crash-safe local spool, and delivered to the hub
     /// idempotently; unsupported or unreadable stores are reported by name.
     Sessions(ImportSessionsArgs),
+    /// Import selected ChatGPT or Claude account conversation JSON exports.
+    /// The desktop and web chat surfaces share account-level conversation IDs.
+    Chats(ImportChatsArgs),
+}
+
+/// Hosted conversation JSON export provider.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum ChatExportProvider {
+    #[value(name = "chatgpt")]
+    ChatGpt,
+    Claude,
+}
+
+#[derive(Debug, Args)]
+pub struct ImportChatsArgs {
+    #[arg(long, value_enum)]
+    pub provider: ChatExportProvider,
+    /// Stable non-secret account label, reused across desktop and web exports.
+    #[arg(long)]
+    pub account: String,
+    /// Explicit destination workspace; do not mix private account history with shared projects.
+    #[arg(long)]
+    pub workspace: String,
+    /// Explicit destination project.
+    #[arg(long)]
+    pub project: String,
+    /// Strict window on each message's original timestamp: `30m`, `12h`,
+    /// `7d`, `5w`, or `all`. Messages before the fixed invocation cutoff, or
+    /// without a usable timestamp, are counted and withheld. Default: every
+    /// message in the selected files.
+    #[arg(long)]
+    pub since: Option<String>,
+    /// Count selected visible conversations without sending or writing import state.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Emit a JSON report without conversation bodies.
+    #[arg(long)]
+    pub json: bool,
+    /// Extracted conversation JSON file(s), not the entire personal data archive.
+    #[arg(required = true, num_args = 1..)]
+    pub files: Vec<PathBuf>,
 }
 
 /// Arguments for `import sessions`.
 #[derive(Debug, Args)]
 pub struct ImportSessionsArgs {
-    /// How far back to look: `30m`, `12h`, `7d`, `2w`, or `all`.
+    /// How far back to look: `30m`, `12h`, `7d`, `2w`, or `all`. Bounded
+    /// windows are strict per event: only events whose original source
+    /// timestamp is at or after the fixed invocation cutoff are imported;
+    /// older or untimestamped events are counted and withheld.
     #[arg(long, default_value = "7d")]
     pub since: String,
     /// Only import this harness's store: `hermes`, or any `run` harness name
@@ -289,7 +333,8 @@ pub struct ImportSessionsArgs {
     pub hermes_home: Option<PathBuf>,
     /// Import from the blobs `snapshot-harness-history` preserved instead of
     /// the live stores (defaults to `<data_dir>/snapshots`). `--since` then
-    /// counts from when each blob was first preserved; Hermes is skipped.
+    /// selects blobs by when each was first preserved, and still filters
+    /// each event by its original timestamp; Hermes is skipped.
     #[arg(long, value_name = "DIR", conflicts_with_all = ["home", "hermes_home"])]
     pub from_snapshots: Option<Option<PathBuf>>,
     /// Count what would be imported without queueing or sending anything.

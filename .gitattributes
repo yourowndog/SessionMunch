@@ -2,3 +2,6 @@
 # part of the CLI and MCP payload contract.
 crates/sessionmunch-core/src/routing_skills/*/SKILL.md text eol=lf
 crates/sessionmunch-cli/templates/plugins/*.ts text eol=lf
+# refinery embeds migrations verbatim and checksums their bytes; a CRLF
+# checkout would make a Windows build reject every store a Linux build wrote.
+crates/sessionmunch-store/migrations/*.sql text eol=lf

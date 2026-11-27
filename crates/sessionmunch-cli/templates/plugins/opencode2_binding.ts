@@ -9,6 +9,22 @@ const SessionMunchOpencode2: Plugin = {
     const ctxAny = ctx as any;
     const directory = ctxAny?.location?.directory;
     const controller = new AbortController();
+    // V2's native hook runs before the compaction model request. Older
+    // beta hosts may reject its registration; retain their event fallback.
+    // Choose one path at setup, not both, to avoid duplicate checkpoints.
+    const compactionRegistration = await (async () => {
+      try {
+        return await ctx.session.hook("compaction", async (event) => {
+          const id = (event as any)?.sessionID;
+          if (!id) return;
+          postPreCompact(id, cwdFor(id, directory));
+          await drainHookQueueForDispose();
+        });
+      } catch (_e) {
+        console.warn("SessionMunch: native OpenCode 2 compaction hook unavailable; using lifecycle events");
+        return undefined;
+      }
+    })();
     void (async () => {
       try {
         for await (const evt of ctx.event.subscribe({ signal: controller.signal })) {
@@ -34,13 +50,11 @@ const SessionMunchOpencode2: Plugin = {
             const id = data?.sessionID ?? data?.id ?? info?.id;
             endSession(id, loc, data?.directory ?? info?.directory);
           }
-          if (type === "session.compaction.started") {
+          if (!compactionRegistration &&
+              (type === "session.compaction.started" || type === "session.compacted" ||
+               type === "session.compaction.ended")) {
             const id = data?.sessionID ?? data?.id;
-            postPreCompact(id, loc);
-          }
-          if (type === "session.compacted") {
-            const id = data?.sessionID ?? data?.id;
-            postPreCompact(id, loc);
+            if (id) postPreCompact(id, loc);
           }
         }
       } catch (_e) {
@@ -63,11 +77,10 @@ const SessionMunchOpencode2: Plugin = {
         prompt: typeof prompt?.text === "string" ? prompt.text : textFromParts(prompt?.parts),
       });
     });
-    const handoffInjected = new Set<string>();
     const contextRegistration = await ctx.session.hook("context", async (event) => {
       const e = event as any;
       const id = e?.sessionID;
-      if (!id || handoffInjected.has(id)) return;
+      if (!id || !Array.isArray(e.system)) return;
       startSession(id, cwdFor(id, directory));
       let pending = handoffFetches.get(id);
       if (!pending) {
@@ -75,12 +88,12 @@ const SessionMunchOpencode2: Plugin = {
         handoffFetches.set(id, pending);
       }
       const handoff = await pending;
-      if (handoff) {
+      if (handoff && handoffFetches.get(id) === pending && startedSessions.has(id) && !e.system.some((part: any) => part?.type === "text" && part.text === handoff)) {
         // SystemPart is `{ type: "text", text }` — the `type` discriminator
         // is required: without it the host fails the model call with a
         // schema validation error (observed live on beta-18999).
         e.system.push({ type: "text", text: handoff });
-        handoffInjected.add(id);
+        // Context arrays are ephemeral: reuse the cached handoff on every call.
       }
     });
     const beforeRegistration = await ctx.tool.hook("execute.before", (event) => {
@@ -121,11 +134,12 @@ const SessionMunchOpencode2: Plugin = {
       for (const registration of [
         promptRegistration,
         contextRegistration,
+        compactionRegistration,
         beforeRegistration,
         afterRegistration,
       ]) {
         try {
-          await registration.dispose();
+          await registration?.dispose();
         } catch (_e) {
           // Unload is best-effort; a dead host has nothing to unregister.
         }

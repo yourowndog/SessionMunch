@@ -3,10 +3,10 @@
 //!
 //! Stateless clients (OpenCode `type: "remote"`, curl) send `initialize`
 //! and `tools/call` as independent requests without echoing an
-//! `Mcp-Session-Id`. In rmcp's default *stateful* mode the server demands
-//! that header and rejects the second request with 422 "Unexpected
-//! message, expect initialize request". `sessionmunch serve --transport http`
-//! now defaults to *stateless* mode (`stateful_mode=false` +
+//! `Mcp-Session-Id`. In rmcp's legacy *stateful* mode the server demands
+//! that header and rejects the second request (rmcp 3.11: HTTP 400
+//! "Session ID is required"; older SDKs returned 422). `sessionmunch serve --transport http`
+//! now defaults to *stateless* mode (`legacy_session_mode=false` +
 //! `json_response=true`), so those clients work with no `mcp-remote` shim.
 //! `--http-stateful` restores the session behaviour.
 //!
@@ -74,7 +74,7 @@ async fn make_router_with_dialect(
         move || Ok(server.clone()),
         LocalSessionManager::default().into(),
         StreamableHttpServerConfig::default()
-            .with_stateful_mode(stateful)
+            .with_legacy_session_mode(stateful)
             .with_json_response(!stateful),
     );
     let router = Router::new().nest_service("/mcp", svc);
@@ -166,8 +166,8 @@ async fn stateless_initialize_returns_json_result() {
 }
 
 /// Contrast / guard: with `--http-stateful` (session mode), the same
-/// session-less `tools/call` is rejected with 422 "Unexpected message,
-/// expect initialize request" — the exact symptom from issue #3. This
+/// legacy session-less `tools/call` is rejected with 400 "Session ID is required".
+/// rmcp 3.11 changed the status from 422; the rejection is still mandatory. This
 /// proves the default flip is what resolves it, and pins the opt-in
 /// behaviour so a future change to the default can't silently regress it.
 #[tokio::test]
@@ -182,13 +182,13 @@ async fn stateful_tools_call_without_session_is_rejected() {
         .unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::UNPROCESSABLE_ENTITY,
+        StatusCode::BAD_REQUEST,
         "stateful mode must reject a session-less tools/call"
     );
     let body = body_string(resp).await;
     assert!(
-        body.contains("initialize"),
-        "stateful rejection should mention the missing initialize: {body}"
+        body.contains("Session ID is required") && !body.contains("pages_latest"),
+        "stateful rejection must identify the missing session and not execute the tool: {body}"
     );
 }
 

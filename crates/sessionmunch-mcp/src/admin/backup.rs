@@ -69,7 +69,7 @@ pub(super) async fn handle_embed_passages(
 /// Handler for `POST /admin/commit`.
 ///
 /// Snapshots the live SQLite DB via the online backup API, then
-/// tar-gzips `wiki/`, the snapshot, and `config.toml` (if present)
+/// tar-gzips `wiki/`, `artifacts/`, the snapshot, and `config.toml` (if present)
 /// into a tempfile. The response streams the file instead of buffering
 /// the full archive in memory.
 pub(super) async fn handle_backup(State(state): State<Arc<AdminState>>) -> Response {
@@ -125,20 +125,7 @@ pub(super) async fn build_backup_tarball_file(
         tar.mode(tar::HeaderMode::Deterministic);
         tar.follow_symlinks(false);
 
-        let wiki_dir = state.data_dir.join("wiki");
-        if wiki_dir.is_dir() {
-            tar.append_dir_all("wiki", &wiki_dir)
-                .map_err(|e| anyhow::anyhow!("archiving wiki/: {e}"))?;
-        }
-
-        tar.append_path_with_name(&snapshot_path, "db/memory.sqlite")
-            .map_err(|e| anyhow::anyhow!("archiving db snapshot: {e}"))?;
-
-        let cfg = state.data_dir.join("config.toml");
-        if cfg.is_file() {
-            tar.append_path_with_name(&cfg, "config.toml")
-                .map_err(|e| anyhow::anyhow!("archiving config.toml: {e}"))?;
-        }
+        append_backup_contents(&mut tar, &state.data_dir, &snapshot_path)?;
 
         let encoder = tar.into_inner()?;
         encoder.finish()?;
@@ -146,4 +133,63 @@ pub(super) async fn build_backup_tarball_file(
     tar_file.sync_data()?;
     tar_file.rewind()?;
     Ok(tokio::fs::File::from_std(tar_file))
+}
+
+fn append_backup_contents<W: std::io::Write>(
+    tar: &mut tar::Builder<W>,
+    data_dir: &std::path::Path,
+    snapshot_path: &std::path::Path,
+) -> anyhow::Result<()> {
+    for subdir in ["wiki", "artifacts"] {
+        let path = data_dir.join(subdir);
+        if path.is_dir() {
+            tar.append_dir_all(subdir, &path)
+                .map_err(|e| anyhow::anyhow!("archiving {subdir}/: {e}"))?;
+        }
+    }
+    tar.append_path_with_name(snapshot_path, "db/memory.sqlite")
+        .map_err(|e| anyhow::anyhow!("archiving db snapshot: {e}"))?;
+    let cfg = data_dir.join("config.toml");
+    if cfg.is_file() {
+        tar.append_path_with_name(&cfg, "config.toml")
+            .map_err(|e| anyhow::anyhow!("archiving config.toml: {e}"))?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::append_backup_contents;
+    use std::io::Read;
+
+    #[test]
+    fn backup_contains_populated_artifacts() {
+        let data = tempfile::tempdir().unwrap();
+        let snapshot = data.path().join("snapshot.sqlite");
+        std::fs::write(&snapshot, b"sqlite").unwrap();
+        let artifact = data.path().join("artifacts/sha256/ab/cd/blob.bin");
+        std::fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+        std::fs::write(&artifact, b"artifact-body").unwrap();
+
+        let mut bytes = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut bytes);
+            append_backup_contents(&mut builder, data.path(), &snapshot).unwrap();
+            builder.finish().unwrap();
+        }
+
+        let mut archive = tar::Archive::new(bytes.as_slice());
+        let mut found = None;
+        for entry in archive.entries().unwrap() {
+            let mut entry = entry.unwrap();
+            if entry.path().unwrap().as_ref()
+                == std::path::Path::new("artifacts/sha256/ab/cd/blob.bin")
+            {
+                let mut body = Vec::new();
+                entry.read_to_end(&mut body).unwrap();
+                found = Some(body);
+            }
+        }
+        assert_eq!(found.as_deref(), Some(b"artifact-body".as_slice()));
+    }
 }

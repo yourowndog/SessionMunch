@@ -69,10 +69,9 @@ pub fn reorg_sessions(
 
 /// Rename a project within its workspace.
 ///
-/// Only the `name` column is updated — all pages, sessions, observations,
-/// and handoffs remain associated with the same `project_id`. No files
-/// move on disk (the wiki is flat: every page from every project lives
-/// under `wiki/`; only the `project_id` foreign key distinguishes them).
+/// The canonical name changes and the former name is retained as an alias.
+/// Pages, versions, sessions, provenance, and active pointers keep the same
+/// stable `project_id`. No UUID-keyed wiki directory moves.
 ///
 /// # Errors
 /// - [`StoreError::InvalidProjectName`] when `new_name` is empty,
@@ -99,6 +98,8 @@ pub fn rename_project(
         ));
     }
 
+    // The schema trigger retains the former name as an alias in this same
+    // transaction. IDs, history, and active pointers are untouched.
     // Wrap the UPDATE + audit row in one transaction so the trail can never
     // diverge from the rename it records (on any error the tx drops without
     // commit, rolling both back).

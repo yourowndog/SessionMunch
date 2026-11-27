@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
@@ -291,3 +292,101 @@ def format_scope_hint(pairs: Iterable[Tuple[str, str]], limit: int = 12) -> str:
         return "no projects discovered on the SessionMunch server"
     suffix = " ..." if len(list(pairs)) > limit else ""
     return "known scopes: " + ", ".join(listed) + suffix
+
+
+def _marker_pair(parent: Path) -> Optional[Tuple[str, str]]:
+    for filename in (".sessionmunch.toml", ".ai-memory.toml"):
+        marker = parent / filename
+        if marker.is_symlink():
+            raise ScopeError(f"Symlinked SessionMunch scope marker is not allowed: {marker}")
+        if not marker.exists():
+            continue
+        try:
+            if not marker.is_file():
+                raise ValueError("marker must be a regular file")
+            if marker.stat().st_size > 16384:
+                raise ValueError("marker exceeds 16 KiB")
+            data = tomllib.loads(marker.read_text(encoding="utf-8"))
+            workspace, project = data.get("workspace"), data.get("project")
+            if not all(isinstance(v, str) and v.strip() for v in (workspace, project)):
+                raise ValueError("marker must declare both workspace and project")
+        except (OSError, ValueError) as exc:
+            raise ScopeError(f"Invalid SessionMunch scope marker {marker}: {exc}") from exc
+        return workspace, project
+    return None
+
+
+def _linked_primary_root(parent: Path) -> Optional[Path]:
+    """Follow reciprocal Git worktree metadata, never a guessed repository name."""
+    marker = parent / ".git"
+    try:
+        if marker.is_symlink() or marker.stat().st_size > 4096:
+            return None
+        text = marker.read_text(encoding="utf-8").strip()
+        if not text.startswith("gitdir: "):
+            return None
+        gitdir = (parent / text[8:]).resolve()
+        common_file = gitdir / "commondir"
+        backlink = gitdir / "gitdir"
+        if (
+            common_file.is_symlink() or backlink.is_symlink()
+            or common_file.stat().st_size > 4096 or backlink.stat().st_size > 4096
+        ):
+            return None
+        common = (gitdir / common_file.read_text().strip()).resolve()
+        if common.name != ".git" or not common.is_dir() or not gitdir.is_relative_to(common / "worktrees"):
+            return None
+        if (gitdir / backlink.read_text().strip()).resolve() != marker.resolve():
+            return None
+        if (common.parent / ".git").resolve() != common:
+            return None
+        return common.parent
+    except (OSError, ValueError):
+        return None
+
+
+def scope_from_cwd(cwd: str) -> Optional[Tuple[str, str]]:
+    """Freeze explicit scope within this Git repository, including linked worktrees."""
+    path = Path(cwd)
+    if not cwd or not path.is_absolute():
+        return None
+    try:
+        path = path.resolve(strict=True)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if not path.is_dir():
+        return None
+    for parent in (path, *path.parents):
+        pair = _marker_pair(parent)
+        if pair:
+            return pair
+        git = parent / ".git"
+        if git.is_symlink() or git.is_dir():
+            return None
+        if git.is_file():
+            primary = _linked_primary_root(parent)
+            return _marker_pair(primary) if primary else None
+    return None
+
+
+def native_session_cwd(hermes_home: str, session_id: str) -> str:
+    """Read owning native metadata when gateway construction omits cwd.
+
+    Never read transcript content or another profile, create a database, or use
+    process cwd. The provider freezes this value during initialization.
+    """
+    if not hermes_home or not session_id:
+        return ""
+    import sqlite3
+    from contextlib import closing
+    db = Path(hermes_home) / "state.db"
+    if db.is_symlink() or not db.is_file():
+        return ""
+    try:
+        with closing(sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True, timeout=1)) as conn:
+            rows = conn.execute("SELECT cwd FROM sessions WHERE id=? LIMIT 2", (session_id,)).fetchall()
+        if len(rows) == 1 and isinstance(rows[0][0], str) and Path(rows[0][0]).is_absolute():
+            return rows[0][0]
+    except (OSError, ValueError, sqlite3.Error):
+        pass
+    return ""

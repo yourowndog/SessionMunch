@@ -4180,14 +4180,14 @@ fn v19_repairs_orphan_observation_attribution_and_purges_empty_projects() {
     // in the same workspace; a session lives under `manga-plus`
     // and an observation was misattributed to `reader`.
     let ws = get_or_create_workspace(&mut conn, "default").unwrap();
-    let parent = get_or_create_project(
+    let parent = seed_legacy_project(
         &mut conn,
         &ws,
         "manga-plus",
         Some("/mnt/data/Projects/manga-plus"),
     )
     .unwrap();
-    let fragment = get_or_create_project(
+    let fragment = seed_legacy_project(
         &mut conn,
         &ws,
         "reader",
@@ -4400,10 +4400,10 @@ fn v27_reattributes_nongit_fragments_and_preserves_reserved_projects() {
     // basename fragment holding misattributed observations, and the
     // reserved projects that must survive even when empty.
     let ws = get_or_create_workspace(&mut conn, "default").unwrap();
-    let parent = get_or_create_project(&mut conn, &ws, "tiktok_analysis", None).unwrap();
-    let fragment = get_or_create_project(&mut conn, &ws, "sources", None).unwrap();
-    let scratch = get_or_create_project(&mut conn, &ws, "scratch", None).unwrap();
-    let global = get_or_create_project(&mut conn, &ws, "_global", None).unwrap();
+    let parent = seed_legacy_project(&mut conn, &ws, "tiktok_analysis", None).unwrap();
+    let fragment = seed_legacy_project(&mut conn, &ws, "sources", None).unwrap();
+    let scratch = seed_legacy_project(&mut conn, &ws, "scratch", None).unwrap();
+    let global = seed_legacy_project(&mut conn, &ws, "_global", None).unwrap();
 
     let sid = SessionId::new();
     // Seeded with era-appropriate SQL rather than `begin_session`: this
@@ -4498,7 +4498,7 @@ fn v20_adds_grok_and_preserves_sessions_invariants_on_upgraded_db() {
         crate::migrations::run_to(&mut conn, 19).unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         ws = get_or_create_workspace(&mut conn, "default").unwrap();
-        proj = get_or_create_project(&mut conn, &ws, "scratch", None).unwrap();
+        proj = seed_legacy_project(&mut conn, &ws, "scratch", None).unwrap();
         // Era-appropriate raw insert: this fixture stops at an older
         // schema on purpose (see `seed_historical_session`).
         seed_historical_session(
@@ -4577,7 +4577,7 @@ fn v20_adds_grok_and_preserves_sessions_invariants_on_upgraded_db() {
     );
 
     let other_ws = get_or_create_workspace(&mut conn, "other").unwrap();
-    let other_proj = get_or_create_project(&mut conn, &other_ws, "other-project", None).unwrap();
+    let other_proj = seed_legacy_project(&mut conn, &other_ws, "other-project", None).unwrap();
     // Raw insert on purpose: the fixture sits on an older schema, and
     // what is under test is the pairing TRIGGER rejecting a session
     // whose workspace does not own its project.
@@ -4625,7 +4625,7 @@ fn v25_adds_pi_and_preserves_sessions_invariants_on_upgraded_db() {
         crate::migrations::run_to(&mut conn, 24).unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         ws = get_or_create_workspace(&mut conn, "default").unwrap();
-        proj = get_or_create_project(&mut conn, &ws, "scratch", None).unwrap();
+        proj = seed_legacy_project(&mut conn, &ws, "scratch", None).unwrap();
         // Era-appropriate raw insert: this fixture stops at an older
         // schema on purpose (see `seed_historical_session`).
         seed_historical_session(
@@ -4721,7 +4721,7 @@ fn v28_adds_devin_and_preserves_sessions_invariants_on_upgraded_db() {
         crate::migrations::run_to(&mut conn, 25).unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         ws = get_or_create_workspace(&mut conn, "default").unwrap();
-        proj = get_or_create_project(&mut conn, &ws, "scratch", None).unwrap();
+        proj = seed_legacy_project(&mut conn, &ws, "scratch", None).unwrap();
         // Era-appropriate raw insert: this fixture stops at an older
         // schema on purpose (see `seed_historical_session`).
         seed_historical_session(
@@ -4804,7 +4804,7 @@ fn v28_adds_devin_and_preserves_sessions_invariants_on_upgraded_db() {
     assert_eq!(fk_violations, 0, "V28 must leave foreign keys clean");
 
     let other_ws = get_or_create_workspace(&mut conn, "other").unwrap();
-    let other_proj = get_or_create_project(&mut conn, &other_ws, "other-project", None).unwrap();
+    let other_proj = seed_legacy_project(&mut conn, &other_ws, "other-project", None).unwrap();
     // Raw insert on purpose: the fixture sits on an older schema, and
     // what is under test is the pairing TRIGGER rejecting a session
     // whose workspace does not own its project.
@@ -4969,7 +4969,7 @@ fn v18_migration_refuses_existing_split_brain_rows() {
 
     let src_ws = get_or_create_workspace(&mut conn, "src").unwrap();
     let stale_ws = get_or_create_workspace(&mut conn, "stale").unwrap();
-    let proj = get_or_create_project(&mut conn, &src_ws, "scratch", None).unwrap();
+    let proj = seed_legacy_project(&mut conn, &src_ws, "scratch", None).unwrap();
     let mut bad_page = page(src_ws, proj, "notes/split.md", "body");
     bad_page.workspace_id = stale_ws;
     insert_page_pre_v36(&conn, &bad_page);
@@ -6254,4 +6254,178 @@ fn admitted_guard_revalidates_and_lifecycle_preserves_handoff_release_audit() {
         }
     );
     assert_eq!(audit_row_for(&conn, "release_lifecycle_only_handoff").0, 1);
+}
+
+#[test]
+fn project_aliases_guard_inserts_moves_and_rollback() {
+    let (_tmp, mut conn, ws, project) = fresh_db();
+    rename_project(&mut conn, &ws, &project, "canonical", None).unwrap();
+    let other_ws = get_or_create_workspace(&mut conn, "other").unwrap();
+    let other = get_or_create_project(&mut conn, &other_ws, "scratch", None).unwrap();
+    // Moving a project must not shadow another project's alias or name.
+    assert!(
+        conn.execute(
+            "UPDATE projects SET workspace_id = ?1 WHERE id = ?2",
+            params![other_ws.as_bytes(), project.as_bytes()],
+        )
+        .is_err()
+    );
+    assert_eq!(
+        get_or_create_project(&mut conn, &ws, "scratch", None).unwrap(),
+        project
+    );
+    assert_eq!(
+        get_or_create_project(&mut conn, &other_ws, "scratch", None).unwrap(),
+        other
+    );
+    // Direct insert callers cannot bypass the retained-name reservation.
+    assert!(conn.execute(
+        "INSERT INTO projects(id, workspace_id, name, created_at) VALUES (?1, ?2, 'scratch', 0)",
+        params![ProjectId::new().as_bytes(), ws.as_bytes()],
+    ).is_err());
+    // Force the audit insert to fail after UPDATE + alias trigger.
+    conn.execute_batch("CREATE TRIGGER fail_rename_audit BEFORE INSERT ON audit_log BEGIN SELECT RAISE(ABORT, 'fixture'); END;").unwrap();
+    assert!(rename_project(&mut conn, &ws, &project, "rolled-back", None).is_err());
+    let names: Vec<String> = conn
+        .prepare("SELECT name FROM project_names WHERE project_id = ?1 ORDER BY name")
+        .unwrap()
+        .query_map(params![project.as_bytes()], |row| row.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(names, vec!["canonical", "scratch"]);
+}
+
+#[test]
+fn project_alias_rename_keeps_all_history_and_provenance_rows_identical() {
+    // Recovered from the historical Weakling rename verification: prove that
+    // every existing row and its content survive, not merely that counts agree.
+    // All fixtures are local and synthetic; never read an operator's database.
+    let (_tmp, mut conn, ws, project) = fresh_db();
+    let (sid, _) = seed_session(&mut conn, ws, project, "legacy");
+    seed_handoff(&conn, ws, project, None, true, None, 1);
+    let session = hook_session(sid, ws, project, None);
+    crate::session_events::begin_session_with_provenance(
+        &mut conn,
+        &session,
+        &sessionmunch_core::SessionProvenance {
+            native_session_id: Some("native-legacy".into()),
+            machine_id: Some("fixture-node".into()),
+            git_branch: Some("main".into()),
+            import_cursor: Some("cursor-1".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    crate::session_events::replace_summary_jobs(
+        &mut conn,
+        &sid,
+        &[("job-1".into(), "fixture-model".into(), "{}".into())],
+    )
+    .unwrap();
+    let mut note = page(ws, project, "notes/history.md", "version one");
+    note.evidence = vec![PageEvidence {
+        kind: PageEvidenceKind::Session,
+        source_id: sid.to_string(),
+    }];
+    upsert_page(&mut conn, &note).unwrap();
+    note.body = "version two".into();
+    let latest = upsert_page(&mut conn, &note).unwrap();
+    let other = get_or_create_project(&mut conn, &ws, "other", None).unwrap();
+    let mut link = page(ws, other, "notes/reference.md", "reference to history");
+    link.links = vec![LinkTarget {
+        workspace: None,
+        project: Some("scratch".into()),
+        path: PagePath::new("notes/history.md").unwrap(),
+        relation: None,
+    }];
+    let link_id = upsert_page(&mut conn, &link).unwrap();
+    let tables = [
+        "pages",
+        "sessions",
+        "observations",
+        "session_events",
+        "handoffs",
+        "links",
+        "page_evidence",
+        "session_summary_jobs",
+    ];
+    let snapshot = |conn: &Connection| -> Vec<Vec<Vec<rusqlite::types::Value>>> {
+        tables
+            .iter()
+            .map(|table| {
+                // Order on every column: composite keys and WITHOUT ROWID
+                // tables must compare deterministically too.
+                let width = conn
+                    .prepare(&format!("SELECT * FROM {table} LIMIT 0"))
+                    .unwrap()
+                    .column_count();
+                let order = (1..=width)
+                    .map(|column| column.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let mut stmt = conn
+                    .prepare(&format!("SELECT * FROM {table} ORDER BY {order}"))
+                    .unwrap();
+                stmt.query_map([], |row| (0..width).map(|i| row.get(i)).collect())
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .collect()
+            })
+            .collect()
+    };
+    let before = snapshot(&conn);
+    assert!(before[0].len() >= 4, "includes superseded versions");
+    for (table, rows) in tables.iter().zip(&before) {
+        assert!(!rows.is_empty(), "fixture must exercise {table}");
+    }
+    let assert_link = |conn: &Connection| {
+        let target: Option<Vec<u8>> = conn
+            .query_row(
+                "SELECT to_page_id FROM links WHERE from_page_id = ?1",
+                params![link_id.as_bytes()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(target.as_deref(), Some(&latest.as_bytes()[..]));
+    };
+    assert_link(&conn);
+    rename_project(&mut conn, &ws, &project, "sessionmunch", None).unwrap();
+    assert_eq!(before, snapshot(&conn));
+    assert_link(&conn);
+    for name in ["scratch", "sessionmunch"] {
+        assert_eq!(
+            get_or_create_project(&mut conn, &ws, name, None).unwrap(),
+            project
+        );
+    }
+    // Returning to the former canonical name must also be lossless.
+    rename_project(&mut conn, &ws, &project, "scratch", None).unwrap();
+    assert_eq!(before, snapshot(&conn));
+    assert_link(&conn);
+    assert_eq!(
+        get_or_create_project(&mut conn, &ws, "sessionmunch", None).unwrap(),
+        project
+    );
+}
+
+/// Era-appropriate project seed for migration fixtures predating V68.
+/// These fixtures must not call current name-resolution SQL on an old schema.
+pub(crate) fn seed_legacy_project(
+    conn: &mut Connection,
+    workspace_id: &WorkspaceId,
+    name: &str,
+    repo_path: Option<&str>,
+) -> StoreResult<ProjectId> {
+    let id = ProjectId::new();
+    conn.execute(
+        "INSERT OR IGNORE INTO projects(id, workspace_id, name, repo_path, created_at) VALUES (?1, ?2, ?3, ?4, 0)",
+        params![id.as_bytes(), workspace_id.as_bytes(), name, repo_path],
+    )?;
+    let bytes: Vec<u8> = conn.query_row(
+        "SELECT id FROM projects WHERE workspace_id = ?1 AND name = ?2",
+        params![workspace_id.as_bytes(), name],
+        |row| row.get(0),
+    )?;
+    Ok(ProjectId::from_slice(&bytes)?)
 }

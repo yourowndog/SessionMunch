@@ -17,7 +17,7 @@
 use anyhow::{Context, Result, bail};
 use flate2::read::GzDecoder;
 use sessionmunch_store::Store;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 use tracing::info;
 
 use crate::cli::RestoreArgs;
@@ -40,43 +40,171 @@ pub fn run(config: &Config, args: RestoreArgs) -> Result<()> {
         bail!("source tarball {} not found", args.from.display());
     }
 
-    let wiki = config.data_dir.join("wiki");
-    let db = config.data_dir.join("db").join("memory.sqlite");
-    if (wiki.is_dir() && std::fs::read_dir(&wiki)?.next().is_some()) || db.is_file() {
-        if !args.force {
-            bail!(
-                "refusing to restore: data dir at {} is non-empty (pass --force to overwrite)",
-                config.data_dir.display(),
-            );
-        }
-        // Force path: drop the existing wiki + db so the tarball can
-        // populate them cleanly. Keep config.toml, logs/, models/.
-        for sub in ["wiki", "db"] {
-            let path = config.data_dir.join(sub);
-            if path.exists() {
-                std::fs::remove_dir_all(&path)?;
-            }
-        }
-    }
-    std::fs::create_dir_all(&config.data_dir)?;
-
-    let file = std::fs::File::open(&args.from)
-        .with_context(|| format!("opening {}", args.from.display()))?;
-    let decoder = GzDecoder::new(file);
-    let mut archive = tar::Archive::new(decoder);
-    unpack_checked_archive(&mut archive, &config.data_dir)
-        .with_context(|| format!("extracting into {}", config.data_dir.display()))?;
-    info!(from = %args.from.display(), into = %config.data_dir.display(), "tarball extracted");
-
-    // Open + drop the store so refinery applies any pending migrations
-    // and the SQLite file is validated.
-    let _store = Store::open(&config.data_dir).context("opening restored store")?;
+    let replaced = restore_archive(&config.data_dir, &args.from, args.force)?;
     info!("restore complete");
     println!(
         "restored {} -> {}",
         args.from.display(),
         config.data_dir.display()
     );
+    if let Some(replaced) = replaced {
+        println!(
+            "previous data kept at {}; delete it once the restored store is verified",
+            replaced.display()
+        );
+    }
+    Ok(())
+}
+
+const RESTORED_PATHS: [&str; 4] = ["wiki", "db", "artifacts", "config.toml"];
+
+/// Returns where the replaced live data was kept, if anything was replaced.
+fn restore_archive(data_dir: &Path, archive_path: &Path, force: bool) -> Result<Option<PathBuf>> {
+    if has_existing_restore_data(data_dir)? && !force {
+        bail!(
+            "refusing to restore: data dir at {} is non-empty (pass --force to overwrite)",
+            data_dir.display(),
+        );
+    }
+    let parent = data_dir.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let staging = tempfile::Builder::new()
+        .prefix(".sessionmunch-restore-")
+        .tempdir_in(parent)?;
+    let file = std::fs::File::open(archive_path)
+        .with_context(|| format!("opening {}", archive_path.display()))?;
+    let decoder = GzDecoder::new(file);
+    let mut archive = tar::Archive::new(decoder);
+    unpack_checked_archive(&mut archive, staging.path()).with_context(|| {
+        format!(
+            "extracting {} into isolated staging",
+            archive_path.display()
+        )
+    })?;
+    if !staging.path().join("db/memory.sqlite").is_file() {
+        bail!("backup is missing required db/memory.sqlite");
+    }
+    {
+        let _store = Store::open(staging.path()).context("opening staged restored store")?;
+    }
+    let replaced = install_staged_restore(staging.path(), data_dir)?;
+    info!(from = %archive_path.display(), into = %data_dir.display(), "validated staged restore installed");
+    Ok(replaced)
+}
+
+fn has_existing_restore_data(data_dir: &Path) -> Result<bool> {
+    for name in ["wiki", "db", "artifacts"] {
+        let path = data_dir.join(name);
+        if path.is_file() || (path.is_dir() && std::fs::read_dir(path)?.next().is_some()) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn install_staged_restore(staged: &Path, data_dir: &Path) -> Result<Option<PathBuf>> {
+    std::fs::create_dir_all(data_dir)?;
+    let parent = data_dir.parent().unwrap_or_else(|| Path::new("."));
+    let rollback = tempfile::Builder::new()
+        .prefix(".sessionmunch-rollback-")
+        .tempdir_in(parent)?;
+    let mut originals = Vec::<String>::new();
+    let mut installed = Vec::<String>::new();
+
+    let result = (|| -> Result<()> {
+        for name in RESTORED_PATHS {
+            let live = data_dir.join(name);
+            // The wiki and ledger are always replaced as a pair. Optional
+            // paths (`config.toml`, `artifacts`) are replaced only when the
+            // archive carries them: an older or config-less backup must not
+            // delete the live configuration or content-addressed blobs.
+            let replaced = matches!(name, "wiki" | "db") || staged.join(name).exists();
+            if replaced && live.exists() {
+                std::fs::rename(&live, rollback.path().join(name))
+                    .with_context(|| format!("moving existing {name} aside"))?;
+                originals.push(name.to_owned());
+            }
+        }
+        for name in RESTORED_PATHS {
+            let source = staged.join(name);
+            if source.exists() {
+                std::fs::rename(&source, data_dir.join(name))
+                    .with_context(|| format!("installing restored {name}"))?;
+                installed.push(name.to_owned());
+            }
+        }
+        #[cfg(test)]
+        if TEST_INJECT_FIRST_FAILURE.with(|flag| flag.replace(false)) {
+            bail!("injected first failure after staging originals");
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        let rollback_error = rollback_install(data_dir, rollback.path(), &installed, &originals);
+        return match rollback_error {
+            Ok(()) => Err(error),
+            Err(rollback_error) => {
+                // Custody: the rollback may have failed partway, leaving some
+                // original bytes still parked under `rollback`. Keeping the
+                // TempDir leaks it to a persisted recovery path on disk instead
+                // of letting TempDir's Drop delete those parked originals, so
+                // an operator can always retrieve the pre-restore data.
+                let preserved = rollback.keep();
+                Err(error.context(format!(
+                    "restore rollback also failed: {rollback_error}; original data preserved at {}",
+                    preserved.display()
+                )))
+            }
+        };
+    }
+    if originals.is_empty() {
+        return Ok(None);
+    }
+    // A forced restore never discards the only copy of the data it replaced:
+    // keep it beside the data dir under a dated name for the operator.
+    let kept = rollback.keep();
+    let stamp = jiff::Timestamp::now()
+        .strftime("%Y%m%dT%H%M%SZ")
+        .to_string();
+    let named = parent.join(format!(".sessionmunch-replaced-{stamp}"));
+    Ok(Some(match std::fs::rename(&kept, &named) {
+        Ok(()) => named,
+        Err(_) => kept,
+    }))
+}
+
+// Per-thread so a parallel test cannot consume another test's injection.
+#[cfg(test)]
+thread_local! {
+    static TEST_INJECT_FIRST_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static TEST_INJECT_ROLLBACK_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn rollback_install(
+    data_dir: &Path,
+    rollback: &Path,
+    installed: &[String],
+    originals: &[String],
+) -> Result<()> {
+    #[cfg(test)]
+    if TEST_INJECT_ROLLBACK_FAILURE.with(|flag| flag.replace(false)) {
+        bail!("injected rollback failure (regression: parked originals must survive)");
+    }
+    for name in installed.iter().rev() {
+        remove_path(&data_dir.join(name))?;
+    }
+    for name in originals.iter().rev() {
+        std::fs::rename(rollback.join(name), data_dir.join(name))?;
+    }
+    Ok(())
+}
+
+fn remove_path(path: &Path) -> Result<()> {
+    if path.is_dir() {
+        std::fs::remove_dir_all(path)?;
+    } else if path.exists() {
+        std::fs::remove_file(path)?;
+    }
     Ok(())
 }
 
@@ -120,9 +248,16 @@ fn validate_restore_entry(path: &Path, entry_type: tar::EntryType) -> Result<()>
     }
     let path_str = path.to_string_lossy();
     let allowed = if entry_type.is_dir() {
-        path_str == "wiki" || path_str.starts_with("wiki/") || path_str == "db"
+        path_str == "wiki"
+            || path_str.starts_with("wiki/")
+            || path_str == "db"
+            || path_str == "artifacts"
+            || path_str.starts_with("artifacts/")
     } else {
-        path_str == "config.toml" || path_str == "db/memory.sqlite" || path_str.starts_with("wiki/")
+        path_str == "config.toml"
+            || path_str == "db/memory.sqlite"
+            || path_str.starts_with("wiki/")
+            || path_str.starts_with("artifacts/")
     };
     if !allowed {
         bail!("backup contains unexpected path: {}", path.display());
@@ -151,6 +286,191 @@ mod tests {
             builder.finish().unwrap();
         }
         bytes
+    }
+
+    fn write_backup(source: &Path, destination: &Path) {
+        use flate2::Compression;
+        use flate2::write::GzEncoder;
+
+        let file = std::fs::File::create(destination).unwrap();
+        let encoder = GzEncoder::new(file, Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+        for name in ["wiki", "artifacts"] {
+            let path = source.join(name);
+            if path.is_dir() {
+                builder.append_dir_all(name, path).unwrap();
+            }
+        }
+        builder
+            .append_path_with_name(source.join("db/memory.sqlite"), "db/memory.sqlite")
+            .unwrap();
+        let encoder = builder.into_inner().unwrap();
+        encoder.finish().unwrap();
+    }
+
+    #[test]
+    fn restore_installs_populated_artifacts_from_validated_staging() {
+        let source = tempfile::tempdir().unwrap();
+        drop(Store::open(source.path()).unwrap());
+        let source_artifact = source.path().join("artifacts/sha256/aa/blob.bin");
+        std::fs::create_dir_all(source_artifact.parent().unwrap()).unwrap();
+        std::fs::write(&source_artifact, b"artifact-body").unwrap();
+        let archive_dir = tempfile::tempdir().unwrap();
+        let archive = archive_dir.path().join("backup.tar.gz");
+        write_backup(source.path(), &archive);
+
+        let destination_parent = tempfile::tempdir().unwrap();
+        let destination = destination_parent.path().join("data");
+        restore_archive(&destination, &archive, false).unwrap();
+
+        assert_eq!(
+            std::fs::read(destination.join("artifacts/sha256/aa/blob.bin")).unwrap(),
+            b"artifact-body"
+        );
+        assert!(destination.join("db/memory.sqlite").is_file());
+    }
+
+    #[test]
+    fn forced_restore_keeps_live_config_and_artifacts_the_archive_lacks() {
+        // A backup taken before artifacts were archived, or with no config,
+        // replaces the wiki and ledger but must not delete what it lacks.
+        let source = tempfile::tempdir().unwrap();
+        drop(Store::open(source.path()).unwrap());
+        std::fs::create_dir_all(source.path().join("wiki")).unwrap();
+        std::fs::write(source.path().join("wiki/new.md"), b"new-wiki").unwrap();
+        let archive_dir = tempfile::tempdir().unwrap();
+        let archive = archive_dir.path().join("backup.tar.gz");
+        write_backup(source.path(), &archive);
+
+        let destination_parent = tempfile::tempdir().unwrap();
+        let destination = destination_parent.path().join("data");
+        std::fs::create_dir_all(destination.join("wiki")).unwrap();
+        std::fs::create_dir_all(destination.join("artifacts/sha256/bb")).unwrap();
+        std::fs::write(destination.join("wiki/old.md"), b"old-wiki").unwrap();
+        std::fs::write(destination.join("config.toml"), b"live = true\n").unwrap();
+        std::fs::write(
+            destination.join("artifacts/sha256/bb/live.bin"),
+            b"live-artifact",
+        )
+        .unwrap();
+        drop(Store::open(&destination).unwrap());
+
+        let replaced = restore_archive(&destination, &archive, true)
+            .unwrap()
+            .expect("a forced restore reports where the replaced data was kept");
+        assert_eq!(
+            std::fs::read(replaced.join("wiki/old.md")).unwrap(),
+            b"old-wiki",
+            "the replaced wiki is kept, not discarded"
+        );
+        assert!(replaced.join("db/memory.sqlite").is_file());
+        assert!(
+            !replaced.join("config.toml").exists(),
+            "paths the archive lacked were never moved"
+        );
+
+        assert_eq!(
+            std::fs::read(destination.join("wiki/new.md")).unwrap(),
+            b"new-wiki"
+        );
+        assert!(
+            !destination.join("wiki/old.md").exists(),
+            "the wiki is replaced as a whole"
+        );
+        assert_eq!(
+            std::fs::read(destination.join("config.toml")).unwrap(),
+            b"live = true\n"
+        );
+        assert_eq!(
+            std::fs::read(destination.join("artifacts/sha256/bb/live.bin")).unwrap(),
+            b"live-artifact"
+        );
+    }
+
+    #[test]
+    fn failed_staged_validation_leaves_existing_restore_data_untouched() {
+        let source = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(source.path().join("db")).unwrap();
+        std::fs::write(source.path().join("db/memory.sqlite"), b"not sqlite").unwrap();
+        let source_artifact = source.path().join("artifacts/new.bin");
+        std::fs::create_dir_all(source_artifact.parent().unwrap()).unwrap();
+        std::fs::write(&source_artifact, b"new-artifact").unwrap();
+        let archive_dir = tempfile::tempdir().unwrap();
+        let archive = archive_dir.path().join("bad-backup.tar.gz");
+        write_backup(source.path(), &archive);
+
+        let destination_parent = tempfile::tempdir().unwrap();
+        let destination = destination_parent.path().join("data");
+        std::fs::create_dir_all(destination.join("wiki")).unwrap();
+        std::fs::create_dir_all(destination.join("artifacts")).unwrap();
+        std::fs::create_dir_all(destination.join("db")).unwrap();
+        std::fs::write(destination.join("wiki/old.md"), b"old-wiki").unwrap();
+        std::fs::write(destination.join("artifacts/old.bin"), b"old-artifact").unwrap();
+        std::fs::write(destination.join("db/memory.sqlite"), b"old-db").unwrap();
+
+        let error = restore_archive(&destination, &archive, true).unwrap_err();
+        assert!(error.to_string().contains("opening staged restored store"));
+        assert_eq!(
+            std::fs::read(destination.join("wiki/old.md")).unwrap(),
+            b"old-wiki"
+        );
+        assert_eq!(
+            std::fs::read(destination.join("artifacts/old.bin")).unwrap(),
+            b"old-artifact"
+        );
+        assert_eq!(
+            std::fs::read(destination.join("db/memory.sqlite")).unwrap(),
+            b"old-db"
+        );
+    }
+    #[test]
+    fn rollback_failure_preserves_parked_original_bytes() {
+        // A restore that has already parked the live originals into the
+        // rollback TempDir, then fails (injected first failure), and whose
+        // compensating rollback ALSO fails (injected second failure), must not
+        // let TempDir's Drop delete the parked original bytes. The keep()
+        // recovery path must retain them byte-for-byte.
+        let staged = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(staged.path().join("db")).unwrap();
+        std::fs::write(staged.path().join("db/memory.sqlite"), b"new-db").unwrap();
+        let source_artifact = staged.path().join("artifacts/new.bin");
+        std::fs::create_dir_all(source_artifact.parent().unwrap()).unwrap();
+        std::fs::write(&source_artifact, b"new-artifact").unwrap();
+
+        let destination_parent = tempfile::tempdir().unwrap();
+        let destination = destination_parent.path().join("data");
+        std::fs::create_dir_all(destination.join("wiki")).unwrap();
+        std::fs::write(destination.join("wiki/old.md"), b"parked-wiki-bytes").unwrap();
+
+        TEST_INJECT_FIRST_FAILURE.with(|flag| flag.set(true));
+        TEST_INJECT_ROLLBACK_FAILURE.with(|flag| flag.set(true));
+
+        let error = install_staged_restore(staged.path(), &destination).unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("rollback also failed"),
+            "unexpected error: {message}"
+        );
+        let preserved = message
+            .rsplit_once("original data preserved at ")
+            .map(|(_, p)| p.to_owned())
+            .expect("recovery path must be reported");
+        let preserved_path = std::path::PathBuf::from(preserved);
+        // The parked original must still exist byte-for-byte at the preserved
+        // recovery path, not have been deleted by the rollback TempDir drop.
+        assert_eq!(
+            std::fs::read(preserved_path.join("wiki/old.md")).unwrap(),
+            b"parked-wiki-bytes"
+        );
+        // The original was moved aside and is no longer at the destination...
+        assert!(!destination.join("wiki/old.md").exists());
+        // ...while the rollback (bailing at its first step) leaves the staged
+        // data installed. Asserting that the staged db landed proves the
+        // install phase really ran before both failures were injected.
+        assert_eq!(
+            std::fs::read(destination.join("db/memory.sqlite")).unwrap(),
+            b"new-db"
+        );
     }
 
     #[test]

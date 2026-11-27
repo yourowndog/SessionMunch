@@ -503,6 +503,179 @@ mod tests {
     use crate::Store;
 
     #[tokio::test]
+    async fn renamed_project_aliases_preserve_scope_and_do_not_create_replacements() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = Store::open(tmp.path()).unwrap();
+        let ws = store
+            .writer
+            .get_or_create_workspace("default")
+            .await
+            .unwrap();
+        let other_ws = store.writer.get_or_create_workspace("other").await.unwrap();
+        let project = store
+            .writer
+            .get_or_create_project(ws, "ai-memory", None)
+            .await
+            .unwrap();
+        let other_project = store
+            .writer
+            .get_or_create_project(other_ws, "ai-memory", None)
+            .await
+            .unwrap();
+        store
+            .writer
+            .upsert_page(sessionmunch_core::NewPage {
+                workspace_id: ws,
+                project_id: project,
+                path: sessionmunch_core::PagePath::new("notes/history.md").unwrap(),
+                title: "legacy history".into(),
+                body: "preserved content".into(),
+                tier: sessionmunch_core::Tier::Semantic,
+                frontmatter_json: serde_json::json!({}),
+                pinned: false,
+                links: vec![],
+                author_id: None,
+                expires_at: None,
+                entities: vec![],
+                evidence: vec![],
+            })
+            .await
+            .unwrap();
+        let actor = ActorKey {
+            user: Some("alice".into()),
+            session_id: Some("s1".into()),
+        };
+        let other_actor = ActorKey {
+            user: Some("bob".into()),
+            session_id: Some("s2".into()),
+        };
+        let active = ActiveProject::new();
+        active.set_for(&actor, ws, project, false);
+        active.set_for(&other_actor, other_ws, other_project, false);
+        store
+            .writer
+            .rename_project(ws, project, "sessionmunch", None)
+            .await
+            .unwrap();
+        let resolver = ScopeResolver::new(&store.reader, ws, project).with_active_project(&active);
+        for name in ["ai-memory", "sessionmunch"] {
+            let pages = store.reader.list_pages("default", name).await.unwrap();
+            assert_eq!(pages.len(), 1);
+            assert_eq!(pages[0].path, "notes/history.md");
+            let meta = store
+                .reader
+                .page_meta("default", name, "notes/history.md")
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(meta.project_id, project);
+            let resolved = resolver
+                .resolve_read_args(Some("default"), Some(name), &actor)
+                .await
+                .unwrap();
+            assert_eq!(resolved.as_tuple(), (ws, project));
+            assert_eq!(
+                store
+                    .writer
+                    .get_or_create_project(ws, name, None)
+                    .await
+                    .unwrap(),
+                project
+            );
+        }
+        assert_eq!(
+            resolver
+                .resolve_read_args(None, None, &actor)
+                .await
+                .unwrap()
+                .as_tuple(),
+            (ws, project)
+        );
+        assert_eq!(
+            resolver
+                .resolve_read_args(None, None, &other_actor)
+                .await
+                .unwrap()
+                .as_tuple(),
+            (other_ws, other_project)
+        );
+        assert_eq!(
+            resolver
+                .resolve_read_args(Some("default"), None, &actor)
+                .await
+                .unwrap_err(),
+            ScopeResolutionError::WorkspaceProjectPairRequired
+        );
+        for (workspace, name) in [("default", "missing"), ("other", "sessionmunch")] {
+            assert!(
+                resolver
+                    .resolve_read_args(Some(workspace), Some(name), &actor)
+                    .await
+                    .is_err()
+            );
+        }
+        assert_eq!(store.reader.list_all_scopes().await.unwrap().len(), 2);
+        // Returning to the old canonical name retains the new name as an alias.
+        store
+            .writer
+            .rename_project(ws, project, "ai-memory", None)
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .reader
+                .find_project(ws, "sessionmunch".into())
+                .await
+                .unwrap(),
+            Some(project)
+        );
+    }
+
+    #[tokio::test]
+    async fn project_alias_collisions_fail_without_changing_names_or_aliases() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = Store::open(tmp.path()).unwrap();
+        let ws = store
+            .writer
+            .get_or_create_workspace("default")
+            .await
+            .unwrap();
+        let project = store
+            .writer
+            .get_or_create_project(ws, "old", None)
+            .await
+            .unwrap();
+        let other = store
+            .writer
+            .get_or_create_project(ws, "other", None)
+            .await
+            .unwrap();
+        store
+            .writer
+            .rename_project(ws, project, "new", None)
+            .await
+            .unwrap();
+        for taken in ["old", "new"] {
+            assert!(
+                store
+                    .writer
+                    .rename_project(ws, other, taken, None)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                store.reader.find_project(ws, taken.into()).await.unwrap(),
+                Some(project)
+            );
+        }
+        assert_eq!(
+            store.reader.find_project(ws, "other".into()).await.unwrap(),
+            Some(other)
+        );
+        assert_eq!(store.reader.list_all_scopes().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
     async fn read_args_reject_partial_scope() {
         let tmp = tempfile::TempDir::new().unwrap();
         let store = Store::open(tmp.path()).unwrap();

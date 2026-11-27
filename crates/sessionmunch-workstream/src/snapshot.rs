@@ -43,7 +43,7 @@ use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, anyhow};
-use rusqlite::{Connection, DatabaseName, OpenFlags, params};
+use rusqlite::{Connection, MAIN_DB, OpenFlags, params};
 use serde::{Deserialize, Serialize};
 use sessionmunch_core::Sanitizer;
 use sha2::{Digest as _, Sha256};
@@ -52,7 +52,10 @@ use uuid::Uuid;
 use crate::ManagedHarness;
 use crate::repository::inspect_repository;
 use crate::spool::write_atomic;
-use crate::transcript::{collect_session_files, crush_db, opencode_db, session_roots};
+use crate::transcript::{
+    collect_history_session_files, crush_db, is_compressed_codex, opencode_db,
+    read_compressed_codex, session_roots,
+};
 
 const SNAPSHOT_VERSION: &str = "harness-store-v1";
 const INDEX_FILE: &str = "index.json";
@@ -306,9 +309,17 @@ fn discover_sources(
                     missing_store.push(root.to_string_lossy().to_string());
                 }
             }
-            let files = collect_session_files(harness, home, session_dir)?
-                .iter()
-                .map(|path| (path.to_path_buf(), primary.clone()))
+            let archive_root = (harness == ManagedHarness::Codex && session_dir.is_none())
+                .then(|| home.join(".codex/archived_sessions"));
+            if let Some(root) = &archive_root && root.is_dir() {
+                present_roots.push(root.clone());
+            }
+            let files = collect_history_session_files(harness, home, session_dir)?
+                .into_iter()
+                .map(|path| {
+                    let root = archive_root.as_ref().filter(|root|path.starts_with(root)).unwrap_or(&primary);
+                    (path, root.clone())
+                })
                 .collect::<Vec<_>>();
             Ok(Discovered {
                 files,
@@ -382,7 +393,10 @@ fn snapshot_text_store(
     sanitizer: &Sanitizer,
 ) -> Result<SnapshotSource> {
     let source_text = source.to_string_lossy().to_string();
-    let rel = relative_to(source, root);
+    let mut rel = relative_to(source, root);
+    if harness == ManagedHarness::Codex && root.ends_with("archived_sessions") {
+        rel = format!("archived_sessions/{rel}");
+    }
     let dest_dir = artifact_root.join(harness.as_str());
     fs::create_dir_all(&dest_dir)
         .with_context(|| format!("creating snapshot dir {}", dest_dir.display()))?;
@@ -401,7 +415,18 @@ fn snapshot_text_store(
         }
     };
 
-    let sanitized = match read_and_scrub(&mut reader, sanitizer) {
+    let sanitized = match if is_compressed_codex(harness, source) {
+        // Never scrub the compressed bytes as text: that corrupts the
+        // journal and bypasses redaction. Decode, scrub, then re-encode the
+        // sanitized snapshot so the original extension remains truthful.
+        read_compressed_codex(source).and_then(|bytes| {
+            let text = std::str::from_utf8(&bytes)?;
+            let sanitized = sanitizer.scrub(text);
+            Ok(zstd::stream::encode_all(sanitized.as_bytes(), 3)?)
+        })
+    } else {
+        read_and_scrub(&mut reader, sanitizer)
+    } {
         Ok(bytes) => bytes,
         Err(error) => {
             return Ok(SnapshotSource {
@@ -463,7 +488,7 @@ fn snapshot_sqlite_store(
         )
         .with_context(|| format!("opening SQLite store {} read-only", source.display()))?;
         connection
-            .backup(DatabaseName::Main, &consistent, None)
+            .backup(MAIN_DB, &consistent, rusqlite::backup::NO_PROGRESS)
             .with_context(|| format!("online-backup of {}", source.display()))?;
 
         // Scrub every text cell in the consistent copy, then hash, dedupe and
@@ -799,6 +824,9 @@ fn staged_path(harness: ManagedHarness, home: &Path, rel: &str) -> Option<PathBu
     match harness {
         // One database serves both adapters; its index entry is the file name.
         ManagedHarness::OpenCode | ManagedHarness::OpenCode2 => Some(opencode_db(home, None)),
+        ManagedHarness::Codex if rel.starts_with("archived_sessions") => {
+            Some(home.join(".codex").join(rel))
+        }
         _ => session_roots(harness, home, None)
             .first()
             .map(|root| root.join(rel)),
@@ -931,6 +959,59 @@ mod tests {
         )
         .await
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn compressed_codex_archive_snapshot_redacts_and_restores() {
+        let td = tempdir().unwrap();
+        let home = td.path().join("home");
+        let archive = home.join(".codex/archived_sessions");
+        fs::create_dir_all(&archive).unwrap();
+        let source = archive.join("rollout.jsonl.zst");
+        let raw = concat!(
+            r#"{"type":"session_meta","payload":{"id":"4f6e1a52-0000-4000-8000-000000000001","cwd":"/repo"}}"#,
+            "\n",
+            r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"archive canary export TOKEN=sk-abcdef1234567890abcdef1234"}]}}"#,
+            "\n",
+        );
+        let compressed = zstd::stream::encode_all(raw.as_bytes(), 3).unwrap();
+        fs::write(&source, &compressed).unwrap();
+        let snapshots = td.path().join("snapshots");
+        let snap = snapshot_store(
+            ManagedHarness::Codex,
+            &snapshots,
+            &home,
+            &home,
+            None,
+            TEST_MACHINE,
+            &sanitizer(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(snap.sources.len(), 1, "{:?}", snap.sources);
+        let entry = &snap.sources[0];
+        assert_eq!(entry.outcome, SnapshotOutcome::Snapshotted);
+        assert_eq!(entry.rel, "archived_sessions/rollout.jsonl.zst");
+        assert_eq!(fs::read(&source).unwrap(), compressed);
+        let stage = td.path().join("stage");
+        let staged = stage_snapshot_home(&snapshots, &stage).unwrap();
+        assert_eq!(staged.staged, 1, "{:?}", staged.losses);
+        let restored = stage.join(".codex/archived_sessions/rollout.jsonl.zst");
+        let decoded = String::from_utf8(read_compressed_codex(&restored).unwrap()).unwrap();
+        assert!(decoded.contains("archive canary"));
+        assert!(!decoded.contains("sk-abcdef1234567890abcdef1234"));
+        fs::remove_file(source).unwrap();
+        let discovery =
+            crate::discover_harness_history(ManagedHarness::Codex, &stage, std::time::UNIX_EPOCH);
+        assert_eq!(discovery.sessions.len(), 1, "{:?}", discovery.unreadable);
+        let export = crate::export_discovered(&discovery.sessions[0], &stage, None).unwrap();
+        assert_eq!(export.events.len(), 1);
+        assert!(export.events[0].content.contains("archive canary"));
+        assert!(
+            !export.events[0]
+                .content
+                .contains("sk-abcdef1234567890abcdef1234")
+        );
     }
 
     #[tokio::test]

@@ -40,7 +40,7 @@ pub(super) fn project_name_in_other_workspaces(
     name: &str,
 ) -> StoreResult<Vec<String>> {
     let mut stmt = tx.prepare(
-        "SELECT w.name FROM projects p \
+        "SELECT DISTINCT w.name FROM project_names p \
          JOIN workspaces w ON w.id = p.workspace_id \
          WHERE p.name = ?1 AND p.workspace_id != ?2 \
          ORDER BY w.name",
@@ -77,7 +77,7 @@ pub fn get_or_create_project(
     let mut created = false;
     let existing: Option<Vec<u8>> = tx
         .query_row(
-            "SELECT id FROM projects WHERE workspace_id = ?1 AND name = ?2",
+            "SELECT project_id FROM project_names WHERE workspace_id = ?1 AND name = ?2",
             params![workspace_id.as_bytes(), name],
             |row| row.get(0),
         )
@@ -133,6 +133,7 @@ pub fn sweep_hollow_projects(conn: &mut Connection, min_age_days: u32) -> StoreR
             "SELECT name FROM projects
              WHERE name NOT IN ('scratch', ?1)
                AND created_at < ?2
+               AND NOT EXISTS (SELECT 1 FROM project_aliases WHERE project_id = projects.id)
                AND NOT EXISTS (SELECT 1 FROM pages        WHERE project_id = projects.id)
                AND NOT EXISTS (SELECT 1 FROM sessions     WHERE project_id = projects.id)
                AND NOT EXISTS (SELECT 1 FROM observations WHERE project_id = projects.id)
@@ -153,6 +154,7 @@ pub fn sweep_hollow_projects(conn: &mut Connection, min_age_days: u32) -> StoreR
             "DELETE FROM projects
              WHERE name NOT IN ('scratch', ?1)
                AND created_at < ?2
+               AND NOT EXISTS (SELECT 1 FROM project_aliases WHERE project_id = projects.id)
                AND NOT EXISTS (SELECT 1 FROM pages        WHERE project_id = projects.id)
                AND NOT EXISTS (SELECT 1 FROM sessions     WHERE project_id = projects.id)
                AND NOT EXISTS (SELECT 1 FROM observations WHERE project_id = projects.id)

@@ -248,6 +248,11 @@ pub enum AgentKind {
     Pool,
     /// ZCode (z.ai) coding agent.
     Zcode,
+    /// OpenAI hosted ChatGPT (web and desktop account history).
+    #[serde(rename = "chatgpt")]
+    ChatGpt,
+    /// Anthropic hosted Claude chat (web and desktop account history).
+    ClaudeChat,
     /// Anything else (manual capture, future agents).
     Other,
 }
@@ -258,7 +263,7 @@ impl AgentKind {
     /// CHECK constraint accepts every kind (the Zero integration shipped
     /// with the enum variant but without the V26 migration and only a
     /// live test caught it). Extend together with the enum.
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 23] = [
         Self::ClaudeCode,
         Self::Codex,
         Self::OpenCode,
@@ -279,6 +284,8 @@ impl AgentKind {
         Self::Hermes,
         Self::Pool,
         Self::Zcode,
+        Self::ChatGpt,
+        Self::ClaudeChat,
         Self::Other,
     ];
 
@@ -306,6 +313,8 @@ impl AgentKind {
             Self::Hermes => "hermes",
             Self::Pool => "pool",
             Self::Zcode => "zcode",
+            Self::ChatGpt => "chatgpt",
+            Self::ClaudeChat => "claude-chat",
             Self::Other => "other",
         }
     }
@@ -336,6 +345,8 @@ impl AgentKind {
             "hermes" | "hermes-agent" => Self::Hermes,
             "pool" | "poolside" => Self::Pool,
             "zcode" | "zai" => Self::Zcode,
+            "chatgpt" | "chatgpt-web" | "chatgpt-desktop" => Self::ChatGpt,
+            "claude-chat" | "claude-web" => Self::ClaudeChat,
             _ => Self::Other,
         }
     }
@@ -383,6 +394,8 @@ impl AgentKind {
                 | Self::KimiCode
                 | Self::Hermes
                 | Self::Pool
+                | Self::ChatGpt
+                | Self::ClaudeChat
                 | Self::Other
         )
     }

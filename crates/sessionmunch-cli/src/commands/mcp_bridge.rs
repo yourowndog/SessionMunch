@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use reqwest::header::{HeaderName, HeaderValue};
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, ListToolsResult, PaginatedRequestParams, ServerInfo,
+    CallToolRequestParams, CallToolResponse, Implementation, ListToolsResult,
+    PaginatedRequestParams, ServerConfig, ServerPeerInfo,
 };
 use rmcp::service::{RequestContext, RoleClient, RoleServer, ServiceError};
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
@@ -21,11 +22,22 @@ const ACTOR_SESSION_HEADER: HeaderName = HeaderName::from_static("x-memory-actor
 #[derive(Clone)]
 struct SessionAwareBridge {
     upstream: Peer<RoleClient>,
-    server_info: ServerInfo,
+    server_info: ServerConfig,
+}
+
+fn bridge_server_config(peer: &ServerPeerInfo) -> ServerConfig {
+    let mut config = ServerConfig::new(peer.capabilities.clone())
+        .with_protocol_version(peer.protocol_version.clone())
+        .with_server_info(peer.server_info.clone().unwrap_or_else(|| {
+            Implementation::new("sessionmunch-bridge", env!("CARGO_PKG_VERSION"))
+        }));
+    config.instructions.clone_from(&peer.instructions);
+    config.meta.clone_from(&peer.meta);
+    config
 }
 
 impl ServerHandler for SessionAwareBridge {
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         self.server_info.clone()
     }
 
@@ -44,10 +56,11 @@ impl ServerHandler for SessionAwareBridge {
         &self,
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, McpError> {
+    ) -> Result<CallToolResponse, McpError> {
         self.upstream
             .call_tool(request)
             .await
+            .map(CallToolResponse::from)
             .map_err(upstream_error)
     }
 }
@@ -136,7 +149,8 @@ pub async fn run(config: &Config, args: McpBridgeArgs) -> Result<()> {
         .with_context(|| format!("connecting session-aware bridge to {server_url}"))?;
     let server_info = upstream
         .peer_info()
-        .map(|info| (*info).clone())
+        .as_deref()
+        .map(bridge_server_config)
         .context("upstream MCP server completed initialization without server info")?;
     let bridge = SessionAwareBridge {
         upstream: upstream.peer().clone(),
@@ -198,7 +212,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use axum::Router;
-    use rmcp::model::{Content, ServerCapabilities, Tool};
+    use rmcp::model::{CallToolResult, ContentBlock, ServerCapabilities, Tool};
     use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
     use rmcp::transport::streamable_http_server::{
         StreamableHttpServerConfig, StreamableHttpService,
@@ -210,8 +224,8 @@ mod tests {
     }
 
     impl ServerHandler for EchoServer {
-        fn get_info(&self) -> ServerInfo {
-            ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+        fn get_info(&self) -> ServerConfig {
+            ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
         }
 
         async fn list_tools(
@@ -219,21 +233,18 @@ mod tests {
             _request: Option<PaginatedRequestParams>,
             _context: RequestContext<RoleServer>,
         ) -> Result<ListToolsResult, McpError> {
-            Ok(ListToolsResult {
-                tools: vec![Tool::new(
-                    "echo",
-                    "Echo through the bridge",
-                    Arc::new(Default::default()),
-                )],
-                ..Default::default()
-            })
+            Ok(ListToolsResult::with_all_items(vec![Tool::new(
+                "echo",
+                "Echo through the bridge",
+                Arc::new(Default::default()),
+            )]))
         }
 
         async fn call_tool(
             &self,
             request: CallToolRequestParams,
             context: RequestContext<RoleServer>,
-        ) -> Result<CallToolResult, McpError> {
+        ) -> Result<CallToolResponse, McpError> {
             let session = context
                 .extensions
                 .get::<axum::http::request::Parts>()
@@ -241,10 +252,10 @@ mod tests {
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_string);
             *self.seen_session.lock().unwrap() = session;
-            Ok(CallToolResult::success(vec![Content::text(format!(
-                "echo:{}",
-                request.name
-            ))]))
+            Ok(
+                CallToolResult::success(vec![ContentBlock::text(format!("echo:{}", request.name))])
+                    .into(),
+            )
         }
     }
 
@@ -308,7 +319,7 @@ mod tests {
                 move || Ok(echo.clone()),
                 LocalSessionManager::default().into(),
                 StreamableHttpServerConfig::default()
-                    .with_stateful_mode(stateful)
+                    .with_legacy_session_mode(stateful)
                     .with_json_response(!stateful),
             );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -325,7 +336,11 @@ mod tests {
         let upstream = ().serve(upstream_transport).await.unwrap();
         let bridge = SessionAwareBridge {
             upstream: upstream.peer().clone(),
-            server_info: upstream.peer_info().map(|info| (*info).clone()).unwrap(),
+            server_info: upstream
+                .peer_info()
+                .as_deref()
+                .map(bridge_server_config)
+                .unwrap(),
         };
         let (client_io, server_io) = tokio::io::duplex(64 * 1024);
         let downstream_server = tokio::spawn(async move { bridge.serve(server_io).await.unwrap() });

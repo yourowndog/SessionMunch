@@ -46,6 +46,44 @@ pub(super) async fn lookup_ws_proj_no_create(
         .map_err(scope_err)
 }
 
+/// Identity-changing operations must use the current name, never an alias.
+pub(super) async fn require_canonical_project(
+    state: &AdminState,
+    ids: (WorkspaceId, ProjectId),
+    project: &str,
+) -> Result<(WorkspaceId, ProjectId), (StatusCode, Json<serde_json::Value>)> {
+    let canonical = state
+        .reader
+        .project_name_by_id(ids.0, ids.1)
+        .await
+        .map_err(|e| internal_err(e.to_string()))?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "project no longer exists"})),
+            )
+        })?;
+    if canonical != project {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({
+                "error": "use the canonical project name for identity-changing operations",
+                "canonical_project": canonical,
+            })),
+        ));
+    }
+    Ok(ids)
+}
+
+pub(super) async fn lookup_ws_proj_canonical(
+    state: &AdminState,
+    workspace: &str,
+    project: &str,
+) -> Result<(WorkspaceId, ProjectId), (StatusCode, Json<serde_json::Value>)> {
+    let ids = lookup_ws_proj_no_create(state, workspace, project).await?;
+    require_canonical_project(state, ids, project).await
+}
+
 /// Look up a workspace by name **without** auto-creating it.
 pub(super) async fn lookup_ws_no_create(
     state: &AdminState,

@@ -122,6 +122,7 @@ pub(super) async fn handle_search_events(
         query: query.q,
         limit: query.limit.clamp(1, 200),
         scope,
+        project: None,
         machine: trimmed_opt(query.machine.as_deref()).map(str::to_owned),
         harness: trimmed_opt(query.harness.as_deref()).map(str::to_owned),
         since_micros: query.since_micros,

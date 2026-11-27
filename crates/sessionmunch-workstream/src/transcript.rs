@@ -325,6 +325,9 @@ pub(crate) fn export_jsonl(
     native_session_id: &str,
     source_cursor: Option<&str>,
 ) -> Result<ExportedTranscript> {
+    if is_compressed_codex(harness, path) {
+        return export_compressed_codex(path, native_session_id, source_cursor);
+    }
     let flavor = file_flavor(harness);
     let cursor = source_cursor
         .and_then(|raw| serde_json::from_str::<FileCursor>(raw).ok())
@@ -334,7 +337,7 @@ pub(crate) fn export_jsonl(
     let mut file = File::open(path)
         .with_context(|| format!("opening native transcript {}", path.display()))?;
     let len = file.metadata()?.len();
-    let (start, mut prefix_hasher) = if journal_rewrites_in_place(harness) {
+    let (start, prefix_hasher) = if journal_rewrites_in_place(harness) {
         let validated = if let Some(cursor) = cursor.as_ref().filter(|cursor| cursor.offset <= len)
             && let Some(expected) = cursor.prefix_sha256.as_deref()
             && let Some(hasher) = hash_file_prefix(&mut file, cursor.offset)?
@@ -357,7 +360,30 @@ pub(crate) fn export_jsonl(
         )
     };
     file.seek(SeekFrom::Start(start))?;
-    let mut reader = BufReader::new(file);
+    export_jsonl_records(
+        harness,
+        path,
+        native_session_id,
+        BufReader::new(file),
+        start,
+        prefix_hasher,
+        journal_rewrites_in_place(harness),
+    )
+}
+
+// The decompressed byte stream is the native journal. Use the identical
+// parser and byte offsets as an uncompressed file, so compression/repacking
+// cannot create a second copy of the transcript.
+fn export_jsonl_records(
+    harness: ManagedHarness,
+    path: &Path,
+    native_session_id: &str,
+    mut reader: impl std::io::BufRead,
+    start: u64,
+    mut prefix_hasher: Sha256,
+    hash_prefix: bool,
+) -> Result<ExportedTranscript> {
+    let flavor = file_flavor(harness);
     let mut offset = start;
     let mut committed_offset = start;
     let mut line = Vec::new();
@@ -373,7 +399,7 @@ pub(crate) fn export_jsonl(
         if !line.ends_with(b"\n") {
             break;
         }
-        if journal_rewrites_in_place(harness) {
+        if hash_prefix {
             prefix_hasher.update(&line);
         }
         committed_offset = offset;
@@ -479,12 +505,75 @@ pub(crate) fn export_jsonl(
             path: path.to_string_lossy().into_owned(),
             offset: committed_offset,
             flavor,
-            prefix_sha256: journal_rewrites_in_place(harness)
-                .then(|| format!("{:x}", prefix_hasher.finalize())),
+            prefix_sha256: hash_prefix.then(|| format!("{:x}", prefix_hasher.finalize())),
         })?),
         events,
         losses: deduplicate_losses(losses),
     })
+}
+
+const MAX_CODEX_DECOMPRESSED_BYTES: u64 = 512 * 1024 * 1024;
+
+pub(crate) fn is_compressed_codex(harness: ManagedHarness, path: &Path) -> bool {
+    harness == ManagedHarness::Codex
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with(".jsonl.zst"))
+}
+
+fn codex_decoder(path: &Path) -> Result<zstd::stream::read::Decoder<'static, BufReader<File>>> {
+    let file = File::open(path)
+        .with_context(|| format!("opening compressed Codex journal {}", path.display()))?;
+    let mut decoder = zstd::stream::read::Decoder::new(file)?;
+    // Bound decoder window allocation even for a hostile/corrupt archive.
+    decoder.window_log_max(27)?;
+    Ok(decoder)
+}
+
+pub(crate) fn read_compressed_codex(path: &Path) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    codex_decoder(path)?
+        .take(MAX_CODEX_DECOMPRESSED_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_CODEX_DECOMPRESSED_BYTES {
+        anyhow::bail!("compressed Codex journal exceeds 512 MiB decoded limit");
+    }
+    Ok(bytes)
+}
+
+fn export_compressed_codex(
+    path: &Path,
+    native_session_id: &str,
+    source_cursor: Option<&str>,
+) -> Result<ExportedTranscript> {
+    let bytes = read_compressed_codex(path)?;
+    let cursor = source_cursor
+        .and_then(|raw| serde_json::from_str::<FileCursor>(raw).ok())
+        .filter(|cursor| Path::new(&cursor.path) == path && cursor.flavor.is_none());
+    // Compressed files are frequently rewritten. Validate the decompressed
+    // prefix before trusting a saved offset; replays keep the same event IDs.
+    let (start, hasher) = cursor
+        .and_then(|cursor| {
+            let offset = usize::try_from(cursor.offset).ok()?;
+            let prefix = bytes.get(..offset)?;
+            let mut hasher = Sha256::new();
+            hasher.update(prefix);
+            (cursor.prefix_sha256.as_deref() == Some(&format!("{:x}", hasher.clone().finalize())))
+                .then_some((cursor.offset, hasher))
+        })
+        .unwrap_or_else(|| (0, Sha256::new()));
+    let mut reader = std::io::Cursor::new(bytes);
+    reader.set_position(start);
+    export_jsonl_records(
+        ManagedHarness::Codex,
+        path,
+        native_session_id,
+        reader,
+        start,
+        hasher,
+        true,
+    )
 }
 
 fn hash_file_prefix(file: &mut File, len: u64) -> Result<Option<Sha256>> {
@@ -1942,7 +2031,19 @@ pub(crate) fn export_opencode(
             losses.push(format!("malformed OpenCode part {id}"));
             continue;
         };
-        parse_opencode(&message, &part, session, &id, &mut events, &mut losses);
+        let occurred_at = sql_occurrence(
+            message.pointer("/time/created").and_then(Value::as_i64),
+            updated,
+        );
+        parse_opencode(
+            &message,
+            &part,
+            session,
+            &id,
+            occurred_at,
+            &mut events,
+            &mut losses,
+        );
     }
     Ok(ExportedTranscript {
         native_session_id: session.to_string(),
@@ -2006,6 +2107,7 @@ fn export_crush(
             is_summary != 0,
             session,
             &id,
+            sql_occurrence(None, updated),
             &mut events,
             &mut losses,
         );
@@ -2018,12 +2120,14 @@ fn export_crush(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_crush_parts(
     role: &str,
     parts: &[Value],
     is_summary: bool,
     session: &str,
     message_id: &str,
+    occurred_at: Option<String>,
     events: &mut Vec<NewWorkstreamEvent>,
     losses: &mut Vec<String>,
 ) {
@@ -2046,7 +2150,7 @@ fn parse_crush_parts(
                         },
                         Some(role),
                         content,
-                        None,
+                        occurred_at.clone(),
                         json!({}),
                     );
                 }
@@ -2067,7 +2171,7 @@ fn parse_crush_parts(
                     WorkstreamEventKind::ToolCall,
                     Some("assistant"),
                     &format!("{name}: {input}"),
-                    None,
+                    occurred_at.clone(),
                     json!({"tool": name}),
                 );
             }
@@ -2087,7 +2191,7 @@ fn parse_crush_parts(
                     WorkstreamEventKind::ToolResult,
                     Some("tool"),
                     &content,
-                    None,
+                    occurred_at.clone(),
                     json!({
                         "tool": name,
                         "is_error": data.get("is_error").and_then(Value::as_bool)
@@ -2106,6 +2210,7 @@ fn parse_opencode(
     part: &Value,
     session: &str,
     id: &str,
+    occurred_at: Option<String>,
     events: &mut Vec<NewWorkstreamEvent>,
     losses: &mut Vec<String>,
 ) {
@@ -2132,7 +2237,7 @@ fn parse_opencode(
                     WorkstreamEventKind::Message,
                     Some(role),
                     text,
-                    None,
+                    occurred_at.clone(),
                     json!({}),
                 );
             }
@@ -2150,7 +2255,7 @@ fn parse_opencode(
                 WorkstreamEventKind::ToolCall,
                 Some("assistant"),
                 &format!("{name}: {input}"),
-                None,
+                occurred_at.clone(),
                 json!({"tool": name}),
             );
             if let Some(output) = state
@@ -2167,7 +2272,7 @@ fn parse_opencode(
                     WorkstreamEventKind::ToolResult,
                     Some("tool"),
                     &output,
-                    None,
+                    occurred_at.clone(),
                     json!({"status": state.get("status").and_then(Value::as_str)}),
                 );
             }
@@ -2183,7 +2288,7 @@ fn parse_opencode(
                 WorkstreamEventKind::Compaction,
                 Some("assistant"),
                 body,
-                None,
+                occurred_at.clone(),
                 json!({}),
             );
         }
@@ -2396,6 +2501,7 @@ fn transcript_file(harness: ManagedHarness, path: &Path) -> bool {
         return path.extension().is_some_and(|ext| ext == "db");
     }
     path.extension().is_some_and(|ext| ext == "jsonl")
+        || is_compressed_codex(harness, path)
         || matches!(harness, ManagedHarness::Pi | ManagedHarness::Omp) && temporary_transcript(path)
 }
 
@@ -2426,7 +2532,12 @@ pub(crate) fn session_header(
     if harness == ManagedHarness::Antigravity {
         return antigravity_session_header(path);
     }
-    let mut reader = BufReader::new(File::open(path)?);
+    // Discovery needs only a bounded header, not a whole decompression.
+    let mut reader: Box<dyn std::io::BufRead> = if is_compressed_codex(harness, path) {
+        Box::new(BufReader::new(codex_decoder(path)?.take(4 * 1024 * 1024)))
+    } else {
+        Box::new(BufReader::new(File::open(path)?))
+    };
     let mut line = String::new();
     for _ in 0..64 {
         line.clear();
@@ -2929,6 +3040,17 @@ pub(crate) fn crush_db(cwd: &Path, session_dir: Option<&Path>) -> PathBuf {
     session_dir.unwrap_or(&cwd.join(".crush")).join("crush.db")
 }
 
+/// RFC 3339 source occurrence for a SQLite-backed record: the record's own
+/// creation time when its JSON carries one, else the row's update time (never
+/// earlier than creation, so a strict cutoff can only over-include an edited
+/// record, never drop a recent one). Seconds or milliseconds, as stored.
+fn sql_occurrence(created: Option<i64>, updated: i64) -> Option<String> {
+    let at = created
+        .and_then(native_timestamp)
+        .or_else(|| native_timestamp(updated))?;
+    jiff::Timestamp::try_from(at).ok().map(|at| at.to_string())
+}
+
 fn native_timestamp(value: i64) -> Option<SystemTime> {
     let value = u64::try_from(value).ok()?;
     if value < 100_000_000_000 {
@@ -3020,7 +3142,19 @@ pub(crate) fn export_opencode2(
             losses.push(format!("malformed OpenCode 2 message {id}"));
             continue;
         };
-        parse_opencode2(&message_type, &data, session, &id, &mut events, &mut losses);
+        let occurred_at = sql_occurrence(
+            data.pointer("/time/created").and_then(Value::as_i64),
+            updated,
+        );
+        parse_opencode2(
+            &message_type,
+            &data,
+            session,
+            &id,
+            occurred_at,
+            &mut events,
+            &mut losses,
+        );
     }
     Ok(ExportedTranscript {
         native_session_id: session.to_string(),
@@ -3035,6 +3169,7 @@ fn parse_opencode2(
     data: &Value,
     session: &str,
     id: &str,
+    occurred_at: Option<String>,
     events: &mut Vec<NewWorkstreamEvent>,
     losses: &mut Vec<String>,
 ) {
@@ -3050,7 +3185,7 @@ fn parse_opencode2(
                     WorkstreamEventKind::Message,
                     Some("user"),
                     text,
-                    None,
+                    occurred_at.clone(),
                     json!({}),
                 );
             }
@@ -3079,7 +3214,7 @@ fn parse_opencode2(
                                 WorkstreamEventKind::Message,
                                 Some("assistant"),
                                 text,
-                                None,
+                                occurred_at.clone(),
                                 json!({}),
                             );
                         }
@@ -3097,7 +3232,7 @@ fn parse_opencode2(
                             WorkstreamEventKind::ToolCall,
                             Some("assistant"),
                             &format!("{name}: {input}"),
-                            None,
+                            occurred_at.clone(),
                             json!({"tool": name}),
                         );
                         let status = state
@@ -3126,7 +3261,7 @@ fn parse_opencode2(
                                     WorkstreamEventKind::ToolResult,
                                     Some("tool"),
                                     &output,
-                                    None,
+                                    occurred_at.clone(),
                                     json!({"status": status}),
                                 );
                             }
@@ -3300,6 +3435,21 @@ pub(crate) fn collect_session_files(
                 files.push(path);
             }
         }
+    }
+    Ok(files)
+}
+
+pub(crate) fn collect_history_session_files(
+    harness: ManagedHarness,
+    home: &Path,
+    override_dir: Option<&Path>,
+) -> Result<Vec<PathBuf>> {
+    let mut files = collect_session_files(harness, home, override_dir)?;
+    if harness == ManagedHarness::Codex && override_dir.is_none() {
+        files.extend(collect_files(
+            &home.join(".codex/archived_sessions"),
+            |path| transcript_file(harness, path),
+        )?);
     }
     Ok(files)
 }
@@ -4119,6 +4269,7 @@ mod tests {
             &opencode_part,
             "session",
             "opencode",
+            None,
             &mut events,
             &mut losses,
         );
@@ -4290,6 +4441,108 @@ mod tests {
             export_opencode2(home.path(), None, "s2", first.source_cursor.as_deref()).unwrap();
         assert!(second.events.is_empty());
         assert!(second.losses.is_empty());
+    }
+
+    /// SQLite-backed adapters (OpenCode v1/v2, Crush) carry a source
+    /// occurrence, so a strict bounded `--since` keeps fresh records instead of
+    /// withholding every one as unknown-time. OpenCode stores milliseconds,
+    /// Crush seconds; a v1 message's own `time.created` wins over the part's
+    /// update time.
+    #[test]
+    fn sql_adapters_carry_source_time_through_a_strict_cutoff() {
+        let now = jiff::Timestamp::now();
+        let created = now - jiff::SignedDuration::from_hours(2);
+        let updated = now - jiff::SignedDuration::from_hours(1);
+        let cutoff = now - jiff::SignedDuration::from_hours(48);
+        let keep_all = |mut events: Vec<NewWorkstreamEvent>| {
+            assert!(!events.is_empty());
+            assert!(
+                events.iter().all(|event| event.occurred_at.is_some()),
+                "{events:?}"
+            );
+            let total = events.len();
+            let excluded = crate::history_import::retain_within_cutoff(&mut events, cutoff);
+            assert_eq!(excluded.total(), 0, "{excluded:?}");
+            assert_eq!(events.len(), total);
+            events
+        };
+
+        // OpenCode v1: message time.created (ms) wins over part time_updated.
+        let v1 = tempfile::tempdir().unwrap();
+        let db = opencode_db(v1.path(), None);
+        fs::create_dir_all(db.parent().unwrap()).unwrap();
+        let connection = Connection::open(&db).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE message(id TEXT PRIMARY KEY, session_id TEXT, data TEXT);\n\
+                 CREATE TABLE part(id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, \
+                                   time_updated INTEGER, data TEXT);",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO message VALUES ('m1', 's1', ?1)",
+                [json!({"role":"user","time":{"created": created.as_millisecond()}}).to_string()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO part VALUES ('p1', 'm1', 's1', ?1, ?2)",
+                params![
+                    updated.as_millisecond(),
+                    json!({"type":"text","text":"fresh v1"}).to_string()
+                ],
+            )
+            .unwrap();
+        let events = keep_all(export_opencode(v1.path(), None, "s1", None).unwrap().events);
+        let expected_created = jiff::Timestamp::from_millisecond(created.as_millisecond())
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            events[0].occurred_at.as_deref(),
+            Some(expected_created.as_str())
+        );
+
+        // OpenCode v2: row time_updated (ms) when the JSON carries no creation time.
+        let v2 = tempfile::tempdir().unwrap();
+        opencode2_fixture(v2.path());
+        Connection::open(opencode_db(v2.path(), None))
+            .unwrap()
+            .execute(
+                "UPDATE session_message SET time_updated = ?1",
+                [updated.as_millisecond()],
+            )
+            .unwrap();
+        let events = keep_all(
+            export_opencode2(v2.path(), None, "s2", None)
+                .unwrap()
+                .events,
+        );
+        assert!(events.len() >= 4, "{events:?}");
+
+        // Crush: row updated_at in seconds.
+        let crush = tempfile::tempdir().unwrap();
+        let cwd = crush.path().join("repo");
+        fs::create_dir_all(cwd.join(".crush")).unwrap();
+        let connection = Connection::open(cwd.join(".crush/crush.db")).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE messages(\
+                    id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL,\
+                    parts TEXT NOT NULL, updated_at INTEGER NOT NULL,\
+                    is_summary_message INTEGER NOT NULL DEFAULT 0);",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO messages VALUES ('m1', 'c1', 'assistant', ?1, ?2, 0)",
+                params![
+                    json!([{"type":"text","data":{"text":"fresh crush"}}]).to_string(),
+                    updated.as_second()
+                ],
+            )
+            .unwrap();
+        keep_all(export_crush(&cwd, None, "c1", None).unwrap().events);
     }
 
     #[test]

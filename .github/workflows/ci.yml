@@ -143,6 +143,14 @@ jobs:
       - run: cargo fmt --check --manifest-path companions/sessionmunch-importer/Cargo.toml
       - run: cargo clippy --manifest-path companions/sessionmunch-importer/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path companions/sessionmunch-importer/Cargo.toml
+      - run: python3 -B companions/hermes-sessionmunch/test_config_compat.py
+      # The OpenCode 2 binding is TypeScript; Node 24 runs the hermetic
+      # mock-host regression with native type stripping and no npm install.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - run: node tests/hooks/test_opencode2_context.mjs
 
   # Build the release binary on its own so a release-only failure
   # (LTO crash, codegen issue, dead-code-with-debug-assertions) doesn't

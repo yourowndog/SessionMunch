@@ -184,6 +184,9 @@ pub async fn run() -> Result<()> {
         Command::Import(crate::cli::ImportCommand::Sessions(args)) => {
             commands::import_sessions::run(&config, &host, args).await
         }
+        Command::Import(crate::cli::ImportCommand::Chats(args)) => {
+            commands::import_sessions::run_chats(&config, args).await
+        }
         Command::SearchEvents(args) => commands::search_events::run(&config, args).await,
         Command::Artifact(crate::cli::ArtifactCommand::Get(args)) => {
             commands::artifact::get(&config, args).await

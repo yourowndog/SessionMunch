@@ -16,6 +16,8 @@ serde_json.workspace = true
 sha2.workspace = true
 # For compressing large artifact evidence (content-addressed storage).
 flate2.workspace = true
+# Codex Desktop now stores native journals as Zstandard frames.
+zstd = { version = "0.14.4", default-features = false, features = ["vendored"] }
 # For resolving the canonical runtime artifact root under the data dir.
 dirs.workspace = true
 # Kimi wire records timestamp in ms epoch; jiff renders them RFC3339 like the

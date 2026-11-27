@@ -2676,6 +2676,7 @@ fn opencode2_plugin_binds_the_v2_api() {
     assert!(plugin.contains("ctx.event.subscribe"));
     assert!(plugin.contains("ctx.session.hook(\"prompt\""));
     assert!(plugin.contains("ctx.session.hook(\"context\""));
+    assert!(plugin.contains("ctx.session.hook(\"compaction\""));
     assert!(plugin.contains("ctx.tool.hook(\"execute.before\""));
     assert!(plugin.contains("ctx.tool.hook(\"execute.after\""));
     // V2 lifecycle envelopes carry `{ type, data, location }`.
@@ -2688,17 +2689,20 @@ fn opencode2_plugin_binds_the_v2_api() {
         assert!(plugin.contains(event), "missing {event}");
     }
     // Handoff injection moved off v1's removed experimental hook and
-    // fires once per session (the context hook runs per model call).
+    // caches once per session and reinserts into each ephemeral model context.
     // System items are `{ type: "text", text }` objects on the V2 API, not strings.
-    assert!(plugin.contains("handoffInjected"));
+    assert!(!plugin.contains("handoffInjected"));
+    assert!(plugin.contains("system.some((part: any)"));
     assert!(plugin.contains("system.push({ type: \"text\", text: handoff })"));
     assert!(!plugin.contains("experimental."));
     // Hook registrations are disposed on unload so a reload cannot
     // leave stale callbacks capturing twice.
-    assert!(plugin.contains("registration.dispose()"));
-    // Pre-compaction arrives on its own start event; the completion
-    // event stays as the consolidation trigger, like v1.
+    assert!(plugin.contains("registration?.dispose()"));
+    // Native pre-compaction is awaited; lifecycle events are fallback only.
+    assert!(plugin.contains("if (!compactionRegistration &&"));
     assert!(plugin.contains("session.compaction.started"));
+    assert!(plugin.contains("session.compaction.ended"));
+    assert!(plugin.contains("await drainHookQueueForDispose();"));
     // Tool failures share the channel with the reason preserved.
     assert!(plugin.contains("status === \"error\""));
     // No v1 remnants.

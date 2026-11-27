@@ -19,16 +19,19 @@ use secrecy::ExposeSecret as _;
 use serde::{Deserialize, Serialize};
 use sessionmunch_core::{AgentKind, Sanitizer, SessionId, SessionProvenance, SessionSource};
 use sessionmunch_workstream::{
-    ArtifactClient, ArtifactProvenance, ArtifactUpload, ExportedTranscript, HarnessDiscovery,
-    HttpEventSink, IMPORTABLE_HARNESSES, ManagedHarness, Spool, SpoolBatch, SpoolConfig,
-    SpoolDrainer, StoreStatus, discover_harness_history, discover_hermes_history,
-    export_discovered, export_hermes_session, stage_snapshot_home, to_session_events,
+    ArtifactClient, ArtifactProvenance, ArtifactUpload, CutoffExclusions, ExportedTranscript,
+    HarnessDiscovery, HttpEventSink, IMPORTABLE_HARNESSES, ManagedHarness, Spool, SpoolBatch,
+    SpoolConfig, SpoolDrainer, StoreStatus, cutoff_exclusion, discover_harness_history,
+    discover_hermes_history, export_discovered, export_hermes_session, retain_within_cutoff,
+    stage_snapshot_home, to_session_events,
 };
 
-use crate::cli::ImportSessionsArgs;
+use crate::cli::{ChatExportProvider, ImportChatsArgs, ImportSessionsArgs};
 use crate::config::Config;
 use crate::host_env::HostEnv;
 use crate::http_client::ServerEndpoint;
+use sessionmunch_workstream::{HostedChatProvider, read_hosted_chat_export};
+use sha2::{Digest as _, Sha256};
 
 /// Events per spooled batch; well under the hub's 4096-event cap so one
 /// batch stays a bounded request.
@@ -51,6 +54,11 @@ struct HarnessReport {
     sessions_with_new_events: usize,
     events_queued: usize,
     artifacts_uploaded: usize,
+    /// Events withheld by the strict per-event cutoff, by reason.
+    cutoff_excluded: CutoffExclusions,
+    /// Sessions whose cursor stayed put because the cutoff withheld some of
+    /// their events, so a later wider window can still import them.
+    cursors_held: usize,
     losses: Vec<String>,
 }
 
@@ -58,6 +66,10 @@ struct HarnessReport {
 struct ImportReport {
     machine: String,
     since: String,
+    /// Fixed UTC invocation cutoff applied to each event's original source
+    /// occurrence; absent for `--since all`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cutoff: Option<String>,
     dry_run: bool,
     hub: Option<String>,
     harnesses: Vec<HarnessReport>,
@@ -75,15 +87,35 @@ struct ImportReport {
 struct CursorFile {
     #[serde(default)]
     cursors: BTreeMap<String, BTreeMap<String, String>>,
+    /// Window (seconds; `null` = `all`) each still-queued spool batch was
+    /// selected with, keyed by spool sequence. Written with the cursors before
+    /// draining, so a batch is never recorded wider than it was selected.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    queued_windows: BTreeMap<u64, Option<u64>>,
 }
 
 pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> Result<()> {
+    // One invocation instant for both session discovery and the strict
+    // per-event cutoff, so they cannot disagree.
+    let invoked = SystemTime::now();
     let since_window = parse_since(&args.since)?;
-    let since = SystemTime::now()
+    let since = invoked
         .checked_sub(since_window)
         .unwrap_or(SystemTime::UNIX_EPOCH);
+    let cutoff = strict_cutoff(&args.since, invoked)?;
+    let window = cutoff.map(|_| since_window.as_secs());
     let import_dir = config.data_dir.join("history-import");
     let (harnesses, include_hermes) = select_sources(args.harness.as_deref())?;
+    // Cursors and spool sequences belong to one on-disk import state.
+    // The spool's mutex only coordinates clones inside one process. Hold
+    // an OS lock across discovery, enqueue, cursor updates and draining so
+    // a timer and a manual import cannot overwrite each other's batches.
+    // A dry run never opens the spool or writes cursors, so it needs no lock.
+    let _import_lock = if args.dry_run {
+        None
+    } else {
+        Some(acquire_import_lock(&import_dir)?)
+    };
     let mut staging_losses = Vec::new();
     let (home, harnesses, include_hermes, staging) = match &args.from_snapshots {
         Some(dir) => {
@@ -125,7 +157,11 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
     };
     let machine = machine_identity();
     let sanitizer = Sanitizer::new(&config.sanitize).context("building canonical sanitizer")?;
-    let (hub_url, token) = hub_target(config).await;
+    let (hub_url, token) = if args.dry_run {
+        ("http://127.0.0.1:1".into(), None)
+    } else {
+        hub_target(config).await
+    };
     let hermes_home = args
         .hermes_home
         .clone()
@@ -138,10 +174,12 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
     } else {
         std::fs::create_dir_all(&import_dir)
             .with_context(|| format!("creating {}", import_dir.display()))?;
-        Some(Spool::open(&SpoolConfig {
+        let spool = Spool::open(&SpoolConfig {
             dir: import_dir.join("spool"),
             max_spool_bytes: MAX_SPOOL_BYTES,
-        })?)
+        })?;
+        refuse_out_of_window_pending(&spool, cutoff, window, &cursors, &import_dir)?;
+        Some(spool)
     };
     let artifacts = ArtifactClient::new(&hub_url, token.clone());
 
@@ -155,6 +193,8 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
             sessions_with_new_events: 0,
             events_queued: 0,
             artifacts_uploaded: 0,
+            cutoff_excluded: CutoffExclusions::default(),
+            cursors_held: 0,
             losses: Vec::new(),
         };
         report.losses.extend(
@@ -173,6 +213,8 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
             &artifacts,
             &mut cursors,
             &mut report,
+            cutoff,
+            window,
             args.dry_run,
         )
         .await;
@@ -187,6 +229,8 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
             sessions_with_new_events: 0,
             events_queued: 0,
             artifacts_uploaded: 0,
+            cutoff_excluded: CutoffExclusions::default(),
+            cursors_held: 0,
             losses: discovery
                 .unreadable
                 .iter()
@@ -195,6 +239,7 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
         };
         let sources = discovery.sessions.iter().map(|session| SessionSourceRef {
             native_session_id: &session.native_session_id,
+            hosted: None,
             cwd: session.cwd.as_deref(),
             agent: AgentKind::Hermes,
             export: Box::new(move |cursor| export_hermes_session(session, cursor)),
@@ -209,6 +254,8 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
             &artifacts,
             &mut cursors,
             &mut report,
+            cutoff,
+            window,
             args.dry_run,
         )
         .await;
@@ -222,6 +269,204 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
             .with_context(|| format!("removing {}", path.display()))?;
     }
 
+    finish_import(
+        spool,
+        &cursor_path,
+        &cursors,
+        &import_dir,
+        &hub_url,
+        token,
+        machine,
+        args.since,
+        cutoff,
+        args.dry_run,
+        args.json,
+        reports,
+        staging_losses,
+    )
+    .await
+}
+
+/// Import explicit hosted-chat exports through the same event/artifact spool.
+pub async fn run_chats(config: &Config, args: ImportChatsArgs) -> Result<()> {
+    let provider = match args.provider {
+        ChatExportProvider::ChatGpt => HostedChatProvider::ChatGpt,
+        ChatExportProvider::Claude => HostedChatProvider::Claude,
+    };
+    for value in [&args.workspace, &args.project] {
+        if value.trim() != value
+            || value.is_empty()
+            || value.len() > 128
+            || value.contains('/')
+            || value.chars().any(char::is_control)
+            || value == "_global"
+        {
+            return Err(anyhow!(
+                "hosted chat history requires an explicit non-global workspace/project"
+            ));
+        }
+    }
+    let cutoff = match &args.since {
+        Some(since) => strict_cutoff(since, SystemTime::now())?,
+        None => None,
+    };
+    let window = match &args.since {
+        Some(since) if cutoff.is_some() => Some(parse_since(since)?.as_secs()),
+        _ => None,
+    };
+    let sanitizer = Sanitizer::new(&config.sanitize).context("building canonical sanitizer")?;
+    let machine = machine_identity();
+    let label = provider.agent().as_str();
+    // No auth lookup, directory creation, upload or network activity on preview.
+    let (hub_url, token) = if args.dry_run {
+        ("http://127.0.0.1:1".into(), None)
+    } else {
+        hub_target(config).await
+    };
+    // Unlike native history, this is an explicit privacy boundary. A change
+    // of destination, account, scope or credential cannot drain a previous
+    // account's queued messages to the new destination.
+    let destination_key = serde_json::to_vec(&(
+        &hub_url,
+        &token,
+        label,
+        &args.account,
+        &args.workspace,
+        &args.project,
+    ))?;
+    let key = format!("{:x}", Sha256::digest(destination_key));
+    let import_dir = config
+        .data_dir
+        .join("history-import")
+        .join("hosted")
+        .join(key);
+    let _lock = if args.dry_run {
+        None
+    } else {
+        std::fs::create_dir_all(&import_dir)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&import_dir, std::fs::Permissions::from_mode(0o700))?;
+        }
+        Some(acquire_import_lock(&import_dir)?)
+    };
+    let cursor_path = import_dir.join("cursors.json");
+    let mut cursors = read_cursors(&cursor_path);
+    let spool = if args.dry_run {
+        None
+    } else {
+        let spool = Spool::open(&SpoolConfig {
+            dir: import_dir.join("spool"),
+            max_spool_bytes: MAX_SPOOL_BYTES,
+        })?;
+        refuse_out_of_window_pending(&spool, cutoff, window, &cursors, &import_dir)?;
+        Some(spool)
+    };
+    let artifacts = ArtifactClient::new(&hub_url, token.clone());
+    let mut report = HarnessReport {
+        harness: label.into(),
+        store: StoreStatus::Found,
+        sessions_found: 0,
+        sessions_with_new_events: 0,
+        events_queued: 0,
+        artifacts_uploaded: 0,
+        cutoff_excluded: CutoffExclusions::default(),
+        cursors_held: 0,
+        losses: Vec::new(),
+    };
+    let mut failed = false;
+    for path in &args.files {
+        let decoded = match read_hosted_chat_export(path, provider, &args.account, &sanitizer) {
+            Ok(value) => value,
+            Err(error) => {
+                report.losses.push(format!("{}: {error}", path.display()));
+                failed = true;
+                continue;
+            }
+        };
+        if !decoded.losses.is_empty() {
+            failed = true;
+        }
+        report.losses.extend(decoded.losses);
+        report.sessions_found += decoded.chats.len();
+        let sources = decoded.chats.iter().map(|chat| SessionSourceRef {
+            native_session_id: &chat.transcript.native_session_id,
+            hosted: Some((chat.session_id, &args.workspace, &args.project)),
+            cwd: None,
+            agent: provider.agent(),
+            export: Box::new(move |cursor| {
+                let mut transcript = chat.transcript.clone();
+                if cursor == transcript.source_cursor.as_deref() && !args.dry_run {
+                    transcript.events.clear();
+                }
+                Ok(transcript)
+            }),
+        });
+        import_sessions(
+            config,
+            label,
+            sources,
+            &machine,
+            &sanitizer,
+            spool.as_ref(),
+            &artifacts,
+            &mut cursors,
+            &mut report,
+            cutoff,
+            window,
+            args.dry_run,
+        )
+        .await;
+    }
+    // Explicitly surface incomplete large-payload uploads/queue failures.
+    failed |= report.losses.iter().any(|s| {
+        s.contains("not uploaded:")
+            || s.contains("could not queue events:")
+            || s.contains("unreadable transcript:")
+    });
+    finish_import(
+        spool,
+        &cursor_path,
+        &cursors,
+        &import_dir,
+        &hub_url,
+        token,
+        machine,
+        args.since
+            .clone()
+            .unwrap_or_else(|| "selected hosted exports".into()),
+        cutoff,
+        args.dry_run,
+        args.json,
+        vec![report],
+        Vec::new(),
+    )
+    .await?;
+    if failed {
+        return Err(anyhow!(
+            "hosted history import had incomplete or malformed inputs; inspect the report"
+        ));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn finish_import(
+    spool: Option<Spool>,
+    cursor_path: &Path,
+    cursors: &CursorFile,
+    import_dir: &Path,
+    hub_url: &str,
+    token: Option<String>,
+    machine: String,
+    since: String,
+    cutoff: Option<jiff::Timestamp>,
+    dry_run: bool,
+    json: bool,
+    reports: Vec<HarnessReport>,
+    staging_losses: Vec<String>,
+) -> Result<()> {
     let mut events_delivered = 0;
     let mut events_already_known = 0;
     let mut delivery_problem = None;
@@ -229,10 +474,10 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
     if let Some(spool) = spool {
         // Cursors advance only once their events sit durably in the spool,
         // so a crash after this point loses nothing and repeats nothing.
-        write_cursors(&cursor_path, &cursors)?;
+        write_cursors(cursor_path, cursors)?;
         let queued: usize = reports.iter().map(|report| report.events_queued).sum();
         let drainer =
-            SpoolDrainer::new(spool.clone(), Arc::new(HttpEventSink::new(&hub_url, token)))
+            SpoolDrainer::new(spool.clone(), Arc::new(HttpEventSink::new(hub_url, token)))
                 .with_batches_per_pass(64);
         let mut transient_retries = 0u32;
         loop {
@@ -269,6 +514,16 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
             }
         }
         batches_pending = spool.metrics().pending_batches;
+        if let Ok(pending) = spool.pending() {
+            let queued: std::collections::BTreeSet<u64> =
+                pending.iter().map(|record| record.seq).collect();
+            let mut pruned = CursorFile {
+                cursors: cursors.cursors.clone(),
+                queued_windows: cursors.queued_windows.clone(),
+            };
+            pruned.queued_windows.retain(|seq, _| queued.contains(seq));
+            write_cursors(cursor_path, &pruned)?;
+        }
         // Only meaningful once everything queued has been answered.
         if batches_pending == 0 {
             events_already_known = queued.saturating_sub(events_delivered);
@@ -277,9 +532,10 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
 
     let report = ImportReport {
         machine,
-        since: args.since.clone(),
-        dry_run: args.dry_run,
-        hub: (!args.dry_run).then_some(hub_url),
+        since,
+        cutoff: cutoff.map(|cutoff| cutoff.to_string()),
+        dry_run,
+        hub: (!dry_run).then(|| hub_url.to_owned()),
         harnesses: reports,
         snapshot_losses: staging_losses,
         events_delivered,
@@ -287,14 +543,14 @@ pub async fn run(config: &Config, host: &HostEnv, args: ImportSessionsArgs) -> R
         batches_pending,
         delivery_problem,
     };
-    if args.json {
+    if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         print_report(&report);
     }
-    if report.delivery_problem.is_some() && report.batches_pending > 0 {
+    if report.delivery_problem.is_some() {
         return Err(anyhow!(
-            "{} batch(es) remain queued; re-run `sessionmunch import sessions` once the hub is reachable",
+            "history import did not fully deliver; {} batch(es) remain queued; inspect the report and retry",
             report.batches_pending
         ));
     }
@@ -307,6 +563,7 @@ type ExportFn<'a> = dyn Fn(Option<&str>) -> Result<ExportedTranscript> + 'a;
 /// One session to import, whatever store it came from.
 struct SessionSourceRef<'a> {
     native_session_id: &'a str,
+    hosted: Option<(SessionId, &'a str, &'a str)>,
     cwd: Option<&'a Path>,
     agent: AgentKind,
     export: Box<ExportFn<'a>>,
@@ -323,10 +580,13 @@ async fn import_harness(
     artifacts: &ArtifactClient,
     cursors: &mut CursorFile,
     report: &mut HarnessReport,
+    cutoff: Option<jiff::Timestamp>,
+    window: Option<u64>,
     dry_run: bool,
 ) {
     let sources = discovery.sessions.iter().map(|session| SessionSourceRef {
         native_session_id: &session.native_session_id,
+        hosted: None,
         cwd: session.cwd.as_deref(),
         agent: discovery.harness.agent_kind(),
         export: Box::new(move |cursor| export_discovered(session, home, cursor)),
@@ -341,6 +601,8 @@ async fn import_harness(
         artifacts,
         cursors,
         report,
+        cutoff,
+        window,
         dry_run,
     )
     .await;
@@ -357,16 +619,24 @@ async fn import_sessions<'a>(
     artifacts: &ArtifactClient,
     cursors: &mut CursorFile,
     report: &mut HarnessReport,
+    cutoff: Option<jiff::Timestamp>,
+    window: Option<u64>,
     dry_run: bool,
 ) {
     for session in sources {
         let native = session.native_session_id;
+        let session_id = session
+            .hosted
+            .map_or_else(|| hook_session_id(native), |(id, _, _)| id);
+        let cursor_key = session
+            .hosted
+            .map_or_else(|| native.to_owned(), |_| session_id.to_string());
         let cursor = cursors
             .cursors
             .get(label)
-            .and_then(|by_id| by_id.get(native))
+            .and_then(|by_id| by_id.get(&cursor_key))
             .cloned();
-        let export = match (session.export)(cursor.as_deref()) {
+        let mut export = match (session.export)(cursor.as_deref()) {
             Ok(export) => export,
             Err(error) => {
                 report
@@ -378,6 +648,18 @@ async fn import_sessions<'a>(
         report
             .losses
             .extend(export.losses.iter().map(|loss| format!("{native}: {loss}")));
+        // Strict window on each event's original source occurrence. A session
+        // that straddles the cutoff keeps its prior cursor: the withheld events
+        // stay importable by a later, wider window, and the hub dedups the
+        // in-window events it already holds by their stable ids.
+        let excluded = cutoff.map_or_else(CutoffExclusions::default, |cutoff| {
+            retain_within_cutoff(&mut export.events, cutoff)
+        });
+        report.cutoff_excluded.add(excluded);
+        let hold_cursor = excluded.total() > 0;
+        if hold_cursor {
+            report.cursors_held += 1;
+        }
         if export.events.is_empty() {
             continue;
         }
@@ -386,17 +668,25 @@ async fn import_sessions<'a>(
         // machine when a transcript store was copied between them.
         for event in &mut events {
             if let serde_json::Value::Object(metadata) = &mut event.metadata {
-                metadata.insert("machine".into(), machine.into());
+                metadata.insert(
+                    if session.hosted.is_some() {
+                        "imported_on"
+                    } else {
+                        "machine"
+                    }
+                    .into(),
+                    machine.into(),
+                );
             }
         }
         report.sessions_with_new_events += 1;
-        report.events_queued += events.len();
         if dry_run {
+            report.events_queued += events.len();
             continue;
         }
         let Some(spool) = spool else { continue };
 
-        let session_id = hook_session_id(native);
+        let mut artifact_failure = false;
         for payload in oversized {
             let upload = ArtifactUpload {
                 content: payload.content,
@@ -414,17 +704,28 @@ async fn import_sessions<'a>(
                 Ok(_) => report.artifacts_uploaded += 1,
                 // The inline head/tail and the digest still reach the hub, so
                 // the loss is the middle of one payload, named here.
-                Err(error) => report.losses.push(format!(
-                    "{native}: artifact {} not uploaded: {error}",
-                    payload.sha256
-                )),
+                Err(error) => {
+                    artifact_failure = true;
+                    report.losses.push(format!(
+                        "{native}: artifact {} not uploaded: {error}",
+                        payload.sha256
+                    ));
+                }
             }
         }
 
-        let (workspace, project) = scope_for(config, session.cwd);
+        // If a large payload failed to arrive, do not commit an incomplete
+        // first-write ledger or advance the cursor. Retain the export for retry.
+        if artifact_failure {
+            continue;
+        }
+        let (workspace, project) = session.hosted.map_or_else(
+            || scope_for(config, session.cwd),
+            |(_, workspace, project)| (workspace.to_owned(), project.to_owned()),
+        );
         let provenance = SessionProvenance {
             native_session_id: Some(native.to_owned()),
-            machine_id: Some(machine.to_owned()),
+            machine_id: session.hosted.is_none().then(|| machine.to_owned()),
             cwd: session.cwd.map(|cwd| cwd.display().to_string()),
             source: SessionSource::Import,
             import_cursor: export.source_cursor.clone(),
@@ -441,20 +742,29 @@ async fn import_sessions<'a>(
             );
             batch.cwd = provenance.cwd.clone();
             batch.provenance = provenance.clone();
-            if let Err(error) = spool.enqueue(&batch) {
-                report
-                    .losses
-                    .push(format!("{native}: could not queue events: {error}"));
-                queued_all = false;
-                break;
+            match spool.enqueue(&batch) {
+                Ok(seq) => {
+                    cursors.queued_windows.insert(seq, window);
+                }
+                Err(error) => {
+                    report
+                        .losses
+                        .push(format!("{native}: could not queue events: {error}"));
+                    queued_all = false;
+                    break;
+                }
             }
+            report.events_queued += chunk.len();
         }
-        if queued_all && let Some(cursor) = export.source_cursor {
+        if queued_all
+            && !hold_cursor
+            && let Some(cursor) = export.source_cursor
+        {
             cursors
                 .cursors
                 .entry(label.to_owned())
                 .or_default()
-                .insert(native.to_owned(), cursor);
+                .insert(cursor_key, cursor);
         }
     }
 }
@@ -563,6 +873,93 @@ pub(crate) fn parse_since(raw: &str) -> Result<Duration> {
     sessionmunch_core::parse_time_window(raw).map_err(|message| anyhow!("--since {message}"))
 }
 
+/// The fixed UTC instant a bounded `--since` window starts at, measured from
+/// `invoked`; `None` for `all`. Applied to each event's original source
+/// occurrence, never to file times, import time or ledger insertion.
+fn strict_cutoff(raw: &str, invoked: SystemTime) -> Result<Option<jiff::Timestamp>> {
+    if raw.trim().eq_ignore_ascii_case("all") {
+        return Ok(None);
+    }
+    let window = parse_since(raw)?;
+    let start = invoked
+        .checked_sub(window)
+        .ok_or_else(|| anyhow!("--since {raw:?} reaches before the Unix epoch; use `all`"))?;
+    let cutoff = jiff::Timestamp::try_from(start)
+        .map_err(|error| anyhow!("--since {raw:?} is out of range: {error}"))?;
+    Ok(Some(cutoff))
+}
+
+/// Refuse to deliver batches an earlier import queued with a wider window.
+/// A bounded run drains the whole spool, so without this an old, unrelated
+/// backlog would ride along. Nothing is enqueued, drained or deleted here.
+fn refuse_out_of_window_pending(
+    spool: &Spool,
+    cutoff: Option<jiff::Timestamp>,
+    window: Option<u64>,
+    cursors: &CursorFile,
+    import_dir: &Path,
+) -> Result<()> {
+    let Some(cutoff) = cutoff else {
+        return Ok(());
+    };
+    let pending = spool
+        .pending()
+        .with_context(|| format!("reading queued batches in {}", import_dir.display()))?;
+    let outside = pending
+        .iter()
+        .filter(|record| match cursors.queued_windows.get(&record.seq) {
+            // Selected by a window no wider than this one: it was in scope
+            // when queued, even if a hub outage has since aged it past the
+            // cutoff. Retrying it is this import's own unfinished work.
+            Some(Some(queued)) => window.is_none_or(|current| *queued > current),
+            // Queued by `--since all`.
+            Some(None) => true,
+            // No record (older binary, or a crash before the cursor write):
+            // judge the events themselves, failing closed.
+            None => record
+                .batch
+                .events
+                .iter()
+                .any(|event| cutoff_exclusion(event.occurred_at.as_deref(), cutoff).is_some()),
+        })
+        .count();
+    if outside > 0 {
+        return Err(anyhow!(
+            "{outside} of {} queued batch(es) in {} are outside the --since window: queued by a wider window, or holding events before {cutoff} or with unknown time; refusing to deliver them with this import. Deliver them with the window that queued them, or inspect the spool first",
+            pending.len(),
+            import_dir.join("spool").display()
+        ));
+    }
+    Ok(())
+}
+
+/// Exclusive access to a single history-import state directory.
+struct ImportLock {
+    _file: std::fs::File,
+}
+
+fn acquire_import_lock(import_dir: &Path) -> Result<ImportLock> {
+    std::fs::create_dir_all(import_dir)
+        .with_context(|| format!("creating {}", import_dir.display()))?;
+    let path = import_dir.join(".import.lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .with_context(|| format!("opening history import lock {}", path.display()))?;
+    // Never unlink a lock file: another process could hold that inode while
+    // a new importer creates a different one. The OS unlocks it on exit.
+    fs2::FileExt::try_lock_exclusive(&file).with_context(|| {
+        format!(
+            "cannot acquire history import lock {}; another import may be active; retry after it exits",
+            path.display()
+        )
+    })?;
+    Ok(ImportLock { _file: file })
+}
+
 fn read_cursors(path: &Path) -> CursorFile {
     std::fs::read_to_string(path)
         .ok()
@@ -579,9 +976,14 @@ fn write_cursors(path: &Path, cursors: &CursorFile) -> Result<()> {
 
 fn print_report(report: &ImportReport) {
     println!(
-        "History import on {} (changed in the last {}){}",
+        "History import on {} ({}{}){}",
         report.machine,
         report.since,
+        report
+            .cutoff
+            .as_deref()
+            .map(|cutoff| format!("; events occurring at or after {cutoff}"))
+            .unwrap_or_default(),
         if report.dry_run { " — dry run" } else { "" }
     );
     for harness in &report.harnesses {
@@ -599,6 +1001,13 @@ fn print_report(report: &ImportReport) {
             harness.events_queued,
             harness.artifacts_uploaded
         );
+        let excluded = harness.cutoff_excluded;
+        if excluded.total() > 0 {
+            println!(
+                "      outside window: {} before cutoff, {} with unknown time; {} session cursor(s) held",
+                excluded.before_cutoff, excluded.unknown_time, harness.cursors_held
+            );
+        }
         for loss in harness.losses.iter().take(5) {
             println!("      lost: {loss}");
         }
@@ -623,6 +1032,19 @@ fn print_report(report: &ImportReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concurrent_imports_cannot_share_cursor_and_spool_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = acquire_import_lock(dir.path()).unwrap();
+        let error = acquire_import_lock(dir.path())
+            .err()
+            .expect("second writer refused");
+        assert!(error.to_string().contains("history import lock"));
+        // The persistent inode is harmless after the first importer exits.
+        drop(first);
+        assert!(acquire_import_lock(dir.path()).is_ok());
+    }
 
     #[test]
     fn imported_sessions_reuse_the_hook_session_identity() {

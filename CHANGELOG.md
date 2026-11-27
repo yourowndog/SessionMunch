@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Upgrade rmcp to 3.12 with its new optional `chrono` feature disabled, removing the unmaintained `chrono` crate from the dependency graph (RUSTSEC-2026-0543). rmcp's other defaults (base64, server, macros) stay enabled.
+- Recover dense passage ranking efficiency: normalize a query once and select the required top-k before sorting, retaining checked floating-point operations and stable UUID tie-breaks in scoped and global searches.
+- Restore OpenCode 2 native pre-compaction capture with a bounded drain, using lifecycle events only when hook registration is unavailable.
+- Serialize history-import writers per data directory so overlapping scheduled and manual imports cannot overwrite spool batches or cursors; read-only previews remain available.
+- Retain former project names as workspace-scoped aliases across renames, preserving history, old client lookups and links. Require canonical names for identity-changing admin requests.
 - The README, install guide, Hermes guide and MCP reference now match the shipped code. The harness table lists the four first-class integrations plus any MCP client, and it no longer claims Aider or Windsurf. The MCP reference documents all 20 tools. The install guide explains how to build the Docker image and binary locally until the first tagged release publishes them. (#11)
 - Finished the SessionMunch rename in companions and installer output. The
   importer companion is now `companions/sessionmunch-importer` and reads
@@ -29,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   API-key prefixes are unchanged (credential contract, not branding).
 
 ### Added
+- Discover active and archived Codex desktop Zstandard-compressed JSONL journals, reuse the existing native event identities, and preserve sanitized compressed snapshots for later recovery.
+- Import explicitly selected ChatGPT and Claude account conversation JSON exports with stable account-scoped session identity, visible-message filtering, dry-run reports, artifact delivery and idempotent ledger ingestion. Hosted chats are distinct from desktop-local coding sessions.
 - `[[session_cards.summary_endpoints]]` spreads AI summaries across more providers, each with its own `lanes`, next to the main provider's `summary_lanes`. All lanes pull from one queue, and a lane that answers 429 hands its session to another lane and rests until the next tick. Endpoints are validated at startup like `[[llm_fallbacks]]`. (#29)
 - Card and AI summary backfills drain fast. While a backlog remains, the maintenance ticks run again after one second instead of a minute. `[session_cards] card_lanes` (default 4) builds that many cards at once, and `summary_lanes` (default 1) sends that many sessions to the provider at once. AI summaries now wait until the card backlog is drained. (#27)
 - `SESSIONMUNCH_CONSOLIDATE_ON_COMPACT=false` (top-level `consolidate_on_compact`, default true) stops LLM consolidation at PreCompact / PostCompaction, so a provider can be configured for session-card AI summaries without rewriting session pages at every compaction. The compaction checkpoint stays rule-based; manual `memory_consolidate` is unaffected. (#26)
@@ -146,6 +153,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#t_c51f1a51).
 
 ### Fixed
+- Global `memory_query` hard filters (`source_projects`, `machine`, `harness`, `since`, `until`) now also constrain the response's `session_evidence`, with owner isolation kept. Filters a stream cannot enforce are rejected instead of broadened: `kinds` with global evidence, and any hard filter outside `unit=passage`. Evidence time bounds apply to ledger record time (`created_at`), not original occurrence.
+- `backup` now includes `artifacts/`. `restore` extracts and validates in isolated staging, then installs with rollback. If the rollback also fails, the parked originals are kept and their path is reported. A forced restore replaces `wiki/` and `db/` and leaves live `config.toml` and `artifacts/` alone when the archive lacks them.
+- A native history import whose large-payload artifact upload fails no longer queues truncated events or advances the session cursor. The next run retries the whole payload.
+- A bounded `import sessions --since` is now a strict per-event cutoff on each event's original timestamp, from one fixed UTC invocation instant. Before, it selected whole sessions by file activity. Older events and events with no usable timestamp are counted and withheld. A session that straddles the cutoff keeps its cursor, so a later wider window can still import them. `import chats` gains the same `--since`. A bounded run refuses to drain spool batches that an earlier wider import left with out-of-window events.
+- Recover opt-in Hermes owning-session marker routing with linked-worktree verification and fail-closed missing or invalid scope.
+- Restore read-only legacy Hermes provider configuration compatibility and fail closed on required pre-compression checkpoints without explicit scope and a matching write receipt.
+- OpenCode 2 reuses a session’s cached handoff in each ephemeral model context without duplicate system entries.
 - History import no longer stops reading a Claude Code, Codex or other append-only transcript after the file is rewritten shorter. The stored byte cursor then pointed past the end, so the importer read nothing from that file until it grew back past the old size, reporting "0 with new events" for those sessions. A cursor past the end now re-reads the file from the start; records already imported are deduplicated by their stable event ids. (#34)
 - Claude Code runs that are a single model call, not a session (`claude -p --no-session-persistence`, as started by Hermes' Claude subscription plugin and other Agent SDK callers), are no longer recorded and get no handoff injected. Before, each call registered a fake one-message session, and the changing handoff text broke the caller's prompt cache. Detection uses the Claude process's command line, or a transcript that was never written at Stop/SessionEnd.
 - Hook events in the session-event ledger are now dated by when the client captured them, not when their spooled batch reached the server. Previously every event in a drained batch shared one arrival timestamp, so a session's timeline collapsed. The drain sends each entry's enqueue time as a `captured_ms` query param; the server accepts it within the spool's 7-day window and up to 5 minutes ahead of its own clock, otherwise it keeps arrival time. Older clients are unaffected.

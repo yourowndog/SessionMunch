@@ -300,7 +300,7 @@ impl ReaderPool {
         .await
     }
 
-    /// Look up a project id by `(workspace_id, name)` without creating it.
+    /// Look up a project id by canonical name or retained alias without creating it.
     ///
     /// Returns `None` when no project with the given name exists in the workspace.
     ///
@@ -314,7 +314,7 @@ impl ReaderPool {
         self.with_conn(move |conn| {
             let row_opt = conn
                 .query_row(
-                    "SELECT id FROM projects WHERE workspace_id = ?1 AND name = ?2",
+                    "SELECT project_id FROM project_names WHERE workspace_id = ?1 AND name = ?2",
                     params![workspace_id.as_bytes(), name],
                     |row| {
                         let bytes: Vec<u8> = row.get(0)?;

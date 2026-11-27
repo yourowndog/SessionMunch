@@ -370,10 +370,14 @@ casing: `mcpServers`, which most other clients use, is ignored here.
 Print or apply the configuration with:
 
 ```bash
+# Local single-user server (preview first, then apply).
 sessionmunch install-mcp --client muse
+sessionmunch install-mcp --client muse --apply
+
+# Remote server: use HTTPS and an authorized bearer credential.
+# SESSIONMUNCH_AUTH_TOKEN must be set privately in this shell.
 sessionmunch install-mcp --client muse --apply \
-  --server-url "http://homelab:49374/mcp" \
-  --auth-token "$TOKEN"
+  --server-url "https://memory.example.com/mcp"
 ```
 
 Two details of Muse's schema are worth knowing before hand-editing the file:
@@ -400,6 +404,24 @@ Muse Code documents a lifecycle hook surface, but the output contract of its
 handoff injection are not claimed here. Ask the agent to call
 `memory_handoff_begin` before leaving and `memory_handoff_accept` when
 resuming when you need continuity.
+
+**Verify the connection before relying on it.** Start a new Muse Code session, run
+`/mcp` to confirm the named SessionMunch server and its tools are present, then
+ask Muse to call `memory_query` with a known project, explicit workspace/project
+and a small limit. Check the returned source paths against a known note. An
+empty result is not a connection failure; a missing server or authentication
+error is. Do not switch to unauthenticated remote access to work around it.
+
+The installer preserves other MCP servers and writes a backup before modifying
+an existing settings file. Bearer credentials can appear in that file and its
+backups; keep them private and out of Git. Muse Code also supports environment
+interpolation in MCP settings, so an operator may choose an environment-backed
+header instead of storing a literal token. Restart after changing configuration.
+
+This guide is for **Meta Muse Code**, the locally configured CLI. Hosted Muse
+agents or a separate relay/connector need their own supported MCP connection
+and authentication path. A reachable local server does not prove that a hosted
+agent can reach it or that conversation history is being captured.
 
 Sources: <https://dev.meta.ai/docs/muse-code/configuration>,
 <https://dev.meta.ai/docs/muse-code/extending>.

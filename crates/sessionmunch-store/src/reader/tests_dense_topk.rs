@@ -214,3 +214,56 @@ fn dot_embedding_bytes_is_f64_safe_and_rejects_bad_input() {
     let huge_q = [f32::MAX; 2];
     assert!(dot_embedding_bytes(&huge_q, &huge_bytes, 2).is_err());
 }
+
+#[test]
+fn passage_top_k_matches_full_sort_with_ties_and_boundaries() {
+    let make = |id: u128, score: f32| {
+        (
+            PassageHit {
+                passage_id: uuid::Uuid::from_u128(id),
+                section_id: uuid::Uuid::nil(),
+                page_id: page_id(1),
+                workspace_id: WorkspaceId::new(),
+                project_id: ProjectId::new(),
+                page_path: path("fixture.md"),
+                page_title: "fixture".into(),
+                heading_path: String::new(),
+                text: "fixture".into(),
+                start_byte: 0,
+                end_byte: 7,
+                rank: 0,
+                lexical_rank: None,
+                dense_rank: None,
+                rrf_score: None,
+            },
+            score,
+        )
+    };
+    let candidates = vec![
+        make(9, 0.5),
+        make(1, 0.5),
+        make(7, 1.0),
+        make(3, -0.2),
+        make(2, 0.5),
+    ];
+    let mut full = candidates.clone();
+    full.sort_by(|a, b| {
+        dense_total_cmp(
+            a.1,
+            a.0.passage_id.as_bytes(),
+            b.1,
+            b.0.passage_id.as_bytes(),
+        )
+    });
+    let ids = |items: &[(PassageHit, f32)]| {
+        items
+            .iter()
+            .map(|(h, s)| (h.passage_id, s.to_bits()))
+            .collect::<Vec<_>>()
+    };
+    for k in 0..=candidates.len() + 1 {
+        let mut actual = candidates.clone();
+        dense_passage_top_k(&mut actual, k);
+        assert_eq!(ids(&actual), ids(&full[..k.min(full.len())]));
+    }
+}

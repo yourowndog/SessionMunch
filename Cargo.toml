@@ -113,8 +113,12 @@ getrandom = "0.3"
 base64 = "0.22"
 
 # Storage.
-rusqlite = { version = "0.32", features = ["bundled", "backup"] }
-refinery = { version = "0.8", features = ["rusqlite"] }
+rusqlite = { version = "0.41", features = ["bundled", "backup", "fallible_uint"] }
+# Keep the existing refinery runner/checksum algorithm; the published
+# rusqlite driver is capped below the patched SQLite bindings.
+refinery = "=0.8.16"
+refinery-core = "=0.8.16"
+time = { version = "0.3", features = ["parsing", "formatting"] }
 sha2 = "0.10"
 # Argon2id PHC for human passwords. Tokens stay SHA-256+pepper (hot-path
 # unique lookup); the slow KDF is reserved for the password class.
@@ -136,7 +140,10 @@ winapi-util = "0.1"
 # `aws_lc_rs`, which is exactly the C/JNI toolchain the bridge avoids by using
 # rmcp's `reqwest-tls-no-provider`. `ring` is already in the lockfile via reqwest 0.12.
 rustls = { version = "0.23.45", default-features = false, features = ["ring", "logging", "std", "tls12"] }
-rmcp = { version = "1.7", features = ["server", "macros", "transport-io", "transport-streamable-http-server", "schemars"] }
+# rmcp >= 3.12 makes chrono optional (rust-sdk#1474); opting out of the default
+# chrono feature removes the unmaintained crate (RUSTSEC-2026-0543). The other
+# defaults (base64, server, macros) stay enabled explicitly.
+rmcp = { version = "3.12", default-features = false, features = ["base64", "server", "macros", "transport-io", "transport-streamable-http-server", "schemars"] }
 schemars = "1"
 axum = "0.8"
 # Same `http` 1.x rmcp/axum use, so handlers can read the injected
@@ -167,10 +174,10 @@ git2 = { version = "0.21", default-features = false, features = ["vendored-libgi
 # path keeps a populated store.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots", "stream"] }
 # Local (in-process, pure-Rust) embeddings — 2.0 item 5.
-candle-core = "0.11"
-candle-nn = "0.11"
-candle-transformers = "0.11"
-tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
+candle-core = "0.11.1"
+candle-nn = "0.11.1"
+candle-transformers = "0.11.1"
+tokenizers = { version = "0.23.2", default-features = false, features = ["fancy-regex"] }
 futures-util = "0.3"
 async-trait = "0.1"
 

@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolResult, Content, Implementation, ListToolsResult, PaginatedRequestParams,
-    ProtocolVersion, ServerCapabilities, ServerInfo, Tool,
+    CallToolResult, ContentBlock, Implementation, ListToolsResult, PaginatedRequestParams,
+    ProtocolVersion, ServerCapabilities, ServerConfig, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{
@@ -1080,15 +1080,26 @@ impl SessionMunchServer {
         };
         let _bump_actor = Self::bump_actor_from_parts(parts);
 
+        let global_filter = if global {
+            let filter = global_passage_filter_from_args(args)?;
+            if filter.as_ref().is_some_and(|filter| filter.kind.is_some()) {
+                return Err(McpError::invalid_params(
+                    "kinds cannot be combined with global retrieval because session evidence has no equivalent event-kind mapping",
+                    None,
+                ));
+            }
+            filter
+        } else {
+            None
+        };
         let passage_hits = if global {
             // Cross-project (global) passage search reuses the store's
             // hybrid lexical+dense RRF machinery with the caller-supplied
             // hard filter (default = unrestricted). Ordering and the
             // per-parent cap live in the store.
-            let filter = global_passage_filter_from_args(args)?;
             self.reader
                 .search_passages_hybrid_global(
-                    filter.unwrap_or_default(),
+                    global_filter.clone().unwrap_or_default(),
                     query.clone(),
                     query_vec.as_deref().map(<[f32]>::to_vec),
                     provider,
@@ -1161,7 +1172,14 @@ impl SessionMunchServer {
             vec![(ws, proj)]
         };
         let session_evidence = self
-            .session_evidence_for_query(parts, &args.query, &evidence_scopes, None, limit)
+            .session_evidence_for_query(
+                parts,
+                &args.query,
+                &evidence_scopes,
+                global_filter.as_ref(),
+                None,
+                limit,
+            )
             .await?;
 
         let response = MemoryQueryPassageResponse {
@@ -1356,6 +1374,12 @@ impl SessionMunchServer {
                     None,
                 ));
             }
+            if global_passage_filter_from_args(&args)?.is_some() {
+                return Err(McpError::invalid_params(
+                    "global hard filters require granularity='passage' so every returned stream can enforce them",
+                    None,
+                ));
+            }
             let global_hits = self
                 .reader
                 .search_pages_with_meta(
@@ -1366,7 +1390,7 @@ impl SessionMunchServer {
                 .await
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
             let session_evidence = self
-                .session_evidence_for_query(&parts, &args.query, &[], None, limit)
+                .session_evidence_for_query(&parts, &args.query, &[], None, None, limit)
                 .await?;
             return ok_json(&MemoryQueryResponse {
                 hits: Vec::new(),
@@ -1432,6 +1456,7 @@ impl SessionMunchServer {
                     &parts,
                     &args.query,
                     &[(ws, proj)],
+                    None,
                     Some(instant.as_microsecond()),
                     limit,
                 )
@@ -1653,7 +1678,7 @@ impl SessionMunchServer {
             vec![(ws, proj)]
         };
         let session_evidence = self
-            .session_evidence_for_query(&parts, &args.query, &evidence_scopes, None, limit)
+            .session_evidence_for_query(&parts, &args.query, &evidence_scopes, None, None, limit)
             .await?;
         let response = MemoryQueryResponse {
             hits,
@@ -2924,6 +2949,7 @@ impl SessionMunchServer {
                 .unwrap_or(SEARCH_EVENTS_DEFAULT_LIMIT)
                 .clamp(1, SEARCH_EVENTS_MAX_LIMIT),
             scope,
+            project: None,
             machine: args.machine.filter(|value| !value.trim().is_empty()),
             harness: args.harness.filter(|value| !value.trim().is_empty()),
             since_micros,
@@ -2956,6 +2982,7 @@ impl SessionMunchServer {
         parts: &axum::http::request::Parts,
         query: &str,
         scopes: &[(WorkspaceId, ProjectId)],
+        global_filter: Option<&GlobalPassageFilter>,
         until_micros: Option<i64>,
         limit: usize,
     ) -> Result<Vec<sessionmunch_core::SessionEventHit>, McpError> {
@@ -2965,9 +2992,6 @@ impl SessionMunchServer {
         let owner = sessionmunch_core::OwnerFilter::for_actor_context(
             &crate::actor::actor_from_parts(parts),
         );
-        // Fetch with headroom per scope, then dedupe by parent session and
-        // truncate to the documented bound. Empty scopes = global/cross-
-        // project evidence (owner-filtered only).
         let mut best_by_session: HashMap<
             sessionmunch_core::SessionId,
             sessionmunch_core::SessionEventHit,
@@ -2977,32 +3001,61 @@ impl SessionMunchServer {
         } else {
             scopes.iter().copied().map(Some).collect()
         };
+        let project_rounds: Vec<Option<ProjectId>> = global_filter
+            .and_then(|filter| filter.project_ids.clone())
+            .map(|values| values.into_iter().map(Some).collect())
+            .unwrap_or_else(|| vec![None]);
+        let machine_rounds: Vec<Option<String>> = global_filter
+            .and_then(|filter| filter.machine.clone())
+            .map(|values| values.into_iter().map(Some).collect())
+            .unwrap_or_else(|| vec![None]);
+        let harness_rounds: Vec<Option<String>> = global_filter
+            .and_then(|filter| filter.harness.clone())
+            .map(|values| values.into_iter().map(Some).collect())
+            .unwrap_or_else(|| vec![None]);
+        let rounds =
+            scope_rounds.len() * project_rounds.len() * machine_rounds.len() * harness_rounds.len();
+        if rounds > 256 {
+            return Err(McpError::invalid_params(
+                "global filter combination expands to more than 256 session-evidence searches",
+                None,
+            ));
+        }
         for scope in scope_rounds {
-            let search = sessionmunch_core::SessionEventSearch {
-                query: query.to_string(),
-                limit: SESSION_EVIDENCE_FETCH_LIMIT,
-                scope,
-                machine: None,
-                harness: None,
-                since_micros: None,
-                until_micros,
-                newest_first: false,
-                owner: Some(owner.clone()),
-            };
-            let hits = self
-                .reader
-                .search_session_events_filtered(search)
-                .await
-                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-            for hit in hits {
-                match best_by_session.entry(hit.session_id) {
-                    std::collections::hash_map::Entry::Occupied(mut slot) => {
-                        if hit.rank < slot.get().rank {
-                            slot.insert(hit);
+            for project in &project_rounds {
+                for machine in &machine_rounds {
+                    for harness in &harness_rounds {
+                        let search = sessionmunch_core::SessionEventSearch {
+                            query: query.to_string(),
+                            limit: SESSION_EVIDENCE_FETCH_LIMIT,
+                            scope,
+                            project: *project,
+                            machine: machine.clone(),
+                            harness: harness.clone(),
+                            since_micros: global_filter.and_then(|filter| filter.since_us),
+                            until_micros: global_filter
+                                .and_then(|filter| filter.until_us)
+                                .or(until_micros),
+                            newest_first: false,
+                            owner: Some(owner.clone()),
+                        };
+                        let hits = self
+                            .reader
+                            .search_session_events_filtered(search)
+                            .await
+                            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                        for hit in hits {
+                            match best_by_session.entry(hit.session_id) {
+                                std::collections::hash_map::Entry::Occupied(mut slot) => {
+                                    if hit.rank < slot.get().rank {
+                                        slot.insert(hit);
+                                    }
+                                }
+                                std::collections::hash_map::Entry::Vacant(slot) => {
+                                    slot.insert(hit);
+                                }
+                            }
                         }
-                    }
-                    std::collections::hash_map::Entry::Vacant(slot) => {
-                        slot.insert(hit);
                     }
                 }
             }
@@ -3724,14 +3777,14 @@ fn hex_to_sha256(hex: &str) -> Result<[u8; 32], String> {
 
 #[tool_handler]
 impl ServerHandler for SessionMunchServer {
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         // `Implementation::from_build_env()` reads CARGO_PKG_NAME/VERSION
         // from *rmcp's* compilation unit, not ours. Patch the fields
         // post-construction so the wire protocol surfaces "sessionmunch".
         let mut implementation = Implementation::from_build_env();
         implementation.name = "sessionmunch".into();
         implementation.version = env!("CARGO_PKG_VERSION").into();
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(implementation)
             .with_protocol_version(ProtocolVersion::V_2024_11_05)
             .with_instructions(MEMORY_INSTRUCTIONS.to_string())
@@ -3745,7 +3798,7 @@ impl ServerHandler for SessionMunchServer {
         &self,
         request: rmcp::model::CallToolRequestParams,
         context: rmcp::service::RequestContext<RoleServer>,
-    ) -> Result<rmcp::model::CallToolResult, McpError> {
+    ) -> Result<rmcp::model::CallToolResponse, McpError> {
         self.record_client_activity(&request.name, &context);
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         self.tool_router.call(tcc).await
@@ -3945,7 +3998,7 @@ fn passage_filter_args_present(args: &QueryArgs) -> bool {
 fn ok_json<T: Serialize>(value: &T) -> Result<CallToolResult, McpError> {
     let s = serde_json::to_string_pretty(value)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-    Ok(CallToolResult::success(vec![Content::text(s)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(s)]))
 }
 
 fn checkpoint_or_mcp(wiki: &Wiki, message: impl AsRef<str>) -> Result<Option<String>, McpError> {

@@ -1,8 +1,61 @@
 //! refinery-driven schema migrations.
 
 use crate::error::{StoreError, StoreResult};
+use refinery_core::traits::sync::{Migrate, Query, Transaction};
+use rusqlite::{Connection, Error, types::Type};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 refinery::embed_migrations!("migrations");
+
+/// Adapter for refinery's public synchronous driver contract. Keep the
+/// established migration history, checksum and runner logic unchanged while
+/// allowing the patched bundled SQLite version. Like refinery's original
+/// SQLite driver, each execute/query batch is transactional.
+struct SqliteMigrationConnection<'a>(&'a mut Connection);
+
+impl Transaction for SqliteMigrationConnection<'_> {
+    type Error = Error;
+
+    fn execute(&mut self, queries: &[&str]) -> Result<usize, Self::Error> {
+        let tx = self.0.transaction()?;
+        for query in queries {
+            tx.execute_batch(query)?;
+        }
+        tx.commit()?;
+        Ok(queries.len())
+    }
+}
+
+impl Query<Vec<refinery::Migration>> for SqliteMigrationConnection<'_> {
+    fn query(&mut self, query: &str) -> Result<Vec<refinery::Migration>, Self::Error> {
+        let tx = self.0.transaction()?;
+        let applied = {
+            let mut stmt = tx.prepare(query)?;
+            let rows = stmt.query_map([], |row| {
+                let applied_on: String = row.get(2)?;
+                let checksum: String = row.get(3)?;
+                // Treat corrupt history as a typed database failure, never a
+                // panic or a silently skipped migration.
+                let applied_on = OffsetDateTime::parse(&applied_on, &Rfc3339)
+                    .map_err(|err| Error::FromSqlConversionFailure(2, Type::Text, Box::new(err)))?;
+                let checksum = checksum
+                    .parse::<u64>()
+                    .map_err(|err| Error::FromSqlConversionFailure(3, Type::Text, Box::new(err)))?;
+                Ok(refinery::Migration::applied(
+                    row.get(0)?,
+                    row.get(1)?,
+                    applied_on,
+                    checksum,
+                ))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        tx.commit()?;
+        Ok(applied)
+    }
+}
+
+impl Migrate for SqliteMigrationConnection<'_> {}
 
 /// Run all pending migrations against an open connection.
 ///
@@ -14,7 +67,9 @@ refinery::embed_migrations!("migrations");
 /// is remapped to [`StoreError::DataSchemaAhead`], which names the offending
 /// migration and points the operator at the fix.
 pub fn run(conn: &mut rusqlite::Connection) -> StoreResult<()> {
-    migrations::runner().run(conn).map_err(classify_run_error)?;
+    migrations::runner()
+        .run(&mut SqliteMigrationConnection(conn))
+        .map_err(classify_run_error)?;
     Ok(())
 }
 
@@ -45,7 +100,7 @@ fn classify_run_error(err: refinery::Error) -> StoreError {
 pub(crate) fn run_to(conn: &mut rusqlite::Connection, target: u32) -> Result<(), refinery::Error> {
     migrations::runner()
         .set_target(refinery::Target::Version(target))
-        .run(conn)?;
+        .run(&mut SqliteMigrationConnection(conn))?;
     Ok(())
 }
 
@@ -61,6 +116,25 @@ mod tests {
     /// this binary embeds) must fail to open with the actionable
     /// `DataSchemaAhead` error, not refinery's raw "missing from the
     /// filesystem" wording.
+    /// Applied migrations are immutable: refinery refuses to open a store whose
+    /// recorded checksum differs from the embedded file. These are the values the
+    /// canonical hub recorded in `refinery_schema_history` (V67/V68, binary
+    /// aa29bd19). Change behaviour in a new migration, never by editing these.
+    #[test]
+    fn applied_migration_checksums_match_the_canonical_hub() {
+        let runner = migrations::runner();
+        let checksum = |version: i64| {
+            runner
+                .get_migrations()
+                .iter()
+                .find(|m| i64::from(m.version()) == version)
+                .map(refinery::Migration::checksum)
+                .expect("migration is embedded")
+        };
+        assert_eq!(checksum(67), 1_267_863_849_395_752_260);
+        assert_eq!(checksum(68), 14_478_166_101_890_634_647);
+    }
+
     #[test]
     fn data_ahead_of_binary_reports_schema_ahead_not_raw_refinery() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -188,6 +262,23 @@ mod tests {
             schema_object_count(&conn, "trigger", "workstreams_ws_proj_pairing_ai"),
             1
         );
+    }
+
+    #[test]
+    fn corrupt_migration_history_fails_without_panicking_or_advancing() {
+        for column in ["checksum", "applied_on"] {
+            let mut conn = Connection::open_in_memory().unwrap();
+            run_to(&mut conn, 30).unwrap();
+            conn.execute(
+                &format!(
+                    "UPDATE refinery_schema_history SET {column} = 'corrupt' WHERE version = 30"
+                ),
+                [],
+            )
+            .unwrap();
+            assert!(matches!(run(&mut conn), Err(StoreError::Migration(_))));
+            assert_eq!(applied_versions(&conn).last(), Some(&30));
+        }
     }
 
     fn applied_versions(conn: &Connection) -> Vec<i64> {
@@ -363,7 +454,8 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         let workspace_id = crate::ops::get_or_create_workspace(&mut conn, "default").unwrap();
         let project_id =
-            crate::ops::get_or_create_project(&mut conn, &workspace_id, "project", None).unwrap();
+            crate::ops::tests::seed_legacy_project(&mut conn, &workspace_id, "project", None)
+                .unwrap();
         let session_id = SessionId::new();
         conn.execute(
             "INSERT INTO sessions (id, workspace_id, project_id, agent_kind, cwd, started_at) \
@@ -470,7 +562,8 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         let workspace_id = crate::ops::get_or_create_workspace(&mut conn, "default").unwrap();
         let project_id =
-            crate::ops::get_or_create_project(&mut conn, &workspace_id, "project", None).unwrap();
+            crate::ops::tests::seed_legacy_project(&mut conn, &workspace_id, "project", None)
+                .unwrap();
         let session_id = SessionId::new();
         // Era-appropriate raw insert. This fixture deliberately stops at V33
         // and then migrates forward, so it must not go through `begin_session`:
@@ -550,7 +643,8 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         let workspace_id = crate::ops::get_or_create_workspace(&mut conn, "default").unwrap();
         let project_id =
-            crate::ops::get_or_create_project(&mut conn, &workspace_id, "project", None).unwrap();
+            crate::ops::tests::seed_legacy_project(&mut conn, &workspace_id, "project", None)
+                .unwrap();
         let session_id = SessionId::new();
         let handoff_id = HandoffId::new();
         conn.execute(
@@ -619,7 +713,8 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         let workspace_id = crate::ops::get_or_create_workspace(&mut conn, "default").unwrap();
         let project_id =
-            crate::ops::get_or_create_project(&mut conn, &workspace_id, "project", None).unwrap();
+            crate::ops::tests::seed_legacy_project(&mut conn, &workspace_id, "project", None)
+                .unwrap();
         let existing = SessionId::new();
         conn.execute(
             "INSERT INTO sessions \
@@ -703,7 +798,8 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         let workspace_id = crate::ops::get_or_create_workspace(&mut conn, "default").unwrap();
         let project_id =
-            crate::ops::get_or_create_project(&mut conn, &workspace_id, "project", None).unwrap();
+            crate::ops::tests::seed_legacy_project(&mut conn, &workspace_id, "project", None)
+                .unwrap();
         let existing = SessionId::new();
         conn.execute(
             "INSERT INTO sessions \
@@ -775,7 +871,8 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         let workspace_id = crate::ops::get_or_create_workspace(&mut conn, "default").unwrap();
         let project_id =
-            crate::ops::get_or_create_project(&mut conn, &workspace_id, "project", None).unwrap();
+            crate::ops::tests::seed_legacy_project(&mut conn, &workspace_id, "project", None)
+                .unwrap();
         let existing = SessionId::new();
         conn.execute(
             "INSERT INTO sessions \
@@ -847,7 +944,8 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         let workspace_id = crate::ops::get_or_create_workspace(&mut conn, "default").unwrap();
         let project_id =
-            crate::ops::get_or_create_project(&mut conn, &workspace_id, "project", None).unwrap();
+            crate::ops::tests::seed_legacy_project(&mut conn, &workspace_id, "project", None)
+                .unwrap();
         let existing = SessionId::new();
         conn.execute(
             "INSERT INTO sessions \
@@ -919,7 +1017,8 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         let workspace_id = crate::ops::get_or_create_workspace(&mut conn, "default").unwrap();
         let project_id =
-            crate::ops::get_or_create_project(&mut conn, &workspace_id, "project", None).unwrap();
+            crate::ops::tests::seed_legacy_project(&mut conn, &workspace_id, "project", None)
+                .unwrap();
         let existing = SessionId::new();
         conn.execute(
             "INSERT INTO sessions \
@@ -1167,7 +1266,8 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         let workspace_id = crate::ops::get_or_create_workspace(&mut conn, "default").unwrap();
         let project_id =
-            crate::ops::get_or_create_project(&mut conn, &workspace_id, "project", None).unwrap();
+            crate::ops::tests::seed_legacy_project(&mut conn, &workspace_id, "project", None)
+                .unwrap();
         // Insert a legacy-era session with observations that must survive.
         let legacy_session = SessionId::new();
         conn.execute(

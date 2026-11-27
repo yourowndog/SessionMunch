@@ -627,7 +627,7 @@ pub(super) fn latest_page_id_for_link(
             };
             let project_blob: Option<Vec<u8>> = tx
                 .query_row(
-                    "SELECT id FROM projects WHERE workspace_id = ?1 AND name = ?2",
+                    "SELECT project_id FROM project_names WHERE workspace_id = ?1 AND name = ?2",
                     params![workspace_blob, project_name],
                     |row| row.get(0),
                 )
