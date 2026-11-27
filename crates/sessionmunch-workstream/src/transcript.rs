@@ -4268,6 +4268,7 @@ mod tests {
             &opencode_part,
             "session",
             "opencode",
+            None,
             &mut events,
             &mut losses,
         );
@@ -4439,6 +4440,108 @@ mod tests {
             export_opencode2(home.path(), None, "s2", first.source_cursor.as_deref()).unwrap();
         assert!(second.events.is_empty());
         assert!(second.losses.is_empty());
+    }
+
+    /// SQLite-backed adapters (OpenCode v1/v2, Crush) carry a source
+    /// occurrence, so a strict bounded `--since` keeps fresh records instead of
+    /// withholding every one as unknown-time. OpenCode stores milliseconds,
+    /// Crush seconds; a v1 message's own `time.created` wins over the part's
+    /// update time.
+    #[test]
+    fn sql_adapters_carry_source_time_through_a_strict_cutoff() {
+        let now = jiff::Timestamp::now();
+        let created = now - jiff::SignedDuration::from_hours(2);
+        let updated = now - jiff::SignedDuration::from_hours(1);
+        let cutoff = now - jiff::SignedDuration::from_hours(48);
+        let keep_all = |mut events: Vec<NewWorkstreamEvent>| {
+            assert!(!events.is_empty());
+            assert!(
+                events.iter().all(|event| event.occurred_at.is_some()),
+                "{events:?}"
+            );
+            let total = events.len();
+            let excluded = crate::history_import::retain_within_cutoff(&mut events, cutoff);
+            assert_eq!(excluded.total(), 0, "{excluded:?}");
+            assert_eq!(events.len(), total);
+            events
+        };
+
+        // OpenCode v1: message time.created (ms) wins over part time_updated.
+        let v1 = tempfile::tempdir().unwrap();
+        let db = opencode_db(v1.path(), None);
+        fs::create_dir_all(db.parent().unwrap()).unwrap();
+        let connection = Connection::open(&db).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE message(id TEXT PRIMARY KEY, session_id TEXT, data TEXT);\n\
+                 CREATE TABLE part(id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, \
+                                   time_updated INTEGER, data TEXT);",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO message VALUES ('m1', 's1', ?1)",
+                [json!({"role":"user","time":{"created": created.as_millisecond()}}).to_string()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO part VALUES ('p1', 'm1', 's1', ?1, ?2)",
+                params![
+                    updated.as_millisecond(),
+                    json!({"type":"text","text":"fresh v1"}).to_string()
+                ],
+            )
+            .unwrap();
+        let events = keep_all(export_opencode(v1.path(), None, "s1", None).unwrap().events);
+        let expected_created = jiff::Timestamp::from_millisecond(created.as_millisecond())
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            events[0].occurred_at.as_deref(),
+            Some(expected_created.as_str())
+        );
+
+        // OpenCode v2: row time_updated (ms) when the JSON carries no creation time.
+        let v2 = tempfile::tempdir().unwrap();
+        opencode2_fixture(v2.path());
+        Connection::open(opencode_db(v2.path(), None))
+            .unwrap()
+            .execute(
+                "UPDATE session_message SET time_updated = ?1",
+                [updated.as_millisecond()],
+            )
+            .unwrap();
+        let events = keep_all(
+            export_opencode2(v2.path(), None, "s2", None)
+                .unwrap()
+                .events,
+        );
+        assert!(events.len() >= 4, "{events:?}");
+
+        // Crush: row updated_at in seconds.
+        let crush = tempfile::tempdir().unwrap();
+        let cwd = crush.path().join("repo");
+        fs::create_dir_all(cwd.join(".crush")).unwrap();
+        let connection = Connection::open(cwd.join(".crush/crush.db")).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE messages(\
+                    id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL,\
+                    parts TEXT NOT NULL, updated_at INTEGER NOT NULL,\
+                    is_summary_message INTEGER NOT NULL DEFAULT 0);",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO messages VALUES ('m1', 'c1', 'assistant', ?1, ?2, 0)",
+                params![
+                    json!([{"type":"text","data":{"text":"fresh crush"}}]).to_string(),
+                    updated.as_second()
+                ],
+            )
+            .unwrap();
+        keep_all(export_crush(&cwd, None, "c1", None).unwrap().events);
     }
 
     #[test]
